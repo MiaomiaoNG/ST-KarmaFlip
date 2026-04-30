@@ -1,0 +1,111 @@
+<div class="inline-drawer kf-inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+        <b>API随机临幸</b>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content">
+<div class="plugin-container" id="kf-root" data-mode="fixed" data-brush="marker">
+    <div class="block">
+        <div class="title">组合管理</div>
+        <div class="row">
+            <div class="select-wrapper two-strokes brush-stroke flex-1" id="group-select-wrapper">
+                <input type="text" id="group-select-display" class="inner-select dropdown-input">
+                <button class="dropdown-arrow" id="group-select-arrow" type="button">▼</button>
+            </div>
+        </div>
+        <div class="row">
+            <div class="btn-group-even">
+                <button id="kf-btn-new-pool" class="marker-btn brush-stroke">添加</button>
+                <button id="kf-btn-copy-pool" class="marker-btn brush-stroke">复制</button>
+                <button id="kf-btn-delete-pool" class="marker-btn brush-stroke">删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="block">
+        <div class="title">API条目</div>
+        <div class="responsive-controls">
+            <label class="marker-checkbox">
+                <input type="radio" name="api-mode" id="mode-fixed" value="fixed">
+                <span class="text brush-stroke">固定模式</span>
+            </label>
+            <label class="marker-checkbox">
+                <input type="radio" name="api-mode" id="mode-random" value="random">
+                <span class="text brush-stroke">随机模式</span>
+            </label>
+            <label class="marker-checkbox">
+                <input type="checkbox" id="kf-no-streak">
+                <span class="text brush-stroke">避免连续命中</span>
+            </label>
+            <button class="marker-btn brush-stroke" id="kf-btn-add-entry">添加条目</button>
+        </div>
+        <div class="entries-container" id="kf-entry-list"></div>
+    </div>
+
+    <div class="block">
+        <div class="btn-group-even">
+            <button class="marker-btn brush-stroke" id="kf-btn-test">测试</button>
+            <button class="marker-btn brush-stroke" id="kf-btn-logs">日志</button>
+            <button class="marker-btn brush-stroke" id="kf-btn-theme">美化</button>
+            <button class="marker-btn brush-stroke" id="kf-btn-save">保存</button>
+        </div>
+    </div>
+
+    <div class="block">
+        <div class="long-press-row two-strokes brush-stroke" id="kf-long-press">
+            <span class="long-press-text" id="kf-long-press-text">插件已关闭（长按启动）</span>
+        </div>
+    </div>
+</div>
+</div>
+</div>
+
+<div class="modal-overlay" id="logModal">
+    <div class="modal-box">
+        <div class="modal-header">系统日志 <span class="close-btn" id="kf-log-close">✖</span></div>
+        <div class="log-filter-row">
+            <button class="marker-btn brush-stroke kf-log-filter active" data-filter="all">全部</button>
+            <button class="marker-btn brush-stroke kf-log-filter" data-filter="error">报错</button>
+            <button class="marker-btn brush-stroke kf-log-filter" data-filter="pick">抽选记录</button>
+        </div>
+        <textarea id="kf-logs-list" style="width:100%;height:180px;resize:none;background:transparent;color:inherit;"></textarea>
+    </div>
+</div>
+
+<div class="modal-overlay" id="dropdownModal">
+    <div class="modal-box">
+        <div class="modal-header"><span id="kf-dropdown-title">选择</span> <span class="close-btn" id="kf-dropdown-close">✖</span></div>
+        <div class="kf-mobile-options" id="kf-mobile-options"></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="theme-modal">
+    <div class="modal-box">
+        <div class="modal-header">界面美化 <span class="close-btn" id="kf-theme-close">✖</span></div>
+        <div class="color-picker-row">
+            <span>背景底色 (大块)</span>
+            <input type="color" id="kf-theme-bg-main" value="#ffffff">
+        </div>
+        <div class="color-picker-row">
+            <span>条目底色 (小块)</span>
+            <input type="color" id="kf-theme-bg-sub" value="#f7f9fc">
+        </div>
+        <div class="color-picker-row">
+            <span>下划线/小标题颜色</span>
+            <input type="color" id="kf-theme-underline" value="#617b9b">
+        </div>
+        <div class="color-picker-row">
+            <span>笔触模糊度</span>
+            <input type="range" id="kf-theme-blur" min="0" max="3" step="0.1" value="0.6">
+        </div>
+        <div class="color-picker-row">
+            <span>笔刷风格</span>
+            <select id="kf-theme-brush" class="inner-input">
+                <option value="marker">马克笔 (水彩叠底)</option>
+                <option value="oil">油画笔 (厚涂实色)</option>
+                <option value="gouache">水粉 (半透磨砂)</option>
+            </select>
+        </div>
+        <div style="font-size: 12px; color: #888; margin-top: 10px; text-align: center;">字体颜色会自动适应底色切换为黑或白</div>
+    </div>
+</div>
