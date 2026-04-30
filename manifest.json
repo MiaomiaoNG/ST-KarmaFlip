@@ -1,9 +1,10 @@
-﻿{
-  "name": "KarmaFlip",
+{
   "display_name": "API随机临幸",
-  "version": "1.0.0",
-  "description": "KarmaFlip: A modular API switcher with random weight, cooldown, and pity system.",
-  "author": "MiaoMiao",
+  "loading_order": 1,
   "js": "index.js",
-  "css": "style.css"
+  "css": "style.css",
+  "author": "MiaoMiao",
+  "version": "1.0.0",
+  "homePage": "https://github.com/MiaomiaoNG/ST-KarmaFlip",
+  "auto_update": true
 }
