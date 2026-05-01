@@ -1,10 +1,10 @@
 import { getRuntimeScope, toInt } from './plugin_state_store.js';
 
-function validEntries(pool) {
+function validEntries(pool, runtime) {
     return (pool.entries || []).filter(e =>
         e &&
         e.enabled !== false &&
-        !e.disabledByFailure &&
+        !runtime?.disabledByFailure?.[e.id] &&
         e.apiUrl &&
         e.key &&
         e.model
@@ -57,7 +57,7 @@ function buildFixedSequence(entries, avoidConsecutive) {
 }
 
 function fixedPick(pool, runtime) {
-    const entries = validEntries(pool);
+    const entries = validEntries(pool, runtime);
     const sequence = buildFixedSequence(entries, !!pool.random?.noConsecutive);
     if (!sequence.length) return null;
     const idx = runtime.fixedCursor % sequence.length;
@@ -66,7 +66,7 @@ function fixedPick(pool, runtime) {
 }
 
 function randomPick(pool, runtime) {
-    const active = validEntries(pool);
+    const active = validEntries(pool, runtime);
     if (!active.length) return { member: null, blocked: [] };
 
     const pity = active
@@ -92,7 +92,7 @@ function randomPick(pool, runtime) {
 }
 
 function updateMissStreaks(pool, runtime, member) {
-    for (const entry of validEntries(pool)) {
+    for (const entry of validEntries(pool, runtime)) {
         runtime.missStreaks[entry.id] = entry.id === member.id ? 0 : toInt(runtime.missStreaks[entry.id]) + 1;
     }
 }
@@ -128,8 +128,7 @@ export function markRequestFailure(state, member) {
     runtime.cooldowns[member.id] = 0;
     runtime.failures[member.id] = toInt(runtime.failures[member.id]) + 1;
     if (runtime.failures[member.id] >= 3) {
-        member.enabled = false;
-        member.disabledByFailure = true;
+        runtime.disabledByFailure[member.id] = true;
     }
     return runtime.failures[member.id];
 }

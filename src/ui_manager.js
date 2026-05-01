@@ -85,7 +85,6 @@ function addEntry(pool) {
         weight: 1,
         pityTurns: 0,
         cooldownTurns: 0,
-        disabledByFailure: false,
         modelOptions: [],
     });
 }
@@ -161,7 +160,6 @@ function copyEntryForPreset(entry) {
         weight: toInt(entry.weight),
         pityTurns: toInt(entry.pityTurns),
         cooldownTurns: toInt(entry.cooldownTurns),
-        disabledByFailure: false,
         modelOptions: Array.isArray(entry.modelOptions) ? [...entry.modelOptions] : [],
     };
 }
@@ -223,10 +221,8 @@ function renderEntries(state) {
 
     for (const entry of pool.entries || []) {
         const enabledChecked = entry.enabled !== false ? 'checked' : '';
-        const disabledText = entry.disabledByFailure ? '<div class="entry-status">连续失败已停用</div>' : '';
         root.append(`
             <div class="entry-block" data-id="${esc(entry.id)}">
-                ${disabledText}
                 <div class="entry-header">
                     <div class="entry-actions-grid entry-main-actions">
                         <label class="marker-checkbox">
@@ -300,7 +296,7 @@ function renderLogs(state, filter = currentLogFilter()) {
         if (filter === 'pick') return ['manual-test', 'pick', 'request'].includes(log.event);
         return true;
     });
-    const lines = filtered.slice(-300).map(formatLog);
+    const lines = filtered.slice(-50).map(formatLog);
     $('#kf-logs-list').val(lines.join('\n'));
 }
 

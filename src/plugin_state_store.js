@@ -1,8 +1,12 @@
 const MODULE_KEY = 'STApiSwitcher';
 const OLD_STORAGE_KEY = 'karmaflip_state_v4';
+const MAX_STORED_LOGS = 200;
 let persistenceEnabled = false;
 let pendingPersist = false;
 let persistTimer = null;
+let asyncPersistTimer = null;
+let cachedState = null;
+const runtimeScopes = {};
 
 export function toInt(value) {
     const n = Number(value);
@@ -63,7 +67,7 @@ function normalizeEntry(entry) {
     e.weight = toInt(e.weight || 0);
     e.pityTurns = toInt(e.pityTurns || 0);
     e.cooldownTurns = toInt(e.cooldownTurns || 0);
-    e.disabledByFailure = !!e.disabledByFailure;
+    delete e.disabledByFailure;
     e.modelOptions = Array.isArray(e.modelOptions) ? e.modelOptions.map(x => String(x)).filter(Boolean) : [];
     return e;
 }
@@ -91,14 +95,15 @@ function normalizeState(raw) {
     s.pools = Array.isArray(s.pools) && s.pools.length ? s.pools.map(normalizePool) : [defaultPool()];
     s.apiPresets = Array.isArray(s.apiPresets) ? s.apiPresets.map(normalizePreset) : [];
     if (!s.pools.find(p => p.id === s.activePoolId)) s.activePoolId = s.pools[0].id;
-    if (!s.runtime || typeof s.runtime !== 'object') s.runtime = {};
+    s.runtime = {};
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
     if (!Array.isArray(s.logs)) s.logs = [];
-    if (s.logs.length > 50) s.logs = s.logs.slice(0, 50);
+    if (s.logs.length > MAX_STORED_LOGS) s.logs = s.logs.slice(0, MAX_STORED_LOGS);
     return s;
 }
 
 export function loadState() {
+    if (cachedState) return cachedState;
     const settings = extensionSettings();
     if (!settings[MODULE_KEY]?.pools?.length) {
         try {
@@ -108,8 +113,9 @@ export function loadState() {
             settings[MODULE_KEY] = getDefaultState();
         }
     }
-    settings[MODULE_KEY] = normalizeState(settings[MODULE_KEY]);
-    return settings[MODULE_KEY];
+    cachedState = normalizeState(settings[MODULE_KEY]);
+    settings[MODULE_KEY] = cachedState;
+    return cachedState;
 }
 
 function persistSettings() {
@@ -126,7 +132,8 @@ export function enableStatePersistence() {
 }
 
 export function saveState(state, options = {}) {
-    extensionSettings()[MODULE_KEY] = normalizeState(state);
+    cachedState = normalizeState(state);
+    extensionSettings()[MODULE_KEY] = cachedState;
     if (options.persist === false) return;
     if (!persistenceEnabled) {
         pendingPersist = true;
@@ -135,8 +142,24 @@ export function saveState(state, options = {}) {
     persistSettings();
 }
 
+export function saveStateAsync(state, delay = 0) {
+    state.runtime = {};
+    cachedState = state;
+    extensionSettings()[MODULE_KEY] = cachedState;
+    if (!persistenceEnabled) {
+        pendingPersist = true;
+        return;
+    }
+    if (asyncPersistTimer) clearTimeout(asyncPersistTimer);
+    asyncPersistTimer = setTimeout(() => {
+        asyncPersistTimer = null;
+        persistSettings();
+    }, delay);
+}
+
 export function saveStateDebounced(state, delay = 400) {
-    extensionSettings()[MODULE_KEY] = normalizeState(state);
+    cachedState = normalizeState(state);
+    extensionSettings()[MODULE_KEY] = cachedState;
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
         persistTimer = null;
@@ -151,12 +174,21 @@ export function getActivePool(state) {
 export function getRuntimeScope(state) {
     const chatId = context()?.chatId || 'global';
     const key = `chat:${chatId}`;
-    if (!state.runtime[key]) {
-        state.runtime[key] = { turn: 0, cooldowns: {}, failures: {}, missStreaks: {}, fixedCursor: 0, lastPick: null };
+    if (!runtimeScopes[key]) {
+        runtimeScopes[key] = {
+            turn: 0,
+            cooldowns: {},
+            failures: {},
+            disabledByFailure: {},
+            missStreaks: {},
+            fixedCursor: 0,
+            lastPick: null,
+        };
     }
-    const scope = state.runtime[key];
+    const scope = runtimeScopes[key];
     if (!scope.cooldowns) scope.cooldowns = {};
     if (!scope.failures) scope.failures = {};
+    if (!scope.disabledByFailure) scope.disabledByFailure = {};
     if (!scope.missStreaks) scope.missStreaks = {};
     if (typeof scope.fixedCursor !== 'number') scope.fixedCursor = 0;
     return scope;
@@ -165,5 +197,5 @@ export function getRuntimeScope(state) {
 export function pushLog(state, entry) {
     if (!Array.isArray(state.logs)) state.logs = [];
     state.logs.unshift({ time: new Date().toISOString(), ...entry });
-    if (state.logs.length > 50) state.logs = state.logs.slice(0, 50);
+    if (state.logs.length > MAX_STORED_LOGS) state.logs = state.logs.slice(0, MAX_STORED_LOGS);
 }

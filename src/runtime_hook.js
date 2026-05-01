@@ -1,4 +1,4 @@
-import { getActivePool, loadState, pushLog, saveState } from './plugin_state_store.js';
+import { getActivePool, loadState, pushLog, saveStateAsync } from './plugin_state_store.js';
 import { markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 
 let fetchPatched = false;
@@ -48,9 +48,12 @@ function chooseRequest(state, pool, blockedIds = new Set()) {
     }
 }
 
-async function askSwitchAfterFixedFailure(member, nextMember) {
-    const message = `[${member.name}]已连续错误三次，是否切换下一个API[${nextMember?.name || '无可用API'}]发起请求？`;
-    return confirm(message);
+function notifyFixedFailureSwitch(member, nextMember) {
+    if (nextMember) {
+        toast('warning', `[${member.name}]连续请求错误达三次，已自动切换到下一个可用 API：[${nextMember.name}]`);
+    } else {
+        toast('warning', `[${member.name}]连续请求错误达三次，已停用；当前没有下一个可用 API`);
+    }
 }
 
 export function installRuntimeHook(onStatus) {
@@ -84,7 +87,7 @@ export function installRuntimeHook(onStatus) {
                 if (response.ok) {
                     markRequestSuccess(state, pool, member, requestKey);
                     pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
-                    saveState(state);
+                    saveStateAsync(state);
                     return response;
                 }
 
@@ -95,8 +98,8 @@ export function installRuntimeHook(onStatus) {
                 if (pool.mode === 'fixed' && count >= 3) {
                     blockedIds.add(member.id);
                     const next = chooseRequest(state, pool, blockedIds)?.member;
-                    const ok = await askSwitchAfterFixedFailure(member, next);
-                    if (!ok || !next) break;
+                    notifyFixedFailureSwitch(member, next);
+                    if (!next) break;
                 } else if (pool.mode === 'random') {
                     blockedIds.add(member.id);
                     if (count >= 3) toast('warning', `[${member.name}]连续请求错误达三次，已停用该模型`);
@@ -114,7 +117,7 @@ export function installRuntimeHook(onStatus) {
             }
         }
 
-        saveState(state);
+        saveStateAsync(state);
         if (lastError) throw lastError;
         if (lastResponse) return lastResponse;
         return originalFetch(input, init);
