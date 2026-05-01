@@ -13,34 +13,56 @@ function contrastText(hex) {
     return yiq >= 128 ? '#000000' : '#ffffff';
 }
 
+function hexToRgb(hex) {
+    const clean = String(hex || '#617b9b').replace('#', '');
+    const value = clean.length === 3
+        ? clean.split('').map(x => x + x).join('')
+        : clean.padEnd(6, '0').slice(0, 6);
+    const r = parseInt(value.slice(0, 2), 16);
+    const g = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    return [r, g, b].map(x => Number.isFinite(x) ? x : 0).join(', ');
+}
+
+function silenceLongPressTransition() {
+    const longPress = $('#kf-long-press');
+    if (!longPress.length) return;
+    longPress.addClass('kf-silent-state');
+    window.clearTimeout(longPress.data('kfSilentTimer'));
+    longPress.data('kfSilentTimer', window.setTimeout(() => {
+        longPress.removeClass('kf-silent-state');
+    }, 80));
+}
+
 function applyBrush(root, style) {
     let blend = 'multiply';
     let opacity = '1';
-    if (style === 'oil') blend = 'normal';
-    if (style === 'gouache') {
-        blend = 'normal';
-        opacity = '0.65';
-    }
+    const resolvedStyle = style === 'simple' ? 'simple' : 'marker';
     root.style.setProperty('--brush-blend', blend);
     root.style.setProperty('--brush-opacity', opacity);
-    root.dataset.brush = style || 'marker';
+    root.dataset.brush = resolvedStyle;
     for (const target of [document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal'), document.getElementById('settings-modal'), document.getElementById('failure-modal')].filter(Boolean)) {
         target.style.setProperty('--brush-blend', blend);
         target.style.setProperty('--brush-opacity', opacity);
+        target.dataset.brush = resolvedStyle;
     }
 }
 
 function applyTheme(state) {
     const root = document.getElementById('kf-root');
     if (!root) return;
+    silenceLongPressTransition();
     const theme = state.theme || {};
     const targets = [root, document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal'), document.getElementById('settings-modal'), document.getElementById('failure-modal')].filter(Boolean);
     for (const target of targets) {
+        const underline = theme.underline || '#617b9b';
         target.style.setProperty('--bg-main', theme.bgMain || '#ffffff');
         target.style.setProperty('--bg-sub', theme.bgSub || '#f7f9fc');
         target.style.setProperty('--text-main', contrastText(theme.bgMain || '#ffffff'));
         target.style.setProperty('--text-sub', contrastText(theme.bgSub || '#f7f9fc'));
-        target.style.setProperty('--underline-color', theme.underline || '#617b9b');
+        target.style.setProperty('--text-accent', contrastText(underline));
+        target.style.setProperty('--underline-color', underline);
+        target.style.setProperty('--underline-rgb', hexToRgb(underline));
         target.style.setProperty('--marker-blur', `${theme.blur || '0.6'}px`);
     }
     applyBrush(root, theme.brush || 'marker');
@@ -49,7 +71,10 @@ function applyTheme(state) {
     $('#kf-theme-bg-sub').val(theme.bgSub || '#f7f9fc');
     $('#kf-theme-underline').val(theme.underline || '#617b9b');
     $('#kf-theme-blur').val(theme.blur || '0.6');
-    $('#kf-theme-brush').val(theme.brush || 'marker');
+    $('#kf-theme-brush').val(theme.brush === 'simple' ? 'simple' : 'marker');
+    const simple = theme.brush === 'simple';
+    $('#kf-theme-blur-row').toggle(!simple);
+    $('#kf-theme-blur').prop('disabled', simple);
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
 }
@@ -181,14 +206,16 @@ function saveApiPreset(state, entry) {
 
 function renderPool(state) {
     const pool = getActivePool(state);
+    silenceLongPressTransition();
+    const longPress = $('#kf-long-press');
     $('#group-select-display').val(pool.name);
     $('#group-select-wrapper').show();
     $('#kf-root').attr('data-mode', pool.mode);
     $('#mode-fixed').prop('checked', pool.mode === 'fixed');
     $('#mode-random').prop('checked', pool.mode === 'random');
     $('#kf-no-streak').prop('checked', !!pool.random?.noConsecutive);
-    $('#kf-long-press').toggleClass('active', !!pool.enabled);
-    $('#kf-long-press-text').text(pool.enabled ? '插件已启动（长按关闭）' : '插件已关闭（长按启动）');
+    longPress.toggleClass('active', state.enabled !== false);
+    $('#kf-long-press-text').text(state.enabled !== false ? '插件全局生效（长按关闭）' : '插件已关闭（长按启动）');
 }
 
 function providerSelect(entry) {
@@ -200,8 +227,9 @@ function providerSelect(entry) {
     ];
     const selected = options.find(([value]) => value === entry.provider)?.[1] || options[0][1];
     return `
-        <div class="select-wrapper two-strokes brush-stroke flex-3">
+        <div class="select-wrapper provider-wrapper two-strokes brush-stroke flex-3">
             <input type="text" class="inner-select dropdown-input kf-entry-provider-display" value="${esc(selected)}" data-provider="${esc(entry.provider || 'open')}" readonly>
+            <button class="dropdown-arrow kf-entry-provider-arrow" type="button">▼</button>
         </div>
     `;
 }
@@ -217,38 +245,33 @@ function providerOptions() {
 
 function renderEntries(state) {
     const pool = getActivePool(state);
-    const fixed = pool.mode === 'fixed';
     const root = $('#kf-entry-list').empty();
+    const apiPresetNames = getApiPresetNames(state);
 
     for (const entry of pool.entries || []) {
         const enabledChecked = entry.enabled !== false ? 'checked' : '';
+        const nameHasOptions = apiPresetNames.some(name => name !== entry.name);
+        const modelHasOptions = getModelOptions(entry).some(model => model !== entry.model);
+        const nameArrow = nameHasOptions ? '<button class="dropdown-arrow kf-entry-name-arrow" type="button">▼</button>' : '';
+        const modelArrow = modelHasOptions ? '<button class="dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
         root.append(`
             <div class="entry-block" data-id="${esc(entry.id)}">
-                <div class="entry-header">
-                    <div class="entry-actions-grid entry-main-actions">
-                        <label class="marker-checkbox">
-                            <input type="checkbox" class="kf-entry-enabled" ${enabledChecked}>
-                            <span class="text brush-stroke">启用</span>
-                        </label>
-                        <button class="marker-btn brush-stroke kf-entry-save">保存</button>
-                        <button class="marker-btn brush-stroke kf-del">删除</button>
-                    </div>
-                    <div class="entry-actions-grid entry-sort-actions sort-only">
-                        <button class="marker-btn brush-stroke kf-move-up">上移</button>
-                        <button class="marker-btn brush-stroke kf-move-down">下移</button>
-                    </div>
+                <div class="row">
+                    <label class="marker-checkbox flex-1">
+                        <input type="checkbox" class="kf-entry-enabled" ${enabledChecked}>
+                        <span class="kf-check-box"></span>
+                        <span class="text brush-stroke">启用</span>
+                    </label>
+                    <div class="input-wrapper flex-7"><span class="label">名称</span><input type="text" class="inner-input dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
                 </div>
                 <div class="row">
-                    <div class="input-wrapper flex-7"><span class="label">名称</span><input type="text" class="inner-input dropdown-input kf-entry-name" value="${esc(entry.name)}"><button class="dropdown-arrow kf-entry-name-arrow" type="button">▼</button></div>
+                    <div class="input-wrapper flex-7"><span class="label">URL</span><input type="text" class="inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
                     ${providerSelect(entry)}
                 </div>
                 <div class="row">
-                    <div class="input-wrapper flex-2"><span class="label">URL</span><input type="text" class="inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
                     <div class="input-wrapper flex-1"><span class="label">KEY</span><input type="password" class="inner-input kf-entry-key" value="${esc(entry.key)}"></div>
-                </div>
-                <div class="row">
-                    <div class="input-wrapper flex-1"><span class="label">模型</span><input type="text" class="inner-input dropdown-input kf-entry-model" value="${esc(entry.model)}"><button class="dropdown-arrow kf-entry-model-arrow" type="button">▼</button></div>
-                    <button class="marker-btn brush-stroke kf-fetch-models">获取模型</button>
+                    <div class="input-wrapper flex-1"><span class="label">模型</span><input type="text" class="inner-input dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
+                    <button class="marker-btn brush-stroke kf-fetch-models">拉取模型</button>
                 </div>
                 <div class="row fixed-only">
                     <div class="input-wrapper flex-1"><span class="label">运行次数</span><input type="number" min="1" class="inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
@@ -257,6 +280,10 @@ function renderEntries(state) {
                     <div class="input-wrapper flex-1"><span class="label">权重</span><input type="number" min="0" class="inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
                     <div class="input-wrapper flex-1"><span class="label">保底回合</span><input type="number" min="0" class="inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
                     <div class="input-wrapper flex-1"><span class="label">冷却回合</span><input type="number" min="0" class="inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
+                </div>
+                <div class="entry-actions-grid entry-bottom-actions">
+                    <button class="marker-btn brush-stroke kf-entry-save">保存</button>
+                    <button class="marker-btn brush-stroke kf-del">删除</button>
                 </div>
             </div>
         `);
@@ -335,20 +362,17 @@ function equalize(pool) {
     }
 }
 
-function moveEntryByDelta(state, entryId, delta) {
+function reorderEntriesByIds(state, orderedIds) {
     const pool = getActivePool(state);
     const entries = pool.entries || [];
-    const from = entries.findIndex(entry => entry.id === String(entryId));
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= entries.length) return false;
-    const [entry] = entries.splice(from, 1);
-    entries.splice(to, 0, entry);
+    const byId = new Map(entries.map(entry => [String(entry.id), entry]));
+    const next = orderedIds.map(id => byId.get(String(id))).filter(Boolean);
+    for (const entry of entries) {
+        if (!next.includes(entry)) next.push(entry);
+    }
+    if (next.length !== entries.length) return false;
+    pool.entries = next;
     return true;
-}
-
-function flashEntryMove() {
-    $('#kf-entry-list .entry-block').addClass('move-shift');
-    setTimeout(() => $('#kf-entry-list .entry-block').removeClass('move-shift'), 220);
 }
 
 function closeModal(id) {
@@ -506,14 +530,14 @@ function bindLongPress(state, rerender, setStatus) {
     area.off('.kfLP');
     const start = (event) => {
         if (event.button === 2) return;
-        const pool = getActivePool(state);
-        area.addClass(pool.enabled ? 'pressing-off' : 'pressing-on');
+        const enabled = state.enabled !== false;
+        area.addClass(enabled ? 'pressing-off' : 'pressing-on');
         timer = setTimeout(() => {
-            pool.enabled = !pool.enabled;
+            state.enabled = !(state.enabled !== false);
             area.removeClass('pressing-on pressing-off');
             saveState(state);
             rerender();
-            setStatus(pool.enabled ? '插件已启动' : '插件已关闭');
+            setStatus(state.enabled !== false ? '插件全局生效' : '插件已关闭');
         }, 800);
     };
     const cancel = () => {
@@ -522,6 +546,146 @@ function bindLongPress(state, rerender, setStatus) {
     };
     area.on('mousedown.kfLP touchstart.kfLP', start);
     $(window).off('mouseup.kfLP touchend.kfLP').on('mouseup.kfLP touchend.kfLP', cancel);
+}
+
+function isDragExcluded(target) {
+    return !!$(target).closest('input,textarea,select,button,label,.dropdown-input,.dropdown-arrow,.marker-checkbox,.select-wrapper,.input-wrapper').length;
+}
+
+function bindEntryDragSort(state, rerender, setStatus) {
+    const list = $('#kf-entry-list');
+    let timer = null;
+    let drag = null;
+
+    const clearTimer = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+    };
+
+    const cleanup = () => {
+        clearTimer();
+        $(document).off('.kfEntryDrag');
+        if (drag?.row?.length) {
+            drag.row.removeClass('kf-dragging').css({ position: '', left: '', top: '', width: '', zIndex: '', pointerEvents: '', transform: '' });
+        }
+        drag?.placeholder?.remove();
+        list.removeClass('kf-drag-active');
+        drag = null;
+    };
+
+    const orderedIdsFromDom = () => {
+        const ids = [];
+        list.children('.entry-block,.kf-drag-placeholder').each(function () {
+            const node = $(this);
+            if (node.hasClass('kf-drag-placeholder')) {
+                if (drag?.id) ids.push(String(drag.id));
+                return;
+            }
+            const id = String(node.data('id') || '');
+            if (id && id !== String(drag?.id || '')) ids.push(id);
+        });
+        return ids;
+    };
+
+    const placePlaceholder = (clientY) => {
+        if (!drag) return;
+        const rows = list.children('.entry-block').not(drag.row);
+        let placed = false;
+        rows.each(function () {
+            const row = $(this);
+            const rect = this.getBoundingClientRect();
+            if (clientY < rect.top + rect.height / 2) {
+                drag.placeholder.insertBefore(row);
+                placed = true;
+                return false;
+            }
+            return true;
+        });
+        if (!placed) list.append(drag.placeholder);
+    };
+
+    const autoScroll = (clientY) => {
+        const node = list.get(0);
+        if (!node) return;
+        const rect = node.getBoundingClientRect();
+        const edge = 42;
+        if (clientY < rect.top + edge) node.scrollTop -= 12;
+        if (clientY > rect.bottom - edge) node.scrollTop += 12;
+    };
+
+    const move = (event) => {
+        if (!drag) return;
+        const dy = event.clientY - drag.startY;
+        drag.row.css('transform', `translate3d(0, ${dy}px, 0)`);
+        placePlaceholder(event.clientY);
+        autoScroll(event.clientY);
+        event.preventDefault();
+    };
+
+    const finish = (event) => {
+        if (!drag) {
+            cleanup();
+            return;
+        }
+        if (event?.type === 'pointercancel') {
+            cleanup();
+            return;
+        }
+        const orderedIds = orderedIdsFromDom();
+        const changed = reorderEntriesByIds(state, orderedIds);
+        cleanup();
+        if (changed) {
+            saveState(state);
+            rerender();
+            setStatus('条目顺序已更新');
+        }
+    };
+
+    const startDrag = (row, event) => {
+        event.preventDefault();
+        syncAllEntries(state);
+        const rect = row.get(0).getBoundingClientRect();
+        const placeholder = $('<div class="kf-drag-placeholder"></div>').height(rect.height);
+        row.after(placeholder);
+        drag = {
+            row,
+            placeholder,
+            id: row.data('id'),
+            startY: event.clientY,
+        };
+        list.addClass('kf-drag-active');
+        row.addClass('kf-dragging').css({
+            position: 'fixed',
+            left: `${rect.left}px`,
+            top: `${rect.top}px`,
+            width: `${rect.width}px`,
+            zIndex: 10050,
+            pointerEvents: 'none',
+            transform: 'translate3d(0, 0, 0)',
+        });
+        row.get(0).setPointerCapture?.(event.pointerId);
+        $(document)
+            .on('pointermove.kfEntryDrag', move)
+            .on('pointerup.kfEntryDrag pointercancel.kfEntryDrag', finish);
+    };
+
+    list.on('pointerdown.kf', '.entry-block', function (event) {
+        if (event.button && event.button !== 0) return;
+        if (isDragExcluded(event.target)) return;
+        const row = $(this);
+        if (list.children('.entry-block').length < 2) return;
+        clearTimer();
+        timer = setTimeout(() => startDrag(row, event), 420);
+        $(document)
+            .off('pointerup.kfEntryPrep pointercancel.kfEntryPrep pointermove.kfEntryPrep')
+            .on('pointermove.kfEntryPrep', prepEvent => {
+                if (Math.abs(prepEvent.clientY - event.clientY) > 8 || Math.abs(prepEvent.clientX - event.clientX) > 8) clearTimer();
+            })
+            .on('pointerup.kfEntryPrep pointercancel.kfEntryPrep', () => {
+                clearTimer();
+                $(document).off('.kfEntryPrep');
+            });
+    });
 }
 
 function bind(state, rerender, setStatus) {
@@ -621,7 +785,9 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.entry-block');
         openEntryNamePicker(state, row, row.find('.kf-entry-name'), rerender);
     });
-    $('#kf-entry-list').on('click.kf', '.kf-entry-provider-display', function () {
+    $('#kf-entry-list').on('click.kf', '.kf-entry-provider-display,.kf-entry-provider-arrow', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
         const pool = getActivePool(state);
         const row = $(this).closest('.entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
@@ -663,24 +829,7 @@ function bind(state, rerender, setStatus) {
         saveState(state);
         rerender();
     });
-    $('#kf-entry-list').on('click.kf', '.kf-move-up', function () {
-        syncAllEntries(state);
-        const id = $(this).closest('.entry-block').data('id');
-        if (moveEntryByDelta(state, id, -1)) {
-            saveState(state);
-            rerender();
-            flashEntryMove();
-        }
-    });
-    $('#kf-entry-list').on('click.kf', '.kf-move-down', function () {
-        syncAllEntries(state);
-        const id = $(this).closest('.entry-block').data('id');
-        if (moveEntryByDelta(state, id, 1)) {
-            saveState(state);
-            rerender();
-            flashEntryMove();
-        }
-    });
+    bindEntryDragSort(state, rerender, setStatus);
     $('#kf-entry-list').on('click.kf', '.kf-fetch-models', async function () {
         const pool = getActivePool(state);
         const row = $(this).closest('.entry-block');
@@ -750,8 +899,8 @@ function bind(state, rerender, setStatus) {
         state.theme.bgMain = $('#kf-theme-bg-main').val();
         state.theme.bgSub = $('#kf-theme-bg-sub').val();
         state.theme.underline = $('#kf-theme-underline').val();
-        state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
         state.theme.brush = String($('#kf-theme-brush').val() || 'marker');
+        if (state.theme.brush !== 'simple') state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
         applyTheme(state);
         saveStateDebounced(state);
     });
@@ -759,6 +908,12 @@ function bind(state, rerender, setStatus) {
         state.failure.retryCount = Math.max(1, toInt($('#kf-failure-retry-count').val() || 3));
         state.failure.alertEnabled = $('#kf-failure-alert-enabled').prop('checked');
         saveStateDebounced(state);
+    });
+    $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
+        const input = $('#kf-failure-retry-count');
+        const delta = $(this).hasClass('kf-stepper-up') ? 1 : -1;
+        const next = Math.max(1, toInt(input.val() || 3) + delta);
+        input.val(next).trigger('change');
     });
 
     bindLongPress(state, rerender, setStatus);

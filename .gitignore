@@ -1,5 +1,6 @@
 # 忽略特定的文件夹（末尾加上斜杠表示忽略整个文件夹）
-backup_1/
+backup-1/
 SPEC.md
 AI_WORKFLOW.md
 scaffold-karmaflip.ps1
+checkpoints/

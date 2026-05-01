@@ -13,8 +13,19 @@ const KarmaFlip = (() => {
         window.setTimeout(task, 500);
     }
 
+    function ensureStylesheet(id, href) {
+        if (document.getElementById(id)) return;
+        const link = document.createElement('link');
+        link.id = id;
+        link.rel = 'stylesheet';
+        link.href = href;
+        document.head.appendChild(link);
+    }
+
     async function init() {
         console.log(`[${moduleName}] Initializing...`);
+
+        ensureStylesheet('st-karmaflip-theme-simple', `${extensionFolderPath}styles/theme-simple.css`);
 
         const html = await $.get(`${extensionFolderPath}index.html`);
         $('#extensions_settings').append(html);

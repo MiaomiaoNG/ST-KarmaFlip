@@ -28,6 +28,7 @@ function defaultPool() {
 export function getDefaultState() {
     return {
         version: 5,
+        enabled: true,
         activePoolId: 'pool_default',
         pools: [defaultPool()],
         apiPresets: [],
@@ -99,8 +100,11 @@ function normalizeState(raw) {
     s.pools = Array.isArray(s.pools) && s.pools.length ? s.pools.map(normalizePool) : [defaultPool()];
     s.apiPresets = Array.isArray(s.apiPresets) ? s.apiPresets.map(normalizePreset) : [];
     if (!s.pools.find(p => p.id === s.activePoolId)) s.activePoolId = s.pools[0].id;
+    const activePool = s.pools.find(p => p.id === s.activePoolId) || s.pools[0];
+    s.enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : activePool?.enabled !== false;
     s.runtime = {};
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
+    s.theme.brush = s.theme.brush === 'simple' ? 'simple' : 'marker';
     s.failure = {
         ...getDefaultState().failure,
         ...(s.failure || {}),

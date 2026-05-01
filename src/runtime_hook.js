@@ -101,7 +101,7 @@ export function installRuntimeHook(onStatus) {
 
         const state = loadState();
         const pool = getActivePool(state);
-        if (!pool?.enabled || !Array.isArray(pool.entries) || !pool.entries.length) return originalFetch(input, init);
+        if (state.enabled === false || !Array.isArray(pool.entries) || !pool.entries.length) return originalFetch(input, init);
 
         const originalBody = String(init.body);
         const blockedIds = new Set();

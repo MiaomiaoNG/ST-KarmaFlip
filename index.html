@@ -27,14 +27,17 @@
         <div class="responsive-controls">
             <label class="marker-checkbox">
                 <input type="radio" name="api-mode" id="mode-fixed" value="fixed">
+                <span class="kf-check-box"></span>
                 <span class="text brush-stroke">固定模式</span>
             </label>
             <label class="marker-checkbox">
                 <input type="radio" name="api-mode" id="mode-random" value="random">
+                <span class="kf-check-box"></span>
                 <span class="text brush-stroke">随机模式</span>
             </label>
             <label class="marker-checkbox">
                 <input type="checkbox" id="kf-no-streak">
+                <span class="kf-check-box"></span>
                 <span class="text brush-stroke">避免连续命中</span>
             </label>
             <button class="marker-btn brush-stroke" id="kf-btn-add-entry">添加条目</button>
@@ -49,9 +52,6 @@
             <button class="marker-btn brush-stroke" id="kf-btn-theme">美化</button>
             <button class="marker-btn brush-stroke" id="kf-btn-save">保存</button>
         </div>
-    </div>
-
-    <div class="block">
         <div class="long-press-row two-strokes brush-stroke" id="kf-long-press">
             <span class="long-press-text" id="kf-long-press-text">插件已关闭（长按启动）</span>
         </div>
@@ -82,17 +82,21 @@
 <div class="modal-overlay" id="settings-modal">
     <div class="modal-box">
         <div class="modal-header">请求设置 <span class="close-btn" id="kf-settings-close">✖</span></div>
-        <div class="kf-settings-grid">
-            <div class="input-wrapper" title="单轮次数">
-                <span class="label">API失败自动重试</span>
-                <input type="number" min="1" id="kf-failure-retry-count" class="inner-input" value="3">
-                <span class="label">次</span>
+        <div class="kf-settings-row">
+            <span class="kf-settings-label">API失败自动重试次数</span>
+            <div class="kf-stepper" title="单轮次数">
+                <input type="number" min="1" id="kf-failure-retry-count" class="kf-stepper-input" value="3">
+                <div class="kf-stepper-buttons">
+                    <button type="button" class="kf-stepper-arrow kf-stepper-up" aria-label="增加">▲</button>
+                    <button type="button" class="kf-stepper-arrow kf-stepper-down" aria-label="减少">▼</button>
+                </div>
             </div>
         </div>
-        <div class="kf-settings-grid">
-            <label class="marker-checkbox kf-settings-check">
+        <div class="kf-settings-row">
+            <span class="kf-settings-label">API失败提醒</span>
+            <label class="kf-square-check">
                 <input type="checkbox" id="kf-failure-alert-enabled">
-                <span class="text brush-stroke">API失败提醒</span>
+                <span class="kf-square-box"></span>
             </label>
         </div>
     </div>
@@ -118,20 +122,19 @@
             <input type="color" id="kf-theme-bg-sub" value="#f7f9fc">
         </div>
         <div class="color-picker-row">
-            <span>下划线/小标题颜色</span>
+            <span>下划线/按钮颜色</span>
             <input type="color" id="kf-theme-underline" value="#617b9b">
         </div>
         <div class="color-picker-row">
+            <span>界面风格</span>
+            <select id="kf-theme-brush" class="inner-input">
+                <option value="marker">马克笔风格</option>
+                <option value="simple">简约风格</option>
+            </select>
+        </div>
+        <div class="color-picker-row" id="kf-theme-blur-row">
             <span>笔触模糊度</span>
             <input type="range" id="kf-theme-blur" min="0" max="3" step="0.1" value="0.6">
-        </div>
-        <div class="color-picker-row">
-            <span>笔刷风格</span>
-            <select id="kf-theme-brush" class="inner-input">
-                <option value="marker">马克笔 (水彩叠底)</option>
-                <option value="oil">油画笔 (厚涂实色)</option>
-                <option value="gouache">水粉 (半透磨砂)</option>
-            </select>
         </div>
         <div style="font-size: 12px; color: #888; margin-top: 10px; text-align: center;">字体颜色会自动适应底色切换为黑或白</div>
     </div>
