@@ -127,8 +127,10 @@ export function markRequestFailure(state, member) {
     const runtime = getRuntimeScope(state);
     runtime.cooldowns[member.id] = 0;
     runtime.failures[member.id] = toInt(runtime.failures[member.id]) + 1;
-    if (runtime.failures[member.id] >= 3) {
-        runtime.disabledByFailure[member.id] = true;
-    }
     return runtime.failures[member.id];
+}
+
+export function disableMemberByFailure(state, member) {
+    const runtime = getRuntimeScope(state);
+    runtime.disabledByFailure[member.id] = true;
 }

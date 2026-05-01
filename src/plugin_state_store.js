@@ -38,6 +38,10 @@ export function getDefaultState() {
             blur: '0.6',
             brush: 'marker',
         },
+        failure: {
+            retryCount: 3,
+            alertEnabled: false,
+        },
         runtime: {},
         logs: [],
     };
@@ -97,6 +101,12 @@ function normalizeState(raw) {
     if (!s.pools.find(p => p.id === s.activePoolId)) s.activePoolId = s.pools[0].id;
     s.runtime = {};
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
+    s.failure = {
+        ...getDefaultState().failure,
+        ...(s.failure || {}),
+        retryCount: Math.max(1, toInt(s.failure?.retryCount || 3)),
+        alertEnabled: !!s.failure?.alertEnabled,
+    };
     if (!Array.isArray(s.logs)) s.logs = [];
     if (s.logs.length > MAX_STORED_LOGS) s.logs = s.logs.slice(0, MAX_STORED_LOGS);
     return s;

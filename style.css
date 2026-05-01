@@ -263,6 +263,29 @@
 .modal-overlay .color-picker-row input[type="color"] { width: 30px; height: 30px; padding: 0; background: transparent; cursor: pointer; }
 .modal-overlay .color-picker-row input[type="range"],
 .modal-overlay .color-picker-row select { width: 120px; }
+.modal-overlay .input-wrapper {
+    display: flex;
+    align-items: center;
+    padding: 4px 2px;
+    border-bottom: 1px solid var(--underline-color, #617b9b) !important;
+    background: transparent;
+    min-width: 0;
+}
+.modal-overlay .input-wrapper .label {
+    font-size: 13px;
+    font-weight: bold;
+    margin-right: 8px;
+    white-space: nowrap;
+    color: var(--underline-color, #617b9b);
+}
+.modal-overlay .input-wrapper .inner-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent !important;
+    color: inherit;
+    font-size: 14px;
+    padding: 0;
+}
 .modal-overlay textarea,
 .modal-overlay input,
 .modal-overlay select {
@@ -294,12 +317,57 @@
     white-space: nowrap;
 }
 .modal-overlay .marker-btn.brush-stroke::before { top: 25%; left: 2%; width: 96%; height: 50%; transform: rotate(-1deg); }
+.modal-overlay .marker-checkbox {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    padding: 5px 0;
+}
+.modal-overlay .marker-checkbox input[type="checkbox"] {
+    display: none;
+}
+.modal-overlay .marker-checkbox .text {
+    position: relative;
+    z-index: 1;
+    font-size: 14px;
+    padding: 0 4px;
+    color: inherit;
+}
+.modal-overlay .marker-checkbox input:checked + .text.brush-stroke::after {
+    top: 50%;
+    left: -10%;
+    width: 120%;
+    height: 60%;
+    transform: translateY(-50%) rotate(-15deg);
+}
 .modal-overlay .kf-log-filter.active::after {
     top: 50%;
     left: -5%;
     width: 110%;
     height: 60%;
     transform: translateY(-50%) rotate(-10deg);
+}
+.modal-overlay .kf-settings-grid,
+.modal-overlay .kf-modal-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.modal-overlay .kf-settings-check {
+    width: 100%;
+    justify-content: center;
+}
+.modal-overlay .kf-modal-message {
+    line-height: 1.5;
+    margin-bottom: 16px;
+    word-break: break-word;
+}
+.modal-overlay .kf-modal-actions {
+    margin-bottom: 0;
 }
 .kf-mobile-option {
     padding: 8px 0;

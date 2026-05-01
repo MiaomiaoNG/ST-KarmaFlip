@@ -1,4 +1,5 @@
 {
+  "name": "ST-KarmaFlip",
   "display_name": "API随机临幸",
   "loading_order": 1,
   "js": "index.js",

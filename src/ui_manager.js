@@ -1,5 +1,4 @@
-import { enableStatePersistence, getActivePool, loadState, pushLog, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
-import { pickMember } from './router.js';
+import { enableStatePersistence, getActivePool, loadState, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,7 +24,7 @@ function applyBrush(root, style) {
     root.style.setProperty('--brush-blend', blend);
     root.style.setProperty('--brush-opacity', opacity);
     root.dataset.brush = style || 'marker';
-    for (const target of [document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal')].filter(Boolean)) {
+    for (const target of [document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal'), document.getElementById('settings-modal'), document.getElementById('failure-modal')].filter(Boolean)) {
         target.style.setProperty('--brush-blend', blend);
         target.style.setProperty('--brush-opacity', opacity);
     }
@@ -35,7 +34,7 @@ function applyTheme(state) {
     const root = document.getElementById('kf-root');
     if (!root) return;
     const theme = state.theme || {};
-    const targets = [root, document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal')].filter(Boolean);
+    const targets = [root, document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal'), document.getElementById('settings-modal'), document.getElementById('failure-modal')].filter(Boolean);
     for (const target of targets) {
         target.style.setProperty('--bg-main', theme.bgMain || '#ffffff');
         target.style.setProperty('--bg-sub', theme.bgSub || '#f7f9fc');
@@ -51,6 +50,8 @@ function applyTheme(state) {
     $('#kf-theme-underline').val(theme.underline || '#617b9b');
     $('#kf-theme-blur').val(theme.blur || '0.6');
     $('#kf-theme-brush').val(theme.brush || 'marker');
+    $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
+    $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
 }
 
 function mkPool(name = null) {
@@ -293,7 +294,7 @@ function renderLogs(state, filter = currentLogFilter()) {
     const logs = [...(state.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
     const filtered = logs.filter(log => {
         if (filter === 'error') return log.success === false || String(log.event || '').includes('error');
-        if (filter === 'pick') return ['manual-test', 'pick', 'request'].includes(log.event);
+        if (filter === 'pick') return ['pick', 'request'].includes(log.event);
         return true;
     });
     const lines = filtered.slice(-50).map(formatLog);
@@ -355,7 +356,7 @@ function closeModal(id) {
 }
 
 function hoistModals() {
-    for (const id of ['logModal', 'dropdownModal', 'theme-modal']) {
+    for (const id of ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal']) {
         let node = document.getElementById(id);
         if (!node) continue;
         if (node.dataset.kfStopBound) {
@@ -366,6 +367,30 @@ function hoistModals() {
         if (node.parentElement !== document.body) document.body.appendChild(node);
     }
 }
+
+function openFailureDecision(message, actions) {
+    return new Promise(resolve => {
+        const previousResolver = window.STKarmaFlip.failureResolver;
+        if (typeof previousResolver === 'function') previousResolver('cancel');
+        window.STKarmaFlip.failureResolver = resolve;
+        $('#kf-failure-message').text(message || '');
+        const box = $('#kf-failure-actions').empty();
+        for (const action of actions || []) {
+            box.append(`<button class="marker-btn brush-stroke" data-value="${esc(action.value)}">${esc(action.label)}</button>`);
+        }
+        box.off('click.kfFailure').on('click.kfFailure', '.marker-btn', function () {
+            const value = String($(this).data('value') || '');
+            $('#failure-modal').removeClass('show');
+            box.off('click.kfFailure');
+            window.STKarmaFlip.failureResolver = null;
+            resolve(value);
+        });
+        $('#failure-modal').addClass('show');
+    });
+}
+
+window.STKarmaFlip = window.STKarmaFlip || {};
+window.STKarmaFlip.openFailureDecision = openFailureDecision;
 
 function isMobileWidth() {
     return window.matchMedia?.('(max-width: 650px)')?.matches || window.innerWidth <= 650;
@@ -676,26 +701,7 @@ function bind(state, rerender, setStatus) {
         }
     });
 
-    $('#kf-btn-test').off('click.kf').on('click.kf', () => {
-        syncAllEntries(state);
-        const pool = getActivePool(state);
-        const picked = pickMember(state, pool);
-        if (!picked?.member) return setStatus('测试失败：无可用条目');
-        const detailParts = [];
-        if (picked.detail.cooldownBlocked?.length) detailParts.push(`跳过冷却/连续: ${picked.detail.cooldownBlocked.join(', ')}`);
-        pushLog(state, {
-            event: 'manual-test',
-            trigger: 'ui',
-            mode: picked.detail.mode,
-            apiName: picked.member.name,
-            model: picked.member.model || '(未填)',
-            success: true,
-            detail: detailParts.join('；') || '抽选测试，不发送请求',
-        });
-        saveState(state);
-        renderLogs(state);
-        alert(`测试命中：${picked.member.name}\n模型：${picked.member.model || '(未填)'}\n模式：${picked.detail.mode}`);
-    });
+    $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#settings-modal').addClass('show'));
     $('#kf-btn-save').off('click.kf').on('click.kf', () => {
         syncAllEntries(state);
         const pool = getActivePool(state);
@@ -720,6 +726,7 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#theme-modal').addClass('show'));
     $('#kf-theme-close').off('click.kf').on('click.kf', () => closeModal('theme-modal'));
+    $('#kf-settings-close').off('click.kf').on('click.kf', () => closeModal('settings-modal'));
     $('#kf-dropdown-close').off('click.kf').on('click.kf', () => closeDropdown());
     $('.modal-overlay').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf', function (event) {
@@ -727,6 +734,7 @@ function bind(state, rerender, setStatus) {
         })
         .on('click.kf', function (event) {
             event.stopPropagation();
+            if (this.id === 'failure-modal') return;
             if (event.target === this) $(this).removeClass('show');
         });
     $('.modal-overlay .modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
@@ -745,6 +753,11 @@ function bind(state, rerender, setStatus) {
         state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
         state.theme.brush = String($('#kf-theme-brush').val() || 'marker');
         applyTheme(state);
+        saveStateDebounced(state);
+    });
+    $('#kf-failure-retry-count,#kf-failure-alert-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
+        state.failure.retryCount = Math.max(1, toInt($('#kf-failure-retry-count').val() || 3));
+        state.failure.alertEnabled = $('#kf-failure-alert-enabled').prop('checked');
         saveStateDebounced(state);
     });
 

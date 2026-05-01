@@ -44,7 +44,7 @@
 
     <div class="block">
         <div class="btn-group-even">
-            <button class="marker-btn brush-stroke" id="kf-btn-test">测试</button>
+            <button class="marker-btn brush-stroke" id="kf-btn-settings">设置</button>
             <button class="marker-btn brush-stroke" id="kf-btn-logs">日志</button>
             <button class="marker-btn brush-stroke" id="kf-btn-theme">美化</button>
             <button class="marker-btn brush-stroke" id="kf-btn-save">保存</button>
@@ -76,6 +76,33 @@
     <div class="modal-box">
         <div class="modal-header"><span id="kf-dropdown-title">选择</span> <span class="close-btn" id="kf-dropdown-close">✖</span></div>
         <div class="kf-mobile-options" id="kf-mobile-options"></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="settings-modal">
+    <div class="modal-box">
+        <div class="modal-header">请求设置 <span class="close-btn" id="kf-settings-close">✖</span></div>
+        <div class="kf-settings-grid">
+            <div class="input-wrapper" title="单轮次数">
+                <span class="label">API失败自动重试</span>
+                <input type="number" min="1" id="kf-failure-retry-count" class="inner-input" value="3">
+                <span class="label">次</span>
+            </div>
+        </div>
+        <div class="kf-settings-grid">
+            <label class="marker-checkbox kf-settings-check">
+                <input type="checkbox" id="kf-failure-alert-enabled">
+                <span class="text brush-stroke">API失败提醒</span>
+            </label>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="failure-modal">
+    <div class="modal-box">
+        <div class="modal-header">API请求失败</div>
+        <div class="kf-modal-message" id="kf-failure-message"></div>
+        <div class="kf-modal-actions" id="kf-failure-actions"></div>
     </div>
 </div>
 

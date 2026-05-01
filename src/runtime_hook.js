@@ -1,5 +1,5 @@
 import { getActivePool, loadState, pushLog, saveStateAsync } from './plugin_state_store.js';
-import { markRequestFailure, markRequestSuccess, pickMember } from './router.js';
+import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 
 let fetchPatched = false;
 let originalFetch = null;
@@ -48,11 +48,45 @@ function chooseRequest(state, pool, blockedIds = new Set()) {
     }
 }
 
-function notifyFixedFailureSwitch(member, nextMember) {
-    if (nextMember) {
-        toast('warning', `[${member.name}]连续请求错误达三次，已自动切换到下一个可用 API：[${nextMember.name}]`);
-    } else {
-        toast('warning', `[${member.name}]连续请求错误达三次，已停用；当前没有下一个可用 API`);
+function retryLimit(state) {
+    const count = Number(state.failure?.retryCount);
+    return Number.isFinite(count) ? Math.max(1, Math.round(count)) : 3;
+}
+
+async function askFailureDecision(message, actions, fallback) {
+    const opener = window.STKarmaFlip?.openFailureDecision;
+    if (typeof opener !== 'function') {
+        toast('warning', message);
+        return fallback;
+    }
+    return opener(message, actions);
+}
+
+function failureMessage(member, count) {
+    return `[${member.name || '未命名'}] [${member.model || '未填模型'}]已失败${count}次，是否继续发起请求？`;
+}
+
+function secondFailureMessage(member) {
+    return `[${member.name || '未命名'}] [${member.model || '未填模型'}]再次请求失败，已暂停，是否使用下一个API？`;
+}
+
+async function sendWithMember(input, init, originalBody, state, pool, picked, member, requestKey, onStatus) {
+    const request = buildRequest(input, init, originalBody, member);
+    if (typeof onStatus === 'function') onStatus(`命中: ${member.name} | ${member.model || '未填模型'} | ${triggerReason}`);
+    try {
+        const response = await originalFetch(request.input, request.init);
+        if (response.ok) {
+            markRequestSuccess(state, pool, member, requestKey);
+            pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
+            return { ok: true, response };
+        }
+        const count = markRequestFailure(state, member);
+        pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, status: response.status });
+        return { ok: false, response, count };
+    } catch (error) {
+        const count = markRequestFailure(state, member);
+        pushLog(state, { event: 'request-error', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, error: String(error?.message || error) });
+        return { ok: false, error, count };
     }
 }
 
@@ -73,47 +107,69 @@ export function installRuntimeHook(onStatus) {
         const blockedIds = new Set();
         let lastError = null;
         let lastResponse = null;
+        const maxFailures = retryLimit(state);
+        const alertEnabled = !!state.failure?.alertEnabled;
+        const maxSwitches = Math.max(1, (pool.entries || []).length);
 
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        for (let switchAttempt = 0; switchAttempt < maxSwitches; switchAttempt += 1) {
             const picked = chooseRequest(state, pool, blockedIds);
             if (!picked?.member) break;
             const member = picked.member;
-            const requestKey = `${triggerReason}|${Date.now()}|${attempt}`;
+            let result = null;
 
-            try {
-                const request = buildRequest(input, init, originalBody, member);
-                if (typeof onStatus === 'function') onStatus(`命中: ${member.name} | ${member.model || '未填模型'} | ${triggerReason}`);
-                const response = await originalFetch(request.input, request.init);
-                if (response.ok) {
-                    markRequestSuccess(state, pool, member, requestKey);
-                    pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
+            for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
+                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|${retryAttempt}`, onStatus);
+                if (result.ok) {
                     saveStateAsync(state);
-                    return response;
+                    return result.response;
                 }
+                lastResponse = result.response || lastResponse;
+                lastError = result.error || lastError;
+            }
 
-                lastResponse = response;
-                const count = markRequestFailure(state, member);
-                pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, status: response.status });
-
-                if (pool.mode === 'fixed' && count >= 3) {
-                    blockedIds.add(member.id);
-                    const next = chooseRequest(state, pool, blockedIds)?.member;
-                    notifyFixedFailureSwitch(member, next);
-                    if (!next) break;
-                } else if (pool.mode === 'random') {
-                    blockedIds.add(member.id);
-                    if (count >= 3) toast('warning', `[${member.name}]连续请求错误达三次，已停用该模型`);
-                    else toast('warning', `[${member.name}]请求出错，已重新随机抽选模型发送请求`);
-                }
-            } catch (error) {
-                lastError = error;
-                const count = markRequestFailure(state, member);
-                pushLog(state, { event: 'request-error', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, error: String(error?.message || error) });
+            if (!alertEnabled) {
                 blockedIds.add(member.id);
-                if (pool.mode === 'random') {
-                    if (count >= 3) toast('warning', `[${member.name}]连续请求错误达三次，已停用该模型`);
-                    else toast('warning', `[${member.name}]请求出错，已重新随机抽选模型发送请求`);
+                continue;
+            }
+
+            const decision = await askFailureDecision(
+                failureMessage(member, maxFailures),
+                [
+                    { value: 'confirm', label: '确认' },
+                    { value: 'switch', label: '切换API' },
+                    { value: 'cancel', label: '取消' },
+                ],
+                'switch',
+            );
+            if (decision === 'cancel') break;
+            if (decision === 'switch') {
+                blockedIds.add(member.id);
+                continue;
+            }
+            if (decision === 'confirm') {
+                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|confirm`, onStatus);
+                if (result.ok) {
+                    saveStateAsync(state);
+                    return result.response;
                 }
+                lastResponse = result.response || lastResponse;
+                lastError = result.error || lastError;
+                const nextDecision = await askFailureDecision(
+                    secondFailureMessage(member),
+                    [
+                        { value: 'use-next', label: '使用下一个API' },
+                        { value: 'disable-cancel', label: '取消并停用该API' },
+                        { value: 'cancel-keep', label: '取消，不停用该API' },
+                    ],
+                    'use-next',
+                );
+                if (nextDecision === 'use-next') {
+                    if (pool.mode === 'random') disableMemberByFailure(state, member);
+                    blockedIds.add(member.id);
+                    continue;
+                }
+                if (nextDecision === 'disable-cancel') disableMemberByFailure(state, member);
+                break;
             }
         }
 
