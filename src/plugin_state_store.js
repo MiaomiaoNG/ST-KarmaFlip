@@ -37,7 +37,7 @@ export function getDefaultState() {
             bgSub: '#f7f9fc',
             underline: '#617b9b',
             blur: '0.6',
-            brush: 'marker',
+            brush: 'simple',
         },
         failure: {
             retryCount: 3,

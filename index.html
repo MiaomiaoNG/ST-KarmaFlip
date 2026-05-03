@@ -4,7 +4,7 @@
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
-<div class="plugin-container" id="kf-root" data-mode="fixed" data-brush="marker">
+<div class="plugin-container" id="kf-root" data-mode="fixed" data-brush="simple">
     <div class="block">
         <div class="title">组合管理</div>
         <div class="row">
@@ -26,20 +26,20 @@
     <div class="block">
         <div class="title">API条目</div>
         <div class="responsive-controls">
-            <label class="marker-checkbox">
+            <label class="marker-checkbox kf-mode-control">
                 <input type="radio" name="api-mode" id="mode-fixed" value="fixed">
                 <span class="kf-check-box"></span>
                 <span class="text brush-stroke">固定模式</span>
             </label>
-            <label class="marker-checkbox">
+            <label class="marker-checkbox kf-mode-control">
                 <input type="radio" name="api-mode" id="mode-random" value="random">
                 <span class="kf-check-box"></span>
                 <span class="text brush-stroke">随机模式</span>
             </label>
-            <label class="marker-checkbox">
+            <label class="marker-checkbox kf-mode-control" title="避免连续使用同一个API">
                 <input type="checkbox" id="kf-no-streak">
                 <span class="kf-check-box"></span>
-                <span class="text brush-stroke">避免连续命中</span>
+                <span class="text brush-stroke">避免连续</span>
             </label>
             <button class="marker-btn brush-stroke" id="kf-btn-add-entry">添加条目</button>
         </div>
@@ -129,8 +129,8 @@
         <div class="color-picker-row">
             <span>界面风格</span>
             <select id="kf-theme-brush" class="inner-input">
-                <option value="marker">马克笔风格</option>
                 <option value="simple">简约风格</option>
+                <option value="marker">马克笔风格</option>
             </select>
         </div>
         <div class="color-picker-row" id="kf-theme-blur-row">

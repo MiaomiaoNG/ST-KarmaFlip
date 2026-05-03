@@ -52,6 +52,25 @@
     gap: 0;
 }
 
+#kf-root[data-brush="simple"] .responsive-controls .kf-mode-control {
+    justify-content: center;
+}
+
+#kf-root[data-brush="simple"] .kf-entry-enabled-wrap {
+    justify-content: center;
+}
+
+#kf-root[data-brush="simple"] .kf-icon-btn,
+#kf-root[data-brush="simple"] .kf-eye-btn {
+    border: 1px solid var(--underline-color) !important;
+    border-radius: var(--simple-radius);
+}
+
+#kf-root[data-brush="simple"] .kf-entry-key-wrap .kf-eye-btn {
+    border: none !important;
+    border-radius: 0;
+}
+
 #kf-root[data-brush="simple"] .kf-check-box {
     display: inline-flex;
     align-items: center;

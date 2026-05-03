@@ -200,12 +200,49 @@
 
 #kf-root .responsive-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; align-items: center; margin-bottom: 15px; }
 #kf-root .responsive-controls > * { width: 100%; min-width: 0; justify-content: center; }
+#kf-root .responsive-controls .kf-mode-control { justify-content: center; }
 #kf-root .entry-header { margin-bottom: 12px; }
 #kf-root .entry-actions-grid { display: grid; gap: 15px; align-items: center; width: 100%; }
 #kf-root .entry-main-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-#kf-root .entry-bottom-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
 #kf-root .entry-actions-grid > * { width: 100%; min-width: 0; justify-content: center; }
 #kf-root .entry-status { font-size: 12px; color: #b91c1c; text-align: center; margin-bottom: 8px; }
+#kf-root .kf-entry-row-top {
+    display: grid;
+    grid-template-columns: minmax(64px, 0.9fr) minmax(0, 7fr) 32px;
+    align-items: center;
+}
+#kf-root .kf-entry-enabled-wrap,
+#kf-root .kf-entry-name-wrap {
+    width: 100%;
+    min-width: 0;
+}
+#kf-root .kf-icon-btn,
+#kf-root .kf-eye-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    background: transparent !important;
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+}
+#kf-root .kf-icon-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 24px;
+    line-height: 1;
+}
+#kf-root .kf-eye-btn {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 15px;
+}
+#kf-root .kf-entry-key-wrap .inner-input {
+    padding-right: 4px;
+}
 
 #kf-root .entries-container { max-height: 480px; overflow-y: auto; padding-right: 5px; }
 #kf-root .entries-container::-webkit-scrollbar { width: 6px; }
@@ -475,7 +512,7 @@
 }
 .modal-overlay .kf-modal-actions {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     align-items: center;
     margin-bottom: 12px;
@@ -487,6 +524,15 @@
 }
 .modal-overlay .kf-modal-actions {
     margin-bottom: 0;
+}
+.modal-overlay .kf-modal-actions .marker-btn {
+    width: 100%;
+    min-width: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+    white-space: normal;
+    line-height: 1.25;
+    text-align: center;
 }
 .kf-mobile-option {
     padding: 8px 0;

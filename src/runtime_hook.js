@@ -53,6 +53,13 @@ function retryLimit(state) {
     return Number.isFinite(count) ? Math.max(1, Math.round(count)) : 3;
 }
 
+function isUserAbortError(error, init) {
+    if (init?.signal?.aborted) return true;
+    if (error?.name === 'AbortError') return true;
+    const message = String(error?.message || error || '').toLowerCase();
+    return /\b(abort|aborted|cancelled|canceled)\b/.test(message);
+}
+
 async function askFailureDecision(message, actions, fallback) {
     const opener = window.STKarmaFlip?.openFailureDecision;
     if (typeof opener !== 'function') {
@@ -84,6 +91,7 @@ async function sendWithMember(input, init, originalBody, state, pool, picked, me
         pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, status: response.status });
         return { ok: false, response, count };
     } catch (error) {
+        if (isUserAbortError(error, request.init)) return { ok: false, error, aborted: true };
         const count = markRequestFailure(state, member);
         pushLog(state, { event: 'request-error', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, error: String(error?.message || error) });
         return { ok: false, error, count };
@@ -123,6 +131,10 @@ export function installRuntimeHook(onStatus) {
                     saveStateAsync(state);
                     return result.response;
                 }
+                if (result.aborted) {
+                    saveStateAsync(state);
+                    throw result.error;
+                }
                 lastResponse = result.response || lastResponse;
                 lastError = result.error || lastError;
             }
@@ -151,6 +163,10 @@ export function installRuntimeHook(onStatus) {
                 if (result.ok) {
                     saveStateAsync(state);
                     return result.response;
+                }
+                if (result.aborted) {
+                    saveStateAsync(state);
+                    throw result.error;
                 }
                 lastResponse = result.response || lastResponse;
                 lastError = result.error || lastError;

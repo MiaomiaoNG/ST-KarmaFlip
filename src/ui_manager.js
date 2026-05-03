@@ -256,20 +256,29 @@ function renderEntries(state) {
         const modelArrow = modelHasOptions ? '<button class="dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
         root.append(`
             <div class="entry-block" data-id="${esc(entry.id)}">
-                <div class="row">
-                    <label class="marker-checkbox flex-1">
+                <div class="row kf-entry-row-top">
+                    <label class="marker-checkbox kf-entry-enabled-wrap">
                         <input type="checkbox" class="kf-entry-enabled" ${enabledChecked}>
                         <span class="kf-check-box"></span>
                         <span class="text brush-stroke">启用</span>
                     </label>
-                    <div class="input-wrapper flex-7"><span class="label">名称</span><input type="text" class="inner-input dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
+                    <div class="input-wrapper kf-entry-name-wrap"><span class="label">名称</span><input type="text" class="inner-input dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
+                    <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">×</button>
                 </div>
                 <div class="row">
                     <div class="input-wrapper flex-7"><span class="label">URL</span><input type="text" class="inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
                     ${providerSelect(entry)}
                 </div>
                 <div class="row">
-                    <div class="input-wrapper flex-1"><span class="label">KEY</span><input type="password" class="inner-input kf-entry-key" value="${esc(entry.key)}"></div>
+                    <div class="input-wrapper flex-1 kf-entry-key-wrap">
+                        <span class="label">KEY</span>
+                        <input type="password" class="inner-input kf-entry-key" value="${esc(entry.key)}">
+                        <button class="kf-eye-btn kf-key-eye" type="button" aria-label="显示 KEY" title="显示 KEY">
+                            <i class="fa-regular fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="row">
                     <div class="input-wrapper flex-1"><span class="label">模型</span><input type="text" class="inner-input dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
                     <button class="marker-btn brush-stroke kf-fetch-models">拉取模型</button>
                 </div>
@@ -280,10 +289,6 @@ function renderEntries(state) {
                     <div class="input-wrapper flex-1"><span class="label">权重</span><input type="number" min="0" class="inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
                     <div class="input-wrapper flex-1"><span class="label">保底回合</span><input type="number" min="0" class="inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
                     <div class="input-wrapper flex-1"><span class="label">冷却回合</span><input type="number" min="0" class="inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
-                </div>
-                <div class="entry-actions-grid entry-bottom-actions">
-                    <button class="marker-btn brush-stroke kf-entry-save">保存</button>
-                    <button class="marker-btn brush-stroke kf-del">删除</button>
                 </div>
             </div>
         `);
@@ -325,7 +330,10 @@ function renderLogs(state, filter = currentLogFilter()) {
         return true;
     });
     const lines = filtered.slice(-50).map(formatLog);
-    $('#kf-logs-list').val(lines.join('\n'));
+    const logBox = $('#kf-logs-list');
+    logBox.val(lines.join('\n'));
+    const node = logBox.get(0);
+    if (node) node.scrollTop = node.scrollHeight;
 }
 
 function syncEntryFromRow(entry, row) {
@@ -824,15 +832,16 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.entry-block');
         openEntryModelPicker(state, row, row.find('.kf-entry-model'), rerender);
     });
-    $('#kf-entry-list').on('click.kf', '.kf-entry-save', function () {
-        const pool = getActivePool(state);
-        const row = $(this).closest('.entry-block');
-        const entry = pool.entries.find(e => e.id === row.data('id'));
-        if (entry) syncEntryFromRow(entry, row);
-        if (entry) saveApiPreset(state, entry);
-        saveState(state);
-        renderPresetLists(state);
-        setStatus('条目已保存');
+    $('#kf-entry-list').on('click.kf', '.kf-key-eye', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const button = $(this);
+        const input = button.closest('.input-wrapper').find('.kf-entry-key');
+        const reveal = input.attr('type') === 'password';
+        input.attr('type', reveal ? 'text' : 'password');
+        button.attr('aria-label', reveal ? '隐藏 KEY' : '显示 KEY');
+        button.attr('title', reveal ? '隐藏 KEY' : '显示 KEY');
+        button.html(`<i class="fa-regular ${reveal ? 'fa-eye-slash' : 'fa-eye'}"></i>`);
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);
