@@ -17,7 +17,7 @@
             <div class="btn-group-even">
                 <button id="kf-btn-new-pool" class="marker-btn brush-stroke">添加</button>
                 <button id="kf-btn-copy-pool" class="marker-btn brush-stroke">复制</button>
-                <button id="kf-btn-save-pool" class="marker-btn brush-stroke">保存</button>
+                <button id="kf-btn-rename-pool" class="marker-btn brush-stroke">修改</button>
                 <button id="kf-btn-delete-pool" class="marker-btn brush-stroke">删除</button>
             </div>
         </div>
@@ -110,6 +110,22 @@
         <div class="kf-modal-actions" id="kf-failure-actions"></div>
     </div>
 </div>
+
+<div class="modal-overlay" id="rename-pool-modal">
+    <div class="modal-box">
+        <div class="modal-header">修改组合名称 <span class="close-btn" id="kf-rename-pool-close">✖</span></div>
+        <div class="input-wrapper">
+            <span class="label">名称</span>
+            <input type="text" class="inner-input" id="kf-rename-pool-input">
+        </div>
+        <div class="kf-modal-actions kf-modal-actions-two">
+            <button class="marker-btn brush-stroke" id="kf-rename-pool-confirm">确认</button>
+            <button class="marker-btn brush-stroke" id="kf-rename-pool-cancel">取消</button>
+        </div>
+    </div>
+</div>
+
+<div id="kf-toast-layer" class="kf-toast-layer"></div>
 
 <div class="modal-overlay" id="theme-modal">
     <div class="modal-box">

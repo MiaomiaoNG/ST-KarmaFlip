@@ -7,6 +7,7 @@ let persistTimer = null;
 let asyncPersistTimer = null;
 let cachedState = null;
 const runtimeScopes = {};
+const LOG_EVENT_NAME = 'STKarmaFlip:logs-updated';
 
 export function toInt(value) {
     const n = Number(value);
@@ -104,7 +105,7 @@ function normalizeState(raw) {
     s.enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : activePool?.enabled !== false;
     s.runtime = {};
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
-    s.theme.brush = s.theme.brush === 'simple' ? 'simple' : 'marker';
+    s.theme.brush = s.theme.brush === 'marker' ? 'marker' : 'simple';
     s.failure = {
         ...getDefaultState().failure,
         ...(s.failure || {}),
@@ -212,4 +213,5 @@ export function pushLog(state, entry) {
     if (!Array.isArray(state.logs)) state.logs = [];
     state.logs.unshift({ time: new Date().toISOString(), ...entry });
     if (state.logs.length > MAX_STORED_LOGS) state.logs = state.logs.slice(0, MAX_STORED_LOGS);
+    window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
 }

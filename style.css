@@ -525,6 +525,10 @@
 .modal-overlay .kf-modal-actions {
     margin-bottom: 0;
 }
+.modal-overlay .kf-modal-actions-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 16px;
+}
 .modal-overlay .kf-modal-actions .marker-btn {
     width: 100%;
     min-width: 0;
@@ -548,6 +552,68 @@
     gap: 8px;
     max-height: 60vh;
     overflow-y: auto;
+}
+
+.kf-toast-layer {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10080;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    --bg-main: #ffffff;
+    --text-main: #000000;
+    --underline-color: #617b9b;
+    --underline-rgb: 97, 123, 155;
+    --marker-rgb: 208, 222, 239;
+    --marker-blur: 0.6px;
+    --brush-blend: multiply;
+    --brush-opacity: 1;
+}
+
+.kf-toast {
+    position: relative;
+    z-index: 1;
+    min-width: 180px;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 9px 16px;
+    border-radius: 6px;
+    background: var(--bg-main, #ffffff);
+    color: var(--text-main, #000000);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.35;
+    word-break: break-word;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    pointer-events: auto;
+}
+
+.kf-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.kf-toast-error {
+    --marker-rgb: 239, 168, 168;
+}
+
+.kf-toast-warning {
+    --marker-rgb: 239, 210, 145;
+}
+
+.kf-toast.brush-stroke::before {
+    top: 22%;
+    left: 2%;
+    width: 96%;
+    height: 56%;
+    transform: rotate(-1deg);
 }
 
 @media (max-width: 650px) {

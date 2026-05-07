@@ -1,5 +1,7 @@
 import { enableStatePersistence, getActivePool, loadState, saveState, toInt } from './plugin_state_store.js';
 
+const MODAL_IDS = ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal', 'rename-pool-modal'];
+
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -41,11 +43,13 @@ function applyBrush(root, style) {
     root.style.setProperty('--brush-blend', blend);
     root.style.setProperty('--brush-opacity', opacity);
     root.dataset.brush = resolvedStyle;
-    for (const target of [document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal'), document.getElementById('settings-modal'), document.getElementById('failure-modal')].filter(Boolean)) {
+    for (const target of MODAL_IDS.map(id => document.getElementById(id)).filter(Boolean)) {
         target.style.setProperty('--brush-blend', blend);
         target.style.setProperty('--brush-opacity', opacity);
         target.dataset.brush = resolvedStyle;
     }
+    const toastLayer = document.getElementById('kf-toast-layer');
+    if (toastLayer) toastLayer.dataset.brush = resolvedStyle;
 }
 
 function applyTheme(state) {
@@ -53,7 +57,7 @@ function applyTheme(state) {
     if (!root) return;
     silenceLongPressTransition();
     const theme = state.theme || {};
-    const targets = [root, document.getElementById('theme-modal'), document.getElementById('logModal'), document.getElementById('dropdownModal'), document.getElementById('settings-modal'), document.getElementById('failure-modal')].filter(Boolean);
+    const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer')].filter(Boolean);
     for (const target of targets) {
         const underline = theme.underline || '#617b9b';
         target.style.setProperty('--bg-main', theme.bgMain || '#ffffff');
@@ -65,7 +69,7 @@ function applyTheme(state) {
         target.style.setProperty('--underline-rgb', hexToRgb(underline));
         target.style.setProperty('--marker-blur', `${theme.blur || '0.6'}px`);
     }
-    applyBrush(root, theme.brush || 'marker');
+    applyBrush(root, theme.brush || 'simple');
 
     $('#kf-theme-bg-main').val(theme.bgMain || '#ffffff');
     $('#kf-theme-bg-sub').val(theme.bgSub || '#f7f9fc');
@@ -323,7 +327,8 @@ function currentLogFilter() {
 }
 
 function renderLogs(state, filter = currentLogFilter()) {
-    const logs = [...(state.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    const source = loadState();
+    const logs = [...(source.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
     const filtered = logs.filter(log => {
         if (filter === 'error') return log.success === false || String(log.event || '').includes('error');
         if (filter === 'pick') return ['pick', 'request'].includes(log.event);
@@ -371,7 +376,7 @@ function syncThemeFromControls(state) {
     state.theme.bgMain = $('#kf-theme-bg-main').val();
     state.theme.bgSub = $('#kf-theme-bg-sub').val();
     state.theme.underline = $('#kf-theme-underline').val();
-    state.theme.brush = String($('#kf-theme-brush').val() || 'marker');
+    state.theme.brush = String($('#kf-theme-brush').val() || 'simple');
     if (state.theme.brush !== 'simple') state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
 }
 
@@ -417,7 +422,7 @@ function closeModal(id) {
 }
 
 function hoistModals() {
-    for (const id of ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal']) {
+    for (const id of MODAL_IDS) {
         let node = document.getElementById(id);
         if (!node) continue;
         if (node.dataset.kfStopBound) {
@@ -452,6 +457,22 @@ function openFailureDecision(message, actions) {
 
 window.STKarmaFlip = window.STKarmaFlip || {};
 window.STKarmaFlip.openFailureDecision = openFailureDecision;
+
+function showToast(message, type = 'info', timeout = 2800) {
+    const layer = $('#kf-toast-layer');
+    if (!layer.length) {
+        return console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
+    }
+    const item = $(`<div class="kf-toast kf-toast-${esc(type)} brush-stroke"></div>`).text(message || '');
+    layer.append(item);
+    requestAnimationFrame(() => item.addClass('show'));
+    window.setTimeout(() => {
+        item.removeClass('show');
+        window.setTimeout(() => item.remove(), 220);
+    }, timeout);
+}
+
+window.STKarmaFlip.showToast = showToast;
 
 function isMobileWidth() {
     return window.matchMedia?.('(max-width: 650px)')?.matches || window.innerWidth <= 650;
@@ -492,6 +513,31 @@ function openGroupPicker(state, rerender) {
         state.activePoolId = pool.id;
         rerender();
     });
+}
+
+function openRenamePoolModal(state) {
+    const pool = getActivePool(state);
+    $('#kf-rename-pool-input').val(pool.name || '');
+    $('#rename-pool-modal').addClass('show');
+    window.setTimeout(() => $('#kf-rename-pool-input').trigger('focus').trigger('select'), 0);
+}
+
+function closeRenamePoolModal() {
+    closeModal('rename-pool-modal');
+}
+
+function renameActivePool(state, rerender, setStatus) {
+    const pool = getActivePool(state);
+    const name = String($('#kf-rename-pool-input').val() || '').trim();
+    if (!name) {
+        showToast('组合名称不能为空', 'warning');
+        return;
+    }
+    pool.name = name;
+    saveState(state);
+    closeRenamePoolModal();
+    rerender();
+    setStatus('组合名称已修改');
 }
 
 function openEntryNamePicker(state, row, input, rerender) {
@@ -722,11 +768,13 @@ function bindEntryDragSort(state, rerender, setStatus) {
 }
 
 function bind(state, rerender, setStatus) {
-    $('#group-select-display').off('dblclick.kf keydown.kf').on('dblclick.kf', function () {
+    $('#group-select-display').prop('readonly', true).off('click.kf keydown.kf').on('click.kf', function () {
         openGroupPicker(state, rerender);
     }).on('keydown.kf', function (event) {
-        if (event.key === 'Enter') $('#kf-btn-save-pool').trigger('click');
-        if (event.key === 'Escape') rerender();
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openGroupPicker(state, rerender);
+        }
     });
     $('#group-select-arrow').off('pointerdown.kf click.kf').on('pointerdown.kf', function (event) {
         event.preventDefault();
@@ -762,12 +810,7 @@ function bind(state, rerender, setStatus) {
         saveState(state);
         rerender();
     });
-    $('#kf-btn-save-pool').off('click.kf').on('click.kf', () => {
-        syncPoolFromControls(state);
-        saveState(state);
-        rerender();
-        setStatus('组合已保存');
-    });
+    $('#kf-btn-rename-pool').off('click.kf').on('click.kf', () => openRenamePoolModal(state));
     $('#kf-btn-delete-pool').off('click.kf').on('click.kf', () => {
         if (state.pools.length <= 1) return setStatus('至少保留一个组合');
         state.pools = state.pools.filter(p => p.id !== state.activePoolId);
@@ -866,8 +909,9 @@ function bind(state, rerender, setStatus) {
             rerender();
             setStatus(`已获取 ${models.length} 个模型`);
         } catch (error) {
-            setStatus(error?.message || '获取模型失败');
-            alert(error?.message || '获取模型失败');
+            const message = error?.message || '获取模型失败';
+            setStatus(message);
+            showToast(message, 'error');
         }
     });
 
@@ -897,6 +941,12 @@ function bind(state, rerender, setStatus) {
     $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#theme-modal').addClass('show'));
     $('#kf-theme-close').off('click.kf').on('click.kf', () => closeModal('theme-modal'));
     $('#kf-settings-close').off('click.kf').on('click.kf', () => closeModal('settings-modal'));
+    $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
+    $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));
+    $('#kf-rename-pool-input').off('keydown.kf').on('keydown.kf', function (event) {
+        if (event.key === 'Enter') renameActivePool(state, rerender, setStatus);
+        if (event.key === 'Escape') closeRenamePoolModal();
+    });
     $('#kf-dropdown-close').off('click.kf').on('click.kf', () => closeDropdown());
     $('.modal-overlay').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf', function (event) {
@@ -954,6 +1004,9 @@ export async function initUI(setStatus) {
     };
 
     rerender();
+    $(window).off('STKarmaFlip:logs-updated.kf').on('STKarmaFlip:logs-updated.kf', () => {
+        if ($('#logModal').hasClass('show')) renderLogs(state);
+    });
     setTimeout(enableStatePersistence, 800);
     setStatus('已加载');
 }

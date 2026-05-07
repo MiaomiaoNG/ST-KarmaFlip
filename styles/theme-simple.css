@@ -194,3 +194,22 @@
 .modal-overlay[data-brush="simple"] .kf-square-check input:checked + .kf-square-box::after {
     border-color: currentColor !important;
 }
+
+.kf-toast-layer[data-brush="simple"] .kf-toast.brush-stroke::before,
+.kf-toast-layer[data-brush="simple"] .kf-toast.brush-stroke::after {
+    display: none;
+}
+
+.kf-toast-layer[data-brush="simple"] .kf-toast {
+    border: 1px solid var(--underline-color, #617b9b) !important;
+    border-radius: 6px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+}
+
+.kf-toast-layer[data-brush="simple"] .kf-toast-error {
+    border-color: #c94f4f !important;
+}
+
+.kf-toast-layer[data-brush="simple"] .kf-toast-warning {
+    border-color: #b98218 !important;
+}

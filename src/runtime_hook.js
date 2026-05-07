@@ -3,27 +3,93 @@ import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMem
 
 let fetchPatched = false;
 let originalFetch = null;
-let triggerReason = 'send';
+let activeGrant = null;
+let externalSendBlockUntil = 0;
+const GRANT_TTL_MS = 2500;
+const EXTERNAL_SEND_BLOCK_MS = 2500;
+const EXTERNAL_SEND_EVENTS = ['phone:sendToChat', 'STKarmaFlip:external-send'];
 
 function toast(type, message) {
     if (window.toastr?.[type]) window.toastr[type](message);
     else console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
 }
 
-function setReason(reason) {
-    triggerReason = reason;
+function isTrustedUserEvent(event) {
+    return !!event && event.isTrusted === true;
+}
+
+function isPlainEnterSend(event) {
+    if (!event || event.key !== 'Enter') return false;
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return false;
+    const target = event.target;
+    return !!target && (target.id === 'send_textarea' || target.closest?.('#send_textarea'));
+}
+
+function grantPrimaryGeneration(reason, event) {
+    if (!isTrustedUserEvent(event)) return;
+    activeGrant = {
+        reason,
+        expiresAt: Date.now() + GRANT_TTL_MS,
+        consumed: false,
+    };
+}
+
+function markExternalSend() {
+    externalSendBlockUntil = Date.now() + EXTERNAL_SEND_BLOCK_MS;
+    activeGrant = null;
+}
+
+function consumeGrant() {
+    const now = Date.now();
+    if (now < externalSendBlockUntil) {
+        activeGrant = null;
+        return null;
+    }
+    if (!activeGrant || activeGrant.consumed || activeGrant.expiresAt < now) {
+        activeGrant = null;
+        return null;
+    }
+    activeGrant.consumed = true;
+    const reason = activeGrant.reason;
+    activeGrant = null;
+    return reason;
 }
 
 function bindTriggerEvents() {
-    $(document).off('click.karmaFlipSend', '#send_but').on('click.karmaFlipSend', '#send_but', () => setReason('send'));
-    $(document).off('click.karmaFlipSwipe', '.swipe_left, .swipe_right').on('click.karmaFlipSwipe', '.swipe_left, .swipe_right', () => setReason('swipe'));
-    $(document).off('click.karmaFlipRegen', '#option_regenerate').on('click.karmaFlipRegen', '#option_regenerate', () => setReason('regenerate'));
-    $(document).off('click.karmaFlipContinue', '#option_continue').on('click.karmaFlipContinue', '#option_continue', () => setReason('continue'));
+    $(document).off('click.karmaFlipSend', '#send_but').on('click.karmaFlipSend', '#send_but', event => grantPrimaryGeneration('send', event.originalEvent || event));
+    $(document).off('click.karmaFlipSwipe', '.swipe_left, .swipe_right').on('click.karmaFlipSwipe', '.swipe_left, .swipe_right', event => grantPrimaryGeneration('swipe', event.originalEvent || event));
+    $(document).off('click.karmaFlipRegen', '#option_regenerate').on('click.karmaFlipRegen', '#option_regenerate', event => grantPrimaryGeneration('regenerate', event.originalEvent || event));
+    $(document).off('click.karmaFlipContinue', '#option_continue').on('click.karmaFlipContinue', '#option_continue', event => grantPrimaryGeneration('continue', event.originalEvent || event));
+    $(document).off('keydown.karmaFlipSend', '#send_textarea').on('keydown.karmaFlipSend', '#send_textarea', event => {
+        const original = event.originalEvent || event;
+        if (isPlainEnterSend(original)) grantPrimaryGeneration('send', original);
+    });
+    for (const eventName of EXTERNAL_SEND_EVENTS) {
+        window.removeEventListener(eventName, markExternalSend, true);
+        window.addEventListener(eventName, markExternalSend, true);
+    }
 }
 
 function isChatRequest(url) {
     const target = String(url || '');
     return target.includes('/api/backends/chat-completions/generate') || target.includes('/v1/chat/completions');
+}
+
+function parseBody(body) {
+    try {
+        return JSON.parse(body);
+    } catch {
+        return null;
+    }
+}
+
+function isBackgroundRequest(payload) {
+    if (!payload || typeof payload !== 'object') return true;
+    return payload.quiet === true ||
+        payload.skip_save === true ||
+        payload.dryRun === true ||
+        payload.dry_run === true ||
+        payload.isVirtualPhoneApiCall === true;
 }
 
 function buildRequest(input, init, originalBody, member) {
@@ -77,7 +143,7 @@ function secondFailureMessage(member) {
     return `[${member.name || '未命名'}] [${member.model || '未填模型'}]再次请求失败，已暂停，是否使用下一个API？`;
 }
 
-async function sendWithMember(input, init, originalBody, state, pool, picked, member, requestKey, onStatus) {
+async function sendWithMember(input, init, originalBody, state, pool, picked, member, requestKey, triggerReason, onStatus) {
     const request = buildRequest(input, init, originalBody, member);
     if (typeof onStatus === 'function') onStatus(`命中: ${member.name} | ${member.model || '未填模型'} | ${triggerReason}`);
     try {
@@ -107,11 +173,17 @@ export function installRuntimeHook(onStatus) {
         const url = typeof input === 'string' ? input : input?.url;
         if (!isChatRequest(url) || !init?.body || typeof init.body !== 'string') return originalFetch(input, init);
 
+        const originalBody = String(init.body);
+        const payload = parseBody(originalBody);
+        if (isBackgroundRequest(payload)) return originalFetch(input, init);
+
+        const triggerReason = consumeGrant();
+        if (!triggerReason) return originalFetch(input, init);
+
         const state = loadState();
         const pool = getActivePool(state);
         if (state.enabled === false || !Array.isArray(pool.entries) || !pool.entries.length) return originalFetch(input, init);
 
-        const originalBody = String(init.body);
         const blockedIds = new Set();
         let lastError = null;
         let lastResponse = null;
@@ -126,7 +198,7 @@ export function installRuntimeHook(onStatus) {
             let result = null;
 
             for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
-                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|${retryAttempt}`, onStatus);
+                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|${retryAttempt}`, triggerReason, onStatus);
                 if (result.ok) {
                     saveStateAsync(state);
                     return result.response;
@@ -159,7 +231,7 @@ export function installRuntimeHook(onStatus) {
                 continue;
             }
             if (decision === 'confirm') {
-                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|confirm`, onStatus);
+                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|confirm`, triggerReason, onStatus);
                 if (result.ok) {
                     saveStateAsync(state);
                     return result.response;
