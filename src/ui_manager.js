@@ -115,6 +115,7 @@ function addEntry(pool) {
         weight: 1,
         pityTurns: 0,
         cooldownTurns: 0,
+        collapsed: false,
         modelOptions: [],
     });
 }
@@ -156,6 +157,25 @@ function getApiPresetNames(state) {
     return savedApiEntries(state).map(entry => entry.name).filter(Boolean);
 }
 
+function deleteSavedApiEntry(state, target) {
+    const targetId = String(target?.id || '');
+    const targetName = String(target?.name || '').trim();
+    if (!targetId && !targetName) return false;
+    const before = Array.isArray(state.apiPresets) ? state.apiPresets.length : 0;
+    state.apiPresets = (state.apiPresets || []).filter(preset => {
+        if (targetId && preset.id === targetId) return false;
+        return !(targetName && String(preset.name || '').trim() === targetName);
+    });
+    for (const pool of state.pools || []) {
+        for (const entry of pool.entries || []) {
+            if ((targetId && entry.presetId === targetId) || (targetName && String(entry.name || '').trim() === targetName)) {
+                entry.presetId = '';
+            }
+        }
+    }
+    return state.apiPresets.length !== before;
+}
+
 function getModelOptions(entry) {
     const values = new Set();
     if (entry.model) values.add(entry.model);
@@ -165,31 +185,26 @@ function getModelOptions(entry) {
 
 function applyEntryPreset(target, preset) {
     if (!preset) return;
+    target.presetId = preset.id || target.presetId || '';
+    target.enabled = preset.enabled !== false;
     target.name = preset.name || target.name;
     target.apiUrl = preset.apiUrl || '';
     target.key = preset.key || '';
     target.provider = preset.provider || 'open';
     target.model = preset.model || '';
-    target.fixedRuns = Math.max(1, toInt(preset.fixedRuns || 1));
-    target.weight = toInt(preset.weight);
-    target.pityTurns = toInt(preset.pityTurns);
-    target.cooldownTurns = toInt(preset.cooldownTurns);
     target.modelOptions = Array.isArray(preset.modelOptions) ? [...preset.modelOptions] : [];
 }
 
 function copyEntryForPreset(entry) {
     return {
         id: `preset_${crypto.randomUUID()}`,
+        presetId: '',
         enabled: entry.enabled !== false,
         name: String(entry.name || ''),
         apiUrl: String(entry.apiUrl || ''),
         key: String(entry.key || ''),
         provider: String(entry.provider || 'open'),
         model: String(entry.model || ''),
-        fixedRuns: Math.max(1, toInt(entry.fixedRuns || 1)),
-        weight: toInt(entry.weight),
-        pityTurns: toInt(entry.pityTurns),
-        cooldownTurns: toInt(entry.cooldownTurns),
         modelOptions: Array.isArray(entry.modelOptions) ? [...entry.modelOptions] : [],
     };
 }
@@ -198,14 +213,21 @@ function saveApiPreset(state, entry) {
     if (!entry?.name) return;
     if (!Array.isArray(state.apiPresets)) state.apiPresets = [];
     const name = String(entry.name || '').trim();
+    const previousName = String(entry._previousPresetName || '').trim();
     const preset = copyEntryForPreset({ ...entry, name });
-    const index = state.apiPresets.findIndex(item => String(item.name || '').trim() === name);
+    const presetId = String(entry.presetId || '').trim();
+    let index = presetId ? state.apiPresets.findIndex(item => item.id === presetId) : -1;
+    if (index < 0) index = state.apiPresets.findIndex(item => item.id === entry.id);
+    if (index < 0 && previousName) index = state.apiPresets.findIndex(item => String(item.name || '').trim() === previousName);
+    if (index < 0) index = state.apiPresets.findIndex(item => String(item.name || '').trim() === name);
     if (index >= 0) {
         preset.id = state.apiPresets[index].id || preset.id;
         state.apiPresets[index] = preset;
     } else {
         state.apiPresets.push(preset);
     }
+    entry.presetId = preset.id;
+    delete entry._previousPresetName;
 }
 
 function renderPool(state) {
@@ -247,6 +269,37 @@ function providerOptions() {
     ];
 }
 
+function fanIcon(expanded) {
+    const svgProps = 'class="kf-fan-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+    return expanded
+        ? `<svg ${svgProps}>
+            <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/>
+            <path d="M 4 10 A 10.5 10.5 0 0 1 20 10"/>
+            <path d="M 8 15 A 4.5 4.5 0 0 1 16 15"/>
+            <line x1="12" y1="19" x2="4" y2="10"/>
+            <line x1="12" y1="19" x2="20" y2="10"/>
+            <line x1="12" y1="19" x2="12" y2="6.5"/>
+            <line x1="12" y1="19" x2="7.5" y2="8.5"/>
+            <line x1="12" y1="19" x2="16.5" y2="8.5"/>
+        </svg>`
+        : `<svg ${svgProps}>
+            <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/>
+            <path d="M 12 19 L 9 6 L 10.5 4.5 L 12 6 L 13.5 4.5 L 15 6 Z"/>
+            <line x1="12" y1="19" x2="12" y2="6"/>
+            <path d="M 10 13 C 11 13.5 13 13.5 14 13"/>
+        </svg>`;
+}
+
+function trashIcon() {
+    return `<svg class="kf-trash-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7 H20"/>
+        <path d="M10 7 V5 H14 V7"/>
+        <path d="M7 7 L8 20 H16 L17 7"/>
+        <path d="M10 11 V17"/>
+        <path d="M14 11 V17"/>
+    </svg>`;
+}
+
 function renderEntries(state) {
     const pool = getActivePool(state);
     const root = $('#kf-entry-list').empty();
@@ -254,12 +307,16 @@ function renderEntries(state) {
 
     for (const entry of pool.entries || []) {
         const enabledChecked = entry.enabled !== false ? 'checked' : '';
+        const collapsed = !!entry.collapsed;
+        const collapsedClass = collapsed ? ' collapsed' : '';
+        const collapseIcon = fanIcon(!collapsed);
+        const collapseLabel = collapsed ? '展开 API 条目' : '折叠 API 条目';
         const nameHasOptions = apiPresetNames.some(name => name !== entry.name);
         const modelHasOptions = getModelOptions(entry).some(model => model !== entry.model);
         const nameArrow = nameHasOptions ? '<button class="dropdown-arrow kf-entry-name-arrow" type="button">▼</button>' : '';
         const modelArrow = modelHasOptions ? '<button class="dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
         root.append(`
-            <div class="entry-block" data-id="${esc(entry.id)}">
+            <div class="entry-block${collapsedClass}" data-id="${esc(entry.id)}">
                 <div class="row kf-entry-row-top">
                     <label class="marker-checkbox kf-entry-enabled-wrap">
                         <input type="checkbox" class="kf-entry-enabled" ${enabledChecked}>
@@ -267,13 +324,14 @@ function renderEntries(state) {
                         <span class="text brush-stroke">启用</span>
                     </label>
                     <div class="input-wrapper kf-entry-name-wrap"><span class="label">名称</span><input type="text" class="inner-input dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
-                    <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">×</button>
+                    <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
+                    <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
                 </div>
-                <div class="row">
+                <div class="row kf-entry-details">
                     <div class="input-wrapper flex-7"><span class="label">URL</span><input type="text" class="inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
                     ${providerSelect(entry)}
                 </div>
-                <div class="row">
+                <div class="row kf-entry-details">
                     <div class="input-wrapper flex-1 kf-entry-key-wrap">
                         <span class="label">KEY</span>
                         <input type="password" class="inner-input kf-entry-key" value="${esc(entry.key)}">
@@ -283,14 +341,14 @@ function renderEntries(state) {
                     </div>
                     <button class="marker-btn brush-stroke kf-test-api" type="button">测试</button>
                 </div>
-                <div class="row">
+                <div class="row kf-entry-details">
                     <div class="input-wrapper flex-1"><span class="label">模型</span><input type="text" class="inner-input dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
                     <button class="marker-btn brush-stroke kf-fetch-models">拉取模型</button>
                 </div>
-                <div class="row fixed-only">
+                <div class="row fixed-only kf-entry-details">
                     <div class="input-wrapper flex-1"><span class="label">运行次数</span><input type="number" min="1" class="inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
                 </div>
-                <div class="row random-only">
+                <div class="row random-only kf-entry-details">
                     <div class="input-wrapper flex-1"><span class="label">权重</span><input type="number" min="0" class="inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
                     <div class="input-wrapper flex-1"><span class="label">保底回合</span><input type="number" min="0" class="inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
                     <div class="input-wrapper flex-1"><span class="label">冷却回合</span><input type="number" min="0" class="inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
@@ -350,8 +408,10 @@ function renderLogs(state, filter = currentLogFilter()) {
 }
 
 function syncEntryFromRow(entry, row) {
+    const previousName = String(entry.name || '').trim();
     entry.enabled = row.find('.kf-entry-enabled').prop('checked');
     entry.name = String(row.find('.kf-entry-name').val() || '');
+    if (!entry.presetId && previousName && previousName !== String(entry.name || '').trim()) entry._previousPresetName = previousName;
     entry.provider = String(row.find('.kf-entry-provider-display').data('provider') || 'open');
     entry.apiUrl = String(row.find('.kf-entry-url').val() || '');
     entry.key = String(row.find('.kf-entry-key').val() || '');
@@ -360,6 +420,7 @@ function syncEntryFromRow(entry, row) {
     entry.weight = toInt(row.find('.kf-entry-weight').val());
     entry.pityTurns = toInt(row.find('.kf-entry-pity').val());
     entry.cooldownTurns = toInt(row.find('.kf-entry-cooldown').val());
+    entry.collapsed = row.hasClass('collapsed');
 }
 
 function syncAllEntries(state) {
@@ -398,6 +459,21 @@ function syncAllFromControls(state) {
     syncAllEntries(state);
     syncThemeFromControls(state);
     syncFailureFromControls(state);
+}
+
+function saveThemeFromModal(state, setStatus) {
+    syncThemeFromControls(state);
+    applyTheme(state);
+    saveState(state);
+    closeModal('theme-modal');
+    setStatus('美化设置已保存');
+}
+
+function saveFailureSettingsFromModal(state, setStatus) {
+    syncFailureFromControls(state);
+    saveState(state);
+    closeModal('settings-modal');
+    setStatus('请求设置已保存');
 }
 
 function shouldEqualize(pool) {
@@ -491,8 +567,19 @@ function closeDropdown() {
     $('#kf-mobile-options').empty();
 }
 
-function openOptionPicker(input, options, title, onPick) {
-    const unique = [...new Set((options || []).map(x => String(x || '').trim()).filter(Boolean))];
+function normalizePickerOptions(options) {
+    const map = new Map();
+    for (const option of options || []) {
+        const item = typeof option === 'object' && option !== null
+            ? { value: String(option.value ?? option.name ?? '').trim(), label: String(option.label ?? option.name ?? option.value ?? '').trim(), item: option.item || option }
+            : { value: String(option || '').trim(), label: String(option || '').trim(), item: null };
+        if (item.value && !map.has(item.value)) map.set(item.value, item);
+    }
+    return [...map.values()];
+}
+
+function openOptionPicker(input, options, title, onPick, config = {}) {
+    const unique = normalizePickerOptions(options);
     if (!unique.length) return;
     const choose = (value) => {
         closeDropdown();
@@ -504,10 +591,25 @@ function openOptionPicker(input, options, title, onPick) {
     $('#kf-dropdown-title').text(title || '选择');
     const box = $('#kf-mobile-options').empty();
     for (const option of unique) {
-        box.append(`<div class="kf-mobile-option" data-value="${esc(option)}">${esc(option)}</div>`);
+        const deleteButton = config.deletable
+            ? '<button class="kf-option-delete marker-btn brush-stroke" type="button">删除</button>'
+            : '';
+        if (config.deletable) {
+            box.append(`<div class="kf-mobile-option-row" data-value="${esc(option.value)}">${deleteButton}<button class="kf-mobile-option kf-option-label kf-option-name" type="button" data-value="${esc(option.value)}">${esc(option.label)}</button></div>`);
+        } else {
+            box.append(`<div class="kf-mobile-option" data-value="${esc(option.value)}">${esc(option.label)}</div>`);
+        }
     }
+    box.data('kfOptions', unique);
     box.off('click.kfDrop').on('click.kfDrop', '.kf-mobile-option', function () {
         choose(String($(this).data('value')));
+    }).on('click.kfDrop', '.kf-option-delete', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = $(this).closest('.kf-mobile-option-row');
+        const value = String(row.data('value') || '');
+        const item = (box.data('kfOptions') || []).find(option => option.value === value)?.item || { name: value };
+        config.onDelete?.(item, value);
     });
     $('#dropdownModal').addClass('show');
 }
@@ -551,7 +653,7 @@ function renameActivePool(state, rerender, setStatus) {
 function openEntryNamePicker(state, row, input, rerender) {
     const pool = getActivePool(state);
     const entry = pool.entries.find(e => e.id === row.data('id'));
-    const options = getApiPresetNames(state);
+    const options = savedApiEntries(state).map(item => ({ value: item.name, label: item.name, item }));
     openOptionPicker(input, options, '选择 API 设定', (name) => {
         if (!entry) return;
         const preset = findSavedApiEntry(state, name, entry.id);
@@ -561,6 +663,15 @@ function openEntryNamePicker(state, row, input, rerender) {
         } else {
             entry.name = name;
         }
+    }, {
+        deletable: true,
+        onDelete: (item) => {
+            const deleted = deleteSavedApiEntry(state, item);
+            if (!deleted) return showToast('该条目未保存为 API 预设，无法从预设列表删除', 'warning');
+            saveState(state);
+            showToast('API 条目已删除', 'info');
+            openEntryNamePicker(state, row, input, rerender);
+        },
     });
 }
 
@@ -938,6 +1049,9 @@ function bind(state, rerender, setStatus) {
             applyEntryPreset(entry, preset);
             rerender();
         }
+        saveApiPreset(state, entry);
+        saveState(state);
+        setStatus('API条目名称已保存');
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-name', function () {
         const row = $(this).closest('.entry-block');
@@ -986,6 +1100,17 @@ function bind(state, rerender, setStatus) {
         button.attr('aria-label', reveal ? '隐藏 KEY' : '显示 KEY');
         button.attr('title', reveal ? '隐藏 KEY' : '显示 KEY');
         button.html(`<i class="fa-regular ${reveal ? 'fa-eye-slash' : 'fa-eye'}"></i>`);
+    });
+    $('#kf-entry-list').on('click.kf', '.kf-collapse', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const pool = getActivePool(state);
+        const row = $(this).closest('.entry-block');
+        const entry = pool.entries.find(e => e.id === row.data('id'));
+        if (!entry) return;
+        syncEntryFromRow(entry, row);
+        entry.collapsed = !entry.collapsed;
+        rerender();
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);
@@ -1042,6 +1167,7 @@ function bind(state, rerender, setStatus) {
 
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#settings-modal').addClass('show'));
     $('#kf-btn-save').off('click.kf').on('click.kf', () => {
+        const saveButton = $('#kf-btn-save');
         syncAllFromControls(state);
         const pool = getActivePool(state);
         for (const entry of pool.entries || []) saveApiPreset(state, entry);
@@ -1051,6 +1177,12 @@ function bind(state, rerender, setStatus) {
         }
         saveState(state);
         rerender();
+        $('#kf-btn-save').text('保存完成');
+        window.clearTimeout(saveButton.data('kfSaveDoneTimer'));
+        const timer = window.setTimeout(() => {
+            $('#kf-btn-save').text('保存');
+        }, 900);
+        $('#kf-btn-save').data('kfSaveDoneTimer', timer);
         setStatus('已保存');
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
@@ -1064,8 +1196,10 @@ function bind(state, rerender, setStatus) {
         renderLogs(state, String($(this).data('filter') || 'all'));
     });
     $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#theme-modal').addClass('show'));
-    $('#kf-theme-close').off('click.kf').on('click.kf', () => closeModal('theme-modal'));
-    $('#kf-settings-close').off('click.kf').on('click.kf', () => closeModal('settings-modal'));
+    $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeModal('theme-modal'));
+    $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('settings-modal'));
+    $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
+    $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, setStatus));
     $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('api-test-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
     $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));

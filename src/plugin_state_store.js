@@ -63,6 +63,7 @@ function extensionSettings() {
 function normalizeEntry(entry) {
     const e = { ...(entry || {}) };
     e.id = String(e.id || `e_${crypto.randomUUID()}`);
+    e.presetId = e.presetId ? String(e.presetId) : '';
     e.enabled = e.enabled !== false;
     e.name = String(e.name || 'New API');
     e.apiUrl = String(e.apiUrl || e.url || '');
@@ -73,6 +74,7 @@ function normalizeEntry(entry) {
     e.weight = toInt(e.weight || 0);
     e.pityTurns = toInt(e.pityTurns || 0);
     e.cooldownTurns = toInt(e.cooldownTurns || 0);
+    e.collapsed = !!e.collapsed;
     delete e.disabledByFailure;
     e.modelOptions = Array.isArray(e.modelOptions) ? e.modelOptions.map(x => String(x)).filter(Boolean) : [];
     return e;

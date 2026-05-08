@@ -1,161 +1,72 @@
-import { getActivePool, loadState, pushLog, saveStateAsync } from './plugin_state_store.js';
+import { getActivePool, loadState, pushLog, saveStateAsync, toInt } from './plugin_state_store.js';
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 
-let fetchPatched = false;
+let chatSettingsBound = false;
+let fetchRetryBound = false;
+let bindRetryTimer = null;
 let originalFetch = null;
-let activeGrant = null;
-let externalSendBlockUntil = 0;
-let generationEventsBound = false;
-let generationBindRetryTimer = null;
-const GRANT_TTL_MS = 2500;
-const EXTERNAL_SEND_BLOCK_MS = 2500;
-const EXTERNAL_SEND_EVENTS = ['phone:sendToChat', 'STKarmaFlip:external-send'];
+let pendingRequest = null;
 
-function toast(type, message) {
-    if (window.toastr?.[type]) window.toastr[type](message);
-    else console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
+const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
+
+function normalizeBaseUrl(apiUrl) {
+    return String(apiUrl || '').trim().replace(/\/+$/, '');
 }
 
-function grantPrimaryGeneration(reason) {
-    activeGrant = {
-        reason,
-        expiresAt: Date.now() + GRANT_TTL_MS,
-        consumed: false,
-    };
+function context() {
+    return window.SillyTavern?.getContext?.() || {};
 }
 
-function markExternalSend() {
-    externalSendBlockUntil = Date.now() + EXTERNAL_SEND_BLOCK_MS;
-    activeGrant = null;
+function generationType(generateData) {
+    return String(generateData?.type || 'normal');
 }
 
-function consumeGrant() {
-    const now = Date.now();
-    if (now < externalSendBlockUntil) {
-        activeGrant = null;
-        return null;
-    }
-    if (!activeGrant || activeGrant.consumed || activeGrant.expiresAt < now) {
-        activeGrant = null;
-        return null;
-    }
-    activeGrant.consumed = true;
-    const reason = activeGrant.reason;
-    activeGrant = null;
-    return reason;
+function isBackgroundRequest(generateData) {
+    if (!generateData || typeof generateData !== 'object') return true;
+    return generateData.quiet === true ||
+        generateData.skip_save === true ||
+        generateData.dryRun === true ||
+        generateData.dry_run === true ||
+        generateData.isVirtualPhoneApiCall === true;
 }
 
-function peekGrant() {
-    const now = Date.now();
-    if (now < externalSendBlockUntil) {
-        activeGrant = null;
-        return null;
-    }
-    if (!activeGrant || activeGrant.consumed || activeGrant.expiresAt < now) {
-        activeGrant = null;
-        return null;
-    }
-    return activeGrant.reason;
-}
-
-function generationReason(type) {
-    const value = typeof type === 'object' && type !== null
-        ? String(type.type || type.reason || 'send')
-        : String(type || 'send');
-    if (value === 'normal') return 'send';
-    return value;
-}
-
-function isPrimaryGeneration(type, details, dryRun) {
-    const payload = typeof type === 'object' && type !== null ? type : details;
-    if (dryRun === true || payload?.dryRun === true || payload?.dry_run === true) return false;
-    if (payload?.automatic_trigger === true) return false;
-    if (payload?.quiet_prompt || payload?.quietImage || payload?.quiet === true) return false;
-    const value = typeof type === 'object' && type !== null
-        ? String(type.type || type.reason || 'send')
-        : String(type || 'send');
-    return !['quiet', 'impersonate'].includes(value);
-}
-
-function bindGenerationEvents() {
-    if (generationEventsBound) return;
-    if (generationBindRetryTimer) {
-        clearTimeout(generationBindRetryTimer);
-        generationBindRetryTimer = null;
-    }
-    const context = window.SillyTavern?.getContext?.() || {};
-    const eventSource = context.eventSource;
-    const eventTypes = context.event_types || {};
-    const generationStarted = eventTypes.GENERATION_STARTED;
-    if (eventSource?.on && generationStarted) {
-        eventSource.on(generationStarted, (type, details, dryRun) => {
-            if (isPrimaryGeneration(type, details, dryRun)) grantPrimaryGeneration(generationReason(type));
-            else activeGrant = null;
-        });
-        generationEventsBound = true;
-    }
-    if (!generationEventsBound) {
-        generationBindRetryTimer = setTimeout(bindGenerationEvents, 1000);
-    }
-    for (const eventName of EXTERNAL_SEND_EVENTS) {
-        window.removeEventListener(eventName, markExternalSend, true);
-        window.addEventListener(eventName, markExternalSend, true);
-    }
-}
-
-function isChatRequest(url) {
-    const target = String(url || '');
-    return target.includes('/api/backends/chat-completions/generate');
-}
-
-function parseBody(body) {
-    try {
-        return JSON.parse(body);
-    } catch {
-        return null;
-    }
-}
-
-function isBackgroundRequest(payload) {
-    if (!payload || typeof payload !== 'object') return true;
-    return payload.quiet === true ||
-        payload.skip_save === true ||
-        payload.dryRun === true ||
-        payload.dry_run === true ||
-        payload.isVirtualPhoneApiCall === true;
-}
-
-function buildRequest(input, init, originalBody, member) {
-    if (!['open', 'openai', 'deepseek'].includes(member.provider || 'open')) {
-        throw new Error(`暂不支持接口类型：${member.provider || 'unknown'}`);
-    }
-    const payload = JSON.parse(originalBody);
-    payload.chat_completion_source = 'openai';
-    payload.reverse_proxy = String(member.apiUrl || '').replace(/\/+$/, '');
-    payload.proxy_password = member.key;
-    payload.model = member.model;
-    return { input, init: { ...init, body: JSON.stringify(payload) } };
-}
-
-function chooseRequest(state, pool, blockedIds = new Set()) {
-    const originalEntries = pool.entries;
-    pool.entries = originalEntries.filter(e => !blockedIds.has(e.id));
-    try {
-        return pickMember(state, pool);
-    } finally {
-        pool.entries = originalEntries;
-    }
-}
-
-function validRuntimeEntries(pool, mode) {
-    return (pool.entries || []).filter(entry =>
-        entry &&
+function canUseEntry(entry, mode) {
+    return entry &&
         entry.enabled !== false &&
         entry.apiUrl &&
         entry.key &&
         entry.model &&
-        (mode !== 'random' || Number(entry.weight) > 0)
-    );
+        (mode !== 'random' || toInt(entry.weight) > 0);
+}
+
+function validRuntimeEntries(pool) {
+    return (pool.entries || []).filter(entry => canUseEntry(entry, pool.mode));
+}
+
+function isTextGeneration(generateData) {
+    return TEXT_GENERATION_TYPES.has(generationType(generateData));
+}
+
+function isGenerateFetch(input) {
+    const url = typeof input === 'string' ? input : input?.url;
+    return String(url || '').includes('/api/backends/chat-completions/generate');
+}
+
+function patchGenerateData(generateData, member) {
+    generateData.chat_completion_source = 'openai';
+    generateData.reverse_proxy = normalizeBaseUrl(member.apiUrl);
+    generateData.proxy_password = member.key;
+    generateData.model = member.model;
+}
+
+function patchBodyForMember(body, member) {
+    const payload = JSON.parse(String(body));
+    patchGenerateData(payload, member);
+    return JSON.stringify(payload);
+}
+
+function sameMember(a, b) {
+    return String(a?.id || '') === String(b?.id || '');
 }
 
 function retryLimit(state) {
@@ -163,20 +74,8 @@ function retryLimit(state) {
     return Number.isFinite(count) ? Math.max(1, Math.round(count)) : 3;
 }
 
-function isUserAbortError(error, init) {
-    if (init?.signal?.aborted) return true;
-    if (error?.name === 'AbortError') return true;
-    const message = String(error?.message || error || '').toLowerCase();
-    return /\b(abort|aborted|cancelled|canceled)\b/.test(message);
-}
-
-async function askFailureDecision(message, actions, fallback) {
-    const opener = window.STKarmaFlip?.openFailureDecision;
-    if (typeof opener !== 'function') {
-        toast('warning', message);
-        return fallback;
-    }
-    return opener(message, actions);
+function memberLabel(member) {
+    return `${member?.name || '未命名'} | ${member?.model || '未填模型'}`;
 }
 
 function failureMessage(member, count) {
@@ -191,145 +90,289 @@ function onlyActiveFailureMessage() {
     return '当前组合唯一启动API请求失败，无法自动更换，请检查';
 }
 
-async function sendWithMember(input, init, originalBody, state, pool, picked, member, requestKey, triggerReason, onStatus) {
-    const request = buildRequest(input, init, originalBody, member);
-    if (typeof onStatus === 'function') onStatus(`命中: ${member.name} | ${member.model || '未填模型'} | ${triggerReason}`);
+function isUserAbortError(error, init) {
+    if (init?.signal?.aborted) return true;
+    if (error?.name === 'AbortError') return true;
+    const message = String(error?.message || error || '').toLowerCase();
+    return /\b(abort|aborted|cancelled|canceled)\b/.test(message);
+}
+
+function toast(type, message) {
+    if (window.toastr?.[type]) window.toastr[type](message);
+    else console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
+}
+
+async function askFailureDecision(message, actions, fallback) {
+    const opener = window.STKarmaFlip?.openFailureDecision;
+    if (typeof opener !== 'function') {
+        toast('warning', message);
+        return fallback;
+    }
+    return opener(message, actions);
+}
+
+async function responseText(response) {
     try {
-        const response = await originalFetch(request.input, request.init);
-        if (response.ok) {
-            markRequestSuccess(state, pool, member, requestKey);
-            pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
-            return { ok: true, response };
-        }
-        const count = markRequestFailure(state, member);
-        pushLog(state, { event: 'request', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, status: response.status });
-        return { ok: false, response, count };
-    } catch (error) {
-        if (isUserAbortError(error, request.init)) return { ok: false, error, aborted: true };
-        const count = markRequestFailure(state, member);
-        pushLog(state, { event: 'request-error', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, error: String(error?.message || error) });
-        return { ok: false, error, count };
+        return await response.clone().text();
+    } catch {
+        return '';
     }
 }
 
-export function installRuntimeHook(onStatus) {
-    bindGenerationEvents();
-    if (fetchPatched) return;
-    originalFetch = window.fetch.bind(window);
+function parseJson(text) {
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
 
-    window.fetch = async function karmaFlipFetch(input, init) {
-        const state = loadState();
-        if (state.enabled === false) return originalFetch(input, init);
+function businessErrorMessage(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    const error = payload.error || payload.response?.error;
+    if (error) {
+        if (typeof error === 'string') return error;
+        if (typeof error?.message === 'string') return error.message;
+        try {
+            return JSON.stringify(error);
+        } catch {
+            return String(error);
+        }
+    }
+    if (payload.quota_error === true) return 'quota_error';
+    if (payload.success === false || payload.ok === false || payload.result === false) {
+        return payload.message || payload.reason || '业务状态返回失败';
+    }
+    if (typeof payload.message === 'string' && /unauthorized|invalid|error|failed|forbidden|quota/i.test(payload.message)) {
+        return payload.message;
+    }
+    return '';
+}
 
-        const url = typeof input === 'string' ? input : input?.url;
-        if (!isChatRequest(url) || !init?.body || typeof init.body !== 'string') return originalFetch(input, init);
+async function responseBusinessFailure(response) {
+    if (!response.ok) {
+        return { failed: true, detail: await responseText(response) };
+    }
+    const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) return { failed: false, detail: '' };
+    const text = await responseText(response);
+    const payload = parseJson(text);
+    const message = businessErrorMessage(payload);
+    return message ? { failed: true, detail: message || text } : { failed: false, detail: '' };
+}
 
-        if (!peekGrant()) return originalFetch(input, init);
+function queueLog(state, entry) {
+    setTimeout(() => {
+        pushLog(state, entry);
+        saveStateAsync(state);
+    }, 0);
+}
 
-        const originalBody = String(init.body);
-        const payload = parseBody(originalBody);
-        if (isBackgroundRequest(payload)) return originalFetch(input, init);
+function chooseRequest(state, pool, blockedIds = new Set()) {
+    const originalEntries = pool.entries;
+    pool.entries = originalEntries.filter(e => !blockedIds.has(e.id));
+    try {
+        return pickMember(state, pool);
+    } finally {
+        pool.entries = originalEntries;
+    }
+}
 
-        const triggerReason = consumeGrant();
-        if (!triggerReason) return originalFetch(input, init);
+function makeRetryInit(init, member) {
+    return {
+        ...init,
+        body: patchBodyForMember(init.body, member),
+    };
+}
 
-        const pool = getActivePool(state);
-        if (state.enabled === false || !Array.isArray(pool.entries) || !pool.entries.length) return originalFetch(input, init);
+function startPendingRequest(state, pool, picked, member, type) {
+    pendingRequest = {
+        id: crypto.randomUUID(),
+        state,
+        pool,
+        picked,
+        member,
+        type,
+        expiresAt: Date.now() + 30000,
+    };
+}
 
-        const blockedIds = new Set();
-        let lastError = null;
-        let lastResponse = null;
-        const maxFailures = retryLimit(state);
-        const alertEnabled = !!state.failure?.alertEnabled;
-        const availableEntries = validRuntimeEntries(pool, pool.mode);
-        const onlyOneAvailable = availableEntries.length === 1;
-        const maxSwitches = Math.max(1, availableEntries.length);
+function consumePendingRequest() {
+    const pending = pendingRequest;
+    pendingRequest = null;
+    if (!pending || pending.expiresAt < Date.now()) return null;
+    return pending;
+}
 
-        for (let switchAttempt = 0; switchAttempt < maxSwitches; switchAttempt += 1) {
-            const picked = chooseRequest(state, pool, blockedIds);
-            if (!picked?.member) break;
-            const member = picked.member;
-            let result = null;
-            pushLog(state, { event: 'pick', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
+async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
+    const requestInit = retryIndex === 0 && sameMember(member, pending.member)
+        ? init
+        : makeRetryInit(init, member);
+    const response = await originalFetch(input, requestInit);
+    const businessFailure = await responseBusinessFailure(response);
+    if (!businessFailure.failed) {
+        markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`);
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
+        return { ok: true, response };
+    }
+    const count = markRequestFailure(pending.state, member);
+    const detail = businessFailure.detail;
+    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, status: response.status, detail });
+    return { ok: false, response, count };
+}
 
-            for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
-                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|${retryAttempt}`, triggerReason, onStatus);
-                if (result.ok) {
-                    saveStateAsync(state);
-                    return result.response;
-                }
-                if (result.aborted) {
-                    saveStateAsync(state);
-                    throw result.error;
-                }
-                lastResponse = result.response || lastResponse;
-                lastError = result.error || lastError;
-            }
+async function runRetryPlan(input, init, pending, onStatus) {
+    const state = pending.state;
+    const pool = pending.pool;
+    const maxFailures = retryLimit(state);
+    const alertEnabled = !!state.failure?.alertEnabled;
+    const availableEntries = validRuntimeEntries(pool);
+    const onlyOneAvailable = availableEntries.length === 1;
+    const maxSwitches = Math.max(1, availableEntries.length);
+    const blockedIds = new Set();
+    let lastResponse = null;
+    let lastError = null;
+    let currentPicked = pending.picked;
+    let currentMember = pending.member;
 
-            if (onlyOneAvailable) {
-                await askFailureDecision(
-                    onlyActiveFailureMessage(),
-                    [{ value: 'ok', label: '确认' }],
-                    'ok',
-                );
-                break;
-            }
+    for (let switchAttempt = 0; switchAttempt < maxSwitches; switchAttempt += 1) {
+        if (switchAttempt > 0) {
+            currentPicked = chooseRequest(state, pool, blockedIds);
+            currentMember = currentPicked?.member;
+            if (!currentMember) break;
+            queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: true });
+            if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(currentMember)} | ${pending.type}`);
+        }
 
-            if (!alertEnabled) {
-                blockedIds.add(member.id);
-                continue;
-            }
-
-            const decision = await askFailureDecision(
-                failureMessage(member, maxFailures),
-                [
-                    { value: 'confirm', label: '确认' },
-                    { value: 'switch', label: '切换API' },
-                    { value: 'cancel', label: '取消' },
-                ],
-                'switch',
-            );
-            if (decision === 'cancel') break;
-            if (decision === 'switch') {
-                blockedIds.add(member.id);
-                continue;
-            }
-            if (decision === 'confirm') {
-                result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|confirm`, triggerReason, onStatus);
-                if (result.ok) {
-                    saveStateAsync(state);
-                    return result.response;
-                }
-                if (result.aborted) {
-                    saveStateAsync(state);
-                    throw result.error;
-                }
-                lastResponse = result.response || lastResponse;
-                lastError = result.error || lastError;
-                const nextDecision = await askFailureDecision(
-                    secondFailureMessage(member),
-                    [
-                        { value: 'use-next', label: '使用下一个API' },
-                        { value: 'disable-cancel', label: '取消并停用该API' },
-                        { value: 'cancel-keep', label: '取消，不停用该API' },
-                    ],
-                    'use-next',
-                );
-                if (nextDecision === 'use-next') {
-                    if (pool.mode === 'random') disableMemberByFailure(state, member);
-                    blockedIds.add(member.id);
-                    continue;
-                }
-                if (nextDecision === 'disable-cancel') disableMemberByFailure(state, member);
-                break;
+        for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
+            try {
+                const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, retryAttempt);
+                if (result.ok) return result.response;
+                lastResponse = result.response;
+            } catch (error) {
+                if (isUserAbortError(error, init)) throw error;
+                const count = markRequestFailure(state, currentMember);
+                lastError = error;
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
             }
         }
 
-        saveStateAsync(state);
-        if (lastError) throw lastError;
-        if (lastResponse) return lastResponse;
-        return originalFetch(input, init);
-    };
+        if (onlyOneAvailable) {
+            await askFailureDecision(onlyActiveFailureMessage(), [{ value: 'ok', label: '确认' }], 'ok');
+            break;
+        }
 
-    fetchPatched = true;
+        if (!alertEnabled) {
+            blockedIds.add(currentMember.id);
+            continue;
+        }
+
+        const decision = await askFailureDecision(
+            failureMessage(currentMember, maxFailures),
+            [
+                { value: 'confirm', label: '确认' },
+                { value: 'switch', label: '切换API' },
+                { value: 'cancel', label: '取消' },
+            ],
+            'switch',
+        );
+        if (decision === 'cancel') break;
+        if (decision === 'switch') {
+            blockedIds.add(currentMember.id);
+            continue;
+        }
+        if (decision === 'confirm') {
+            try {
+                const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, maxFailures);
+                if (result.ok) return result.response;
+                lastResponse = result.response;
+            } catch (error) {
+                if (isUserAbortError(error, init)) throw error;
+                lastError = error;
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: false, error: String(error?.message || error) });
+            }
+            const nextDecision = await askFailureDecision(
+                secondFailureMessage(currentMember),
+                [
+                    { value: 'use-next', label: '使用下一个API' },
+                    { value: 'disable-cancel', label: '取消并停用该API' },
+                    { value: 'cancel-keep', label: '取消，不停用该API' },
+                ],
+                'use-next',
+            );
+            if (nextDecision === 'use-next') {
+                if (pool.mode === 'random') disableMemberByFailure(state, currentMember);
+                blockedIds.add(currentMember.id);
+                continue;
+            }
+            if (nextDecision === 'disable-cancel') disableMemberByFailure(state, currentMember);
+            break;
+        }
+    }
+
+    saveStateAsync(state);
+    if (lastError) throw lastError;
+    if (lastResponse) return lastResponse;
+    return originalFetch(input, init);
+}
+
+function bindRetryFetch(onStatus) {
+    if (fetchRetryBound) return;
+    originalFetch = window.fetch.bind(window);
+    window.fetch = async function karmaFlipRetryFetch(input, init) {
+        if (!isGenerateFetch(input) || !init?.body || typeof init.body !== 'string') {
+            return originalFetch(input, init);
+        }
+        const pending = consumePendingRequest();
+        if (!pending) return originalFetch(input, init);
+        return runRetryPlan(input, init, pending, onStatus);
+    };
+    fetchRetryBound = true;
+}
+
+function bindChatCompletionSettings(onStatus) {
+    if (chatSettingsBound) return;
+    if (bindRetryTimer) {
+        clearTimeout(bindRetryTimer);
+        bindRetryTimer = null;
+    }
+
+    const ctx = context();
+    const eventSource = ctx.eventSource;
+    const eventTypes = ctx.event_types || {};
+    const eventName = eventTypes.CHAT_COMPLETION_SETTINGS_READY;
+
+    if (!eventSource?.on || !eventName) {
+        bindRetryTimer = setTimeout(() => bindChatCompletionSettings(onStatus), 1000);
+        return;
+    }
+
+    eventSource.on(eventName, (generateData) => {
+        const state = loadState();
+        if (state.enabled === false) return;
+        if (!isTextGeneration(generateData) || isBackgroundRequest(generateData)) return;
+
+        const pool = getActivePool(state);
+        if (!Array.isArray(pool.entries) || !pool.entries.length) return;
+        if (!validRuntimeEntries(pool).length) return;
+
+        const picked = pickMember(state, pool);
+        if (!picked?.member) return;
+
+        const member = picked.member;
+        patchGenerateData(generateData, member);
+
+        const type = generationType(generateData);
+        startPendingRequest(state, pool, picked, member, type);
+        queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
+        if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
+    });
+
+    chatSettingsBound = true;
+}
+
+export function installRuntimeHook(onStatus) {
+    bindChatCompletionSettings(onStatus);
+    bindRetryFetch(onStatus);
 }
