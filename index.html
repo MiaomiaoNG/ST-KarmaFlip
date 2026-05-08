@@ -69,7 +69,7 @@
             <button class="marker-btn brush-stroke kf-log-filter" data-filter="error">报错</button>
             <button class="marker-btn brush-stroke kf-log-filter" data-filter="pick">抽选记录</button>
         </div>
-        <textarea id="kf-logs-list" style="width:100%;height:180px;resize:none;background:transparent;color:inherit;"></textarea>
+        <div id="kf-logs-list" class="kf-logs-list" role="log" aria-live="polite"></div>
     </div>
 </div>
 
@@ -108,6 +108,14 @@
         <div class="modal-header">API请求失败</div>
         <div class="kf-modal-message" id="kf-failure-message"></div>
         <div class="kf-modal-actions" id="kf-failure-actions"></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="api-test-modal">
+    <div class="modal-box">
+        <div class="modal-header">API连通测试 <span class="close-btn" id="kf-api-test-close">✖</span></div>
+        <div class="kf-test-status" id="kf-api-test-status"></div>
+        <pre class="kf-test-detail" id="kf-api-test-detail"></pre>
     </div>
 </div>
 

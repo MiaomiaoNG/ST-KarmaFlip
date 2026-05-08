@@ -1,6 +1,6 @@
 import { enableStatePersistence, getActivePool, loadState, saveState, toInt } from './plugin_state_store.js';
 
-const MODAL_IDS = ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal', 'rename-pool-modal'];
+const MODAL_IDS = ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal', 'api-test-modal', 'rename-pool-modal'];
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -281,6 +281,7 @@ function renderEntries(state) {
                             <i class="fa-regular fa-eye"></i>
                         </button>
                     </div>
+                    <button class="marker-btn brush-stroke kf-test-api" type="button">测试</button>
                 </div>
                 <div class="row">
                     <div class="input-wrapper flex-1"><span class="label">模型</span><input type="text" class="inner-input dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
@@ -300,7 +301,10 @@ function renderEntries(state) {
 }
 
 function formatLog(log) {
-    const type = log.success === false || String(log.event || '').includes('error') ? '报错' : '抽选记录';
+    const event = String(log.event || '');
+    const type = event === 'pick'
+        ? '抽选记录'
+        : (log.success === false || event.includes('error') ? '发送报错' : '发送结果');
     const date = new Date(log.time);
     const pad = value => String(value).padStart(2, '0');
     const timestamp = [
@@ -336,9 +340,13 @@ function renderLogs(state, filter = currentLogFilter()) {
     });
     const lines = filtered.slice(-50).map(formatLog);
     const logBox = $('#kf-logs-list');
-    logBox.val(lines.join('\n'));
+    logBox.text(lines.join('\n'));
     const node = logBox.get(0);
-    if (node) node.scrollTop = node.scrollHeight;
+    if (node) {
+        requestAnimationFrame(() => {
+            node.scrollTop = node.scrollHeight;
+        });
+    }
 }
 
 function syncEntryFromRow(entry, row) {
@@ -601,6 +609,99 @@ async function fetchOpenAICompatibleModels(entry) {
     entry.modelOptions = models;
     if (!entry.model) entry.model = models[0];
     return models;
+}
+
+function responsePreview(payload) {
+    if (typeof payload === 'string') return payload;
+    try {
+        return JSON.stringify(payload, null, 2);
+    } catch {
+        return String(payload);
+    }
+}
+
+async function readResponseText(response) {
+    return await response.text();
+}
+
+function parseMaybeJson(text) {
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
+
+function statusFailureMessage(payload, rawBody) {
+    if (payload === false) return rawBody || 'false';
+    if (!payload || typeof payload !== 'object') return '';
+    const failureKeys = ['ok', 'success', 'result', 'online', 'connected'];
+    if (failureKeys.some(key => payload[key] === false)) {
+        return payload.message || payload.error || payload.reason || rawBody || responsePreview(payload);
+    }
+    if (payload.error) return responsePreview(payload.error);
+    if (typeof payload.message === 'string' && /fail|error|incorrect|invalid|down|unauthorized/i.test(payload.message)) {
+        return payload.message;
+    }
+    return '';
+}
+
+async function testOpenAICompatibleEntry(entry) {
+    if (!entry.apiUrl) throw new Error('请先填写 URL');
+    if (!entry.key) throw new Error('请先填写 KEY');
+    if (!['open', 'openai', 'deepseek'].includes(entry.provider || 'open')) {
+        throw new Error(`暂不支持接口类型：${entry.provider || 'unknown'}`);
+    }
+    const context = window.SillyTavern?.getContext?.() || {};
+    const requestHeaders = typeof context.getRequestHeaders === 'function'
+        ? context.getRequestHeaders()
+        : { 'Content-Type': 'application/json' };
+    const response = await fetch('/api/backends/chat-completions/status', {
+        method: 'POST',
+        headers: {
+            ...requestHeaders,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            chat_completion_source: 'openai',
+            reverse_proxy: normalizeBaseUrl(entry.apiUrl),
+            proxy_password: entry.key,
+        }),
+    });
+    const body = await readResponseText(response);
+    const payload = parseMaybeJson(body);
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}${body ? `\n${body}` : ''}`);
+    }
+    const failure = statusFailureMessage(payload, body);
+    if (failure) throw new Error(failure);
+    const models = Array.isArray(payload?.data)
+        ? payload.data.map(item => String(item?.id || '')).filter(Boolean)
+        : [];
+    const ok = payload === true || payload?.ok === true || payload?.success === true || payload?.result === true || payload?.online === true || payload?.connected === true || models.length > 0;
+    if (!ok) {
+        return {
+            status: response.status,
+            models,
+            body: body || '状态接口返回空内容',
+            uncertain: true,
+        };
+    }
+    return {
+        status: response.status,
+        models,
+        body: body || responsePreview(payload),
+    };
+}
+
+function showApiTestResult(ok, message, detail = '') {
+    $('#kf-api-test-status')
+        .toggleClass('success', !!ok)
+        .toggleClass('error', !ok)
+        .text(message || (ok ? '测试成功' : '测试失败'));
+    $('#kf-api-test-detail').text(detail || '');
+    $('#api-test-modal').addClass('show');
 }
 
 function bindLongPress(state, rerender, setStatus) {
@@ -914,6 +1015,30 @@ function bind(state, rerender, setStatus) {
             showToast(message, 'error');
         }
     });
+    $('#kf-entry-list').on('click.kf', '.kf-test-api', async function () {
+        const pool = getActivePool(state);
+        const row = $(this).closest('.entry-block');
+        const entry = pool.entries.find(e => e.id === row.data('id'));
+        if (!entry) return;
+        syncEntryFromRow(entry, row);
+        const button = $(this);
+        button.prop('disabled', true).text('测试中');
+        try {
+            const result = await testOpenAICompatibleEntry(entry);
+            showApiTestResult(
+                !result.uncertain,
+                `${result.uncertain ? '状态未确认' : '连接成功'}：HTTP ${result.status}`,
+                result.models.length ? `可用模型数：${result.models.length}\n${result.models.join('\n')}` : result.body,
+            );
+            setStatus(result.uncertain ? 'API连通状态未确认' : 'API连通测试成功');
+        } catch (error) {
+            const message = String(error?.message || error || '测试失败');
+            showApiTestResult(false, '连接失败', message);
+            setStatus('API连通测试失败');
+        } finally {
+            button.prop('disabled', false).text('测试');
+        }
+    });
 
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#settings-modal').addClass('show'));
     $('#kf-btn-save').off('click.kf').on('click.kf', () => {
@@ -929,8 +1054,8 @@ function bind(state, rerender, setStatus) {
         setStatus('已保存');
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
-        renderLogs(state);
         $('#logModal').addClass('show');
+        renderLogs(state);
     });
     $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('logModal'));
     $('.kf-log-filter').off('click.kf').on('click.kf', function () {
@@ -941,6 +1066,7 @@ function bind(state, rerender, setStatus) {
     $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#theme-modal').addClass('show'));
     $('#kf-theme-close').off('click.kf').on('click.kf', () => closeModal('theme-modal'));
     $('#kf-settings-close').off('click.kf').on('click.kf', () => closeModal('settings-modal'));
+    $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('api-test-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
     $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));
     $('#kf-rename-pool-input').off('keydown.kf').on('keydown.kf', function (event) {

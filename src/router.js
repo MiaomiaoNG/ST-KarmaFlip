@@ -12,7 +12,9 @@ function validEntries(pool, runtime) {
 }
 
 function weightedPick(entries) {
-    const weighted = entries.map(e => ({ entry: e, weight: Math.max(1, toInt(e.weight)) }));
+    const weighted = entries
+        .map(e => ({ entry: e, weight: toInt(e.weight) }))
+        .filter(item => item.weight > 0);
     const total = weighted.reduce((sum, x) => sum + x.weight, 0);
     if (total <= 0) return null;
     let r = Math.random() * total;
@@ -66,7 +68,7 @@ function fixedPick(pool, runtime) {
 }
 
 function randomPick(pool, runtime) {
-    const active = validEntries(pool, runtime);
+    const active = validEntries(pool, runtime).filter(e => toInt(e.weight) > 0);
     if (!active.length) return { member: null, blocked: [] };
 
     const pity = active

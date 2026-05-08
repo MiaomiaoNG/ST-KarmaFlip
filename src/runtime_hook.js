@@ -5,6 +5,8 @@ let fetchPatched = false;
 let originalFetch = null;
 let activeGrant = null;
 let externalSendBlockUntil = 0;
+let generationEventsBound = false;
+let generationBindRetryTimer = null;
 const GRANT_TTL_MS = 2500;
 const EXTERNAL_SEND_BLOCK_MS = 2500;
 const EXTERNAL_SEND_EVENTS = ['phone:sendToChat', 'STKarmaFlip:external-send'];
@@ -14,19 +16,7 @@ function toast(type, message) {
     else console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
 }
 
-function isTrustedUserEvent(event) {
-    return !!event && event.isTrusted === true;
-}
-
-function isPlainEnterSend(event) {
-    if (!event || event.key !== 'Enter') return false;
-    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return false;
-    const target = event.target;
-    return !!target && (target.id === 'send_textarea' || target.closest?.('#send_textarea'));
-}
-
-function grantPrimaryGeneration(reason, event) {
-    if (!isTrustedUserEvent(event)) return;
+function grantPrimaryGeneration(reason) {
     activeGrant = {
         reason,
         expiresAt: Date.now() + GRANT_TTL_MS,
@@ -55,15 +45,58 @@ function consumeGrant() {
     return reason;
 }
 
-function bindTriggerEvents() {
-    $(document).off('click.karmaFlipSend', '#send_but').on('click.karmaFlipSend', '#send_but', event => grantPrimaryGeneration('send', event.originalEvent || event));
-    $(document).off('click.karmaFlipSwipe', '.swipe_left, .swipe_right').on('click.karmaFlipSwipe', '.swipe_left, .swipe_right', event => grantPrimaryGeneration('swipe', event.originalEvent || event));
-    $(document).off('click.karmaFlipRegen', '#option_regenerate').on('click.karmaFlipRegen', '#option_regenerate', event => grantPrimaryGeneration('regenerate', event.originalEvent || event));
-    $(document).off('click.karmaFlipContinue', '#option_continue').on('click.karmaFlipContinue', '#option_continue', event => grantPrimaryGeneration('continue', event.originalEvent || event));
-    $(document).off('keydown.karmaFlipSend', '#send_textarea').on('keydown.karmaFlipSend', '#send_textarea', event => {
-        const original = event.originalEvent || event;
-        if (isPlainEnterSend(original)) grantPrimaryGeneration('send', original);
-    });
+function peekGrant() {
+    const now = Date.now();
+    if (now < externalSendBlockUntil) {
+        activeGrant = null;
+        return null;
+    }
+    if (!activeGrant || activeGrant.consumed || activeGrant.expiresAt < now) {
+        activeGrant = null;
+        return null;
+    }
+    return activeGrant.reason;
+}
+
+function generationReason(type) {
+    const value = typeof type === 'object' && type !== null
+        ? String(type.type || type.reason || 'send')
+        : String(type || 'send');
+    if (value === 'normal') return 'send';
+    return value;
+}
+
+function isPrimaryGeneration(type, details, dryRun) {
+    const payload = typeof type === 'object' && type !== null ? type : details;
+    if (dryRun === true || payload?.dryRun === true || payload?.dry_run === true) return false;
+    if (payload?.automatic_trigger === true) return false;
+    if (payload?.quiet_prompt || payload?.quietImage || payload?.quiet === true) return false;
+    const value = typeof type === 'object' && type !== null
+        ? String(type.type || type.reason || 'send')
+        : String(type || 'send');
+    return !['quiet', 'impersonate'].includes(value);
+}
+
+function bindGenerationEvents() {
+    if (generationEventsBound) return;
+    if (generationBindRetryTimer) {
+        clearTimeout(generationBindRetryTimer);
+        generationBindRetryTimer = null;
+    }
+    const context = window.SillyTavern?.getContext?.() || {};
+    const eventSource = context.eventSource;
+    const eventTypes = context.event_types || {};
+    const generationStarted = eventTypes.GENERATION_STARTED;
+    if (eventSource?.on && generationStarted) {
+        eventSource.on(generationStarted, (type, details, dryRun) => {
+            if (isPrimaryGeneration(type, details, dryRun)) grantPrimaryGeneration(generationReason(type));
+            else activeGrant = null;
+        });
+        generationEventsBound = true;
+    }
+    if (!generationEventsBound) {
+        generationBindRetryTimer = setTimeout(bindGenerationEvents, 1000);
+    }
     for (const eventName of EXTERNAL_SEND_EVENTS) {
         window.removeEventListener(eventName, markExternalSend, true);
         window.addEventListener(eventName, markExternalSend, true);
@@ -72,7 +105,7 @@ function bindTriggerEvents() {
 
 function isChatRequest(url) {
     const target = String(url || '');
-    return target.includes('/api/backends/chat-completions/generate') || target.includes('/v1/chat/completions');
+    return target.includes('/api/backends/chat-completions/generate');
 }
 
 function parseBody(body) {
@@ -114,6 +147,17 @@ function chooseRequest(state, pool, blockedIds = new Set()) {
     }
 }
 
+function validRuntimeEntries(pool, mode) {
+    return (pool.entries || []).filter(entry =>
+        entry &&
+        entry.enabled !== false &&
+        entry.apiUrl &&
+        entry.key &&
+        entry.model &&
+        (mode !== 'random' || Number(entry.weight) > 0)
+    );
+}
+
 function retryLimit(state) {
     const count = Number(state.failure?.retryCount);
     return Number.isFinite(count) ? Math.max(1, Math.round(count)) : 3;
@@ -143,6 +187,10 @@ function secondFailureMessage(member) {
     return `[${member.name || '未命名'}] [${member.model || '未填模型'}]再次请求失败，已暂停，是否使用下一个API？`;
 }
 
+function onlyActiveFailureMessage() {
+    return '当前组合唯一启动API请求失败，无法自动更换，请检查';
+}
+
 async function sendWithMember(input, init, originalBody, state, pool, picked, member, requestKey, triggerReason, onStatus) {
     const request = buildRequest(input, init, originalBody, member);
     if (typeof onStatus === 'function') onStatus(`命中: ${member.name} | ${member.model || '未填模型'} | ${triggerReason}`);
@@ -165,13 +213,18 @@ async function sendWithMember(input, init, originalBody, state, pool, picked, me
 }
 
 export function installRuntimeHook(onStatus) {
-    bindTriggerEvents();
+    bindGenerationEvents();
     if (fetchPatched) return;
     originalFetch = window.fetch.bind(window);
 
     window.fetch = async function karmaFlipFetch(input, init) {
+        const state = loadState();
+        if (state.enabled === false) return originalFetch(input, init);
+
         const url = typeof input === 'string' ? input : input?.url;
         if (!isChatRequest(url) || !init?.body || typeof init.body !== 'string') return originalFetch(input, init);
+
+        if (!peekGrant()) return originalFetch(input, init);
 
         const originalBody = String(init.body);
         const payload = parseBody(originalBody);
@@ -180,7 +233,6 @@ export function installRuntimeHook(onStatus) {
         const triggerReason = consumeGrant();
         if (!triggerReason) return originalFetch(input, init);
 
-        const state = loadState();
         const pool = getActivePool(state);
         if (state.enabled === false || !Array.isArray(pool.entries) || !pool.entries.length) return originalFetch(input, init);
 
@@ -189,13 +241,16 @@ export function installRuntimeHook(onStatus) {
         let lastResponse = null;
         const maxFailures = retryLimit(state);
         const alertEnabled = !!state.failure?.alertEnabled;
-        const maxSwitches = Math.max(1, (pool.entries || []).length);
+        const availableEntries = validRuntimeEntries(pool, pool.mode);
+        const onlyOneAvailable = availableEntries.length === 1;
+        const maxSwitches = Math.max(1, availableEntries.length);
 
         for (let switchAttempt = 0; switchAttempt < maxSwitches; switchAttempt += 1) {
             const picked = chooseRequest(state, pool, blockedIds);
             if (!picked?.member) break;
             const member = picked.member;
             let result = null;
+            pushLog(state, { event: 'pick', trigger: triggerReason, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
 
             for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
                 result = await sendWithMember(input, init, originalBody, state, pool, picked, member, `${triggerReason}|${Date.now()}|${switchAttempt}|${retryAttempt}`, triggerReason, onStatus);
@@ -209,6 +264,15 @@ export function installRuntimeHook(onStatus) {
                 }
                 lastResponse = result.response || lastResponse;
                 lastError = result.error || lastError;
+            }
+
+            if (onlyOneAvailable) {
+                await askFailureDecision(
+                    onlyActiveFailureMessage(),
+                    [{ value: 'ok', label: '确认' }],
+                    'ok',
+                );
+                break;
             }
 
             if (!alertEnabled) {
