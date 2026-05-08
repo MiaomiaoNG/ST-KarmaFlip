@@ -273,20 +273,22 @@ function fanIcon(expanded) {
     const svgProps = 'class="kf-fan-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
     return expanded
         ? `<svg ${svgProps}>
-            <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/>
-            <path d="M 4 10 A 10.5 10.5 0 0 1 20 10"/>
-            <path d="M 8 15 A 4.5 4.5 0 0 1 16 15"/>
-            <line x1="12" y1="19" x2="4" y2="10"/>
-            <line x1="12" y1="19" x2="20" y2="10"/>
-            <line x1="12" y1="19" x2="12" y2="6.5"/>
-            <line x1="12" y1="19" x2="7.5" y2="8.5"/>
-            <line x1="12" y1="19" x2="16.5" y2="8.5"/>
+            <line x1="16" y1="17" x2="19" y2="4"/>
+            <line x1="16" y1="17" x2="4" y2="12"/>
+            <polyline points="4,12 7,8 11,5 15,3.5 19,4"/>
+            <line x1="16" y1="17" x2="7" y2="8"/>
+            <line x1="16" y1="17" x2="11" y2="5"/>
+            <line x1="16" y1="17" x2="15" y2="3.5"/>
+            <circle cx="16" cy="17" r="1" fill="currentColor" stroke="none"/>
         </svg>`
         : `<svg ${svgProps}>
-            <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/>
-            <path d="M 12 19 L 9 6 L 10.5 4.5 L 12 6 L 13.5 4.5 L 15 6 Z"/>
-            <line x1="12" y1="19" x2="12" y2="6"/>
-            <path d="M 10 13 C 11 13.5 13 13.5 14 13"/>
+            <path d="M 15.5 16.5 L 6 5 L 9 3 L 17.5 14.5 Z"/>
+            <line x1="7.5" y1="4" x2="16.5" y2="15.5"/>
+            <circle cx="16" cy="17" r="1" fill="currentColor" stroke="none"/>
+            <line x1="16" y1="17" x2="17.5" y2="19.5"/>
+            <circle cx="17.5" cy="19.5" r="1"/>
+            <line x1="17.5" y1="20.5" x2="16" y2="23"/>
+            <line x1="17.5" y1="20.5" x2="19" y2="23"/>
         </svg>`;
 }
 
