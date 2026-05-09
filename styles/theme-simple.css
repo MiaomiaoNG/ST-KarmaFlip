@@ -26,7 +26,7 @@
 }
 
 #kf-root[data-brush="simple"] .input-wrapper .label {
-    font-size: 15px;
+    font-size: var(--kf-font-control);
     line-height: 1;
     margin-right: 10px;
 }
@@ -92,7 +92,7 @@
 
 #kf-root[data-brush="simple"] .marker-checkbox input:checked + .kf-check-box::after {
     content: '✓';
-    font-size: 13px;
+    font-size: var(--kf-font-small);
     line-height: 1;
     transform: translateY(-1px);
 }
@@ -160,7 +160,7 @@
 }
 
 .modal-overlay[data-brush="simple"] .input-wrapper .label {
-    font-size: 15px;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
 }
 
 .modal-overlay[data-brush="simple"] .kf-mobile-option {
@@ -178,7 +178,7 @@
     top: 50%;
     transform: translateY(-50%);
     color: var(--underline-color, #617b9b);
-    font-size: 12px;
+    font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
 }
 
 .modal-overlay[data-brush="simple"] .kf-square-box {

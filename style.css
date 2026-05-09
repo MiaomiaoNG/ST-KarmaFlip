@@ -10,6 +10,11 @@
     --marker-blur: 0.6px;
     --brush-blend: multiply;
     --brush-opacity: 1;
+    --kf-font-base: clamp(13px, 1.55vw, 15px);
+    --kf-font-small: clamp(11px, 1.25vw, 13px);
+    --kf-font-title: clamp(15px, 1.8vw, 17px);
+    --kf-font-control: clamp(13px, 1.45vw, 14px);
+    --kf-font-modal-title: clamp(15px, 1.7vw, 16px);
     max-width: 800px;
     margin: 0 auto;
     display: flex;
@@ -66,7 +71,24 @@
     from { transform: translateY(8px); }
     to { transform: translateY(0); }
 }
-#kf-root .title { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+#kf-root .title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: var(--kf-font-title);
+    font-weight: bold;
+    margin-bottom: 15px;
+    text-align: center;
+    color: inherit;
+}
+#kf-root .title::before,
+#kf-root .title::after {
+    content: '';
+    flex: 1 1 0;
+    max-width: 72px;
+    border-top: 1px solid var(--underline-color);
+}
 #kf-root .row { display: flex; align-items: center; gap: 15px; margin-bottom: 12px; width: 100%; }
 #kf-root .flex-7 { flex: 7; min-width: 0; }
 #kf-root .flex-3 { flex: 3; min-width: 0; }
@@ -85,7 +107,7 @@
 }
 #kf-root .input-wrapper:focus-within { border-bottom-color: #1a2a3a !important; }
 #kf-root .input-wrapper .label {
-    font-size: 13px;
+    font-size: var(--kf-font-small);
     font-weight: bold;
     margin-right: 8px;
     white-space: nowrap;
@@ -96,7 +118,7 @@
     flex: 1;
     background: transparent !important;
     min-width: 0;
-    font-size: 14px;
+    font-size: var(--kf-font-control);
     padding: 0;
     color: inherit;
     border: none !important;
@@ -130,7 +152,7 @@
     background: transparent;
     color: inherit;
     padding: 6px 12px;
-    font-size: 14px;
+    font-size: var(--kf-font-control);
     cursor: pointer;
     position: relative;
     z-index: 1;
@@ -151,7 +173,7 @@
     background: transparent;
     color: inherit;
     width: 100%;
-    font-size: 14px;
+    font-size: var(--kf-font-control);
     padding: 8px 10px;
     cursor: pointer;
     position: relative;
@@ -174,7 +196,7 @@
     padding: 0;
     color: inherit;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--kf-font-small);
     line-height: 1;
     position: relative;
     z-index: 3;
@@ -189,7 +211,7 @@
 #kf-root .marker-checkbox input[type="radio"],
 #kf-root .marker-checkbox input[type="checkbox"] { display: none; }
 #kf-root .kf-check-box { display: none; }
-#kf-root .marker-checkbox .text { position: relative; z-index: 1; font-size: 14px; padding: 0 4px; color: inherit; }
+#kf-root .marker-checkbox .text { position: relative; z-index: 1; font-size: var(--kf-font-control); padding: 0 4px; color: inherit; }
 #kf-root .marker-checkbox input:checked ~ .text.brush-stroke::after {
     top: 50%;
     left: -10%;
@@ -205,7 +227,7 @@
 #kf-root .entry-actions-grid { display: grid; gap: 15px; align-items: center; width: 100%; }
 #kf-root .entry-main-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 #kf-root .entry-actions-grid > * { width: 100%; min-width: 0; justify-content: center; }
-#kf-root .entry-status { font-size: 12px; color: #b91c1c; text-align: center; margin-bottom: 8px; }
+#kf-root .entry-status { font-size: var(--kf-font-small); color: #b91c1c; text-align: center; margin-bottom: 8px; }
 #kf-root .kf-entry-row-top {
     display: grid;
     grid-template-columns: minmax(64px, 0.9fr) minmax(0, 7fr) 32px 32px;
@@ -350,9 +372,9 @@
     box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     transition: background-color 0.3s, color 0.3s;
 }
-.modal-overlay .modal-header { font-weight: bold; margin-bottom: 15px; font-size: 16px; display: flex; justify-content: space-between; }
+.modal-overlay .modal-header { font-weight: bold; margin-bottom: 15px; font-size: var(--kf-font-modal-title, clamp(15px, 1.7vw, 16px)); display: flex; justify-content: space-between; }
 .modal-overlay .close-btn { cursor: pointer; color: #888; }
-.modal-overlay .color-picker-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; }
+.modal-overlay .color-picker-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px)); }
 .modal-overlay .color-picker-row input[type="color"] { width: 30px; height: 30px; padding: 0; background: transparent; cursor: pointer; }
 .modal-overlay .color-picker-row input[type="range"],
 .modal-overlay .color-picker-row select { width: 120px; }
@@ -365,7 +387,7 @@
     min-width: 0;
 }
 .modal-overlay .input-wrapper .label {
-    font-size: 13px;
+    font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     font-weight: bold;
     margin-right: 8px;
     white-space: nowrap;
@@ -376,7 +398,7 @@
     min-width: 0;
     background: transparent !important;
     color: inherit;
-    font-size: 14px;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
     padding: 0;
 }
 .modal-overlay textarea,
@@ -403,7 +425,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     font-family: "Microsoft YaHei", sans-serif;
-    font-size: 13px;
+    font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     line-height: 1.45;
 }
 .modal-overlay .kf-logs-list:empty::before {
@@ -412,7 +434,7 @@
 }
 .modal-overlay .log-filter-row {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
     gap: 10px;
     margin-bottom: 12px;
 }
@@ -420,7 +442,7 @@
     background: transparent;
     color: inherit;
     padding: 6px 12px;
-    font-size: 14px;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
     cursor: pointer;
     position: relative;
     z-index: 1;
@@ -441,7 +463,7 @@
 .modal-overlay .marker-checkbox .text {
     position: relative;
     z-index: 1;
-    font-size: 14px;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
     padding: 0 4px;
     color: inherit;
 }
@@ -468,7 +490,7 @@
     margin-bottom: 12px;
 }
 .modal-overlay .kf-settings-label {
-    font-size: 14px;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
     font-weight: bold;
     color: inherit;
 }
@@ -484,7 +506,7 @@
     background: transparent !important;
     color: inherit;
     border-bottom: 1px solid var(--underline-color, #617b9b) !important;
-    font-size: 15px;
+    font-size: var(--kf-font-base, clamp(13px, 1.55vw, 15px));
     font-weight: bold;
     padding: 2px 0;
 }
@@ -503,7 +525,7 @@
     height: 14px;
     padding: 0;
     line-height: 14px;
-    font-size: 11px;
+    font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     font-family: Arial, sans-serif;
     text-align: center;
     cursor: pointer;
@@ -609,7 +631,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     font-family: Consolas, "Microsoft YaHei", monospace;
-    font-size: 12px;
+    font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     line-height: 1.45;
 }
 .kf-mobile-option {
@@ -629,7 +651,7 @@
     flex: 0 0 auto;
     min-width: 52px;
     padding: 4px 8px;
-    font-size: 12px;
+    font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -682,6 +704,7 @@
     --marker-blur: 0.6px;
     --brush-blend: multiply;
     --brush-opacity: 1;
+    --kf-font-control: clamp(13px, 1.45vw, 14px);
 }
 
 .kf-toast {
@@ -695,7 +718,7 @@
     color: var(--text-main, #000000);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
     text-align: center;
-    font-size: 14px;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
     line-height: 1.35;
     word-break: break-word;
     opacity: 0;
@@ -733,11 +756,10 @@
     /* 手机端进一步压缩边缘空白，避免撑破屏幕 */
     #kf-root .block { padding: 8px; } 
     #kf-root .entry-block { padding: 8px; margin-bottom: 6px; }
-    #kf-root .title { margin-bottom: 10px; font-size: 16px; }
+    #kf-root .title { margin-bottom: 10px; }
     
     /* 稍微调小手机端的按钮和输入框的“胖瘦度”与字号（不改字体，只改大小），避免占满屏幕 */
-    #kf-root .marker-btn { padding: 4px 8px; font-size: 13px; }
-    #kf-root .select-wrapper .inner-select { padding: 6px 8px; font-size: 13px; }
-    #kf-root .input-wrapper .inner-input { font-size: 13px; }
-    #kf-root .input-wrapper .label { font-size: 12px; margin-right: 4px; }
+    #kf-root .marker-btn { padding: 4px 8px; }
+    #kf-root .select-wrapper .inner-select { padding: 6px 8px; }
+    #kf-root .input-wrapper .label { margin-right: 4px; }
 }
