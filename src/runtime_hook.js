@@ -270,16 +270,12 @@ function readTraceRequest(init) {
     const body = String(init?.body || '');
     if (!body.includes(TRACE_FIELD)) return null;
     try {
-        const payload = JSON.parse(body);
-        const traceId = String(payload?.[TRACE_FIELD] || '');
+        const match = body.match(new RegExp(`"${TRACE_FIELD}"\\s*:\\s*"([^"]+)"`));
+        const traceId = String(match?.[1] || '');
         if (!traceId) return null;
-        delete payload[TRACE_FIELD];
         return {
             traceId,
-            init: {
-                ...init,
-                body: JSON.stringify(payload),
-            },
+            init,
         };
     } catch {
         return null;
