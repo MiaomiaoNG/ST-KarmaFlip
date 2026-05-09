@@ -51,7 +51,7 @@
             <button class="marker-btn brush-stroke" id="kf-btn-settings">设置</button>
             <button class="marker-btn brush-stroke" id="kf-btn-logs">日志</button>
             <button class="marker-btn brush-stroke" id="kf-btn-theme">美化</button>
-            <button class="marker-btn brush-stroke" id="kf-btn-save">保存</button>
+            <button class="marker-btn brush-stroke" id="kf-btn-import-export">导入/出</button>
         </div>
         <div class="long-press-row two-strokes brush-stroke" id="kf-long-press">
             <span class="long-press-text" id="kf-long-press-text">插件已关闭（长按启动）</span>
@@ -68,6 +68,7 @@
             <button class="marker-btn brush-stroke kf-log-filter active" data-filter="all">全部</button>
             <button class="marker-btn brush-stroke kf-log-filter" data-filter="error">报错</button>
             <button class="marker-btn brush-stroke kf-log-filter" data-filter="pick">抽选记录</button>
+            <button class="marker-btn brush-stroke" id="kf-log-clear">清空</button>
         </div>
         <div id="kf-logs-list" class="kf-logs-list" role="log" aria-live="polite"></div>
     </div>
@@ -134,6 +135,19 @@
             <button class="marker-btn brush-stroke" id="kf-rename-pool-confirm">确认</button>
             <button class="marker-btn brush-stroke" id="kf-rename-pool-cancel">取消</button>
         </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="import-export-modal">
+    <div class="modal-box">
+        <div class="modal-header">导入/导出 <span class="close-btn" id="kf-import-export-close">✖</span></div>
+        <div class="kf-modal-actions">
+            <button class="marker-btn brush-stroke" id="kf-export-current-pool">导出当前组合</button>
+            <button class="marker-btn brush-stroke" id="kf-export-all-pools">导出全部组合</button>
+            <button class="marker-btn brush-stroke" id="kf-export-api-presets">导出API条目</button>
+            <button class="marker-btn brush-stroke" id="kf-import-config">导入</button>
+        </div>
+        <input type="file" id="kf-import-file" accept="application/json,.json" style="display: none;">
     </div>
 </div>
 

@@ -1,6 +1,8 @@
-import { enableStatePersistence, getActivePool, loadState, saveState, toInt } from './plugin_state_store.js';
+import { enableStatePersistence, getActivePool, loadState, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 
-const MODAL_IDS = ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal', 'api-test-modal', 'rename-pool-modal'];
+const MODAL_IDS = ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal', 'api-test-modal', 'rename-pool-modal', 'import-export-modal'];
+const HOT_SAVE_DELAY = 1000;
+let uiPersistenceReady = false;
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -102,6 +104,38 @@ function clonePool(pool) {
     return p;
 }
 
+function cloneEntry(entry) {
+    return {
+        id: `e_${crypto.randomUUID()}`,
+        presetId: '',
+        enabled: entry?.enabled !== false,
+        name: String(entry?.name || 'New API'),
+        apiUrl: String(entry?.apiUrl || entry?.url || ''),
+        key: String(entry?.key || ''),
+        provider: String(entry?.provider || 'open'),
+        model: String(entry?.model || ''),
+        fixedRuns: Math.max(1, toInt(entry?.fixedRuns || 1)),
+        weight: toInt(entry?.weight || 0),
+        pityTurns: toInt(entry?.pityTurns || 0),
+        cooldownTurns: toInt(entry?.cooldownTurns || 0),
+        collapsed: !!entry?.collapsed,
+        modelOptions: Array.isArray(entry?.modelOptions) ? entry.modelOptions.map(x => String(x)).filter(Boolean) : [],
+    };
+}
+
+function clonePoolForImport(pool) {
+    const cloned = {
+        id: `pool_${crypto.randomUUID()}`,
+        name: String(pool?.name || `导入组合_${new Date().toLocaleTimeString()}`),
+        mode: pool?.mode === 'random' ? 'random' : 'fixed',
+        enabled: pool?.enabled !== false,
+        random: { noConsecutive: !!pool?.random?.noConsecutive },
+        entries: Array.isArray(pool?.entries) ? pool.entries.map(cloneEntry) : [],
+    };
+    if (!cloned.entries.length) addEntry(cloned);
+    return cloned;
+}
+
 function addEntry(pool) {
     pool.entries.push({
         id: `e_${crypto.randomUUID()}`,
@@ -151,6 +185,22 @@ function findSavedApiEntry(state, name, excludeId) {
 
 function renderPresetLists(state) {
     return state;
+}
+
+function persistHot(state, delay = HOT_SAVE_DELAY) {
+    if (!uiPersistenceReady) {
+        saveState(state, { persist: false });
+        return;
+    }
+    saveStateDebounced(state, delay);
+}
+
+function persistNow(state) {
+    if (!uiPersistenceReady) {
+        saveState(state, { persist: false });
+        return;
+    }
+    saveState(state);
 }
 
 function getApiPresetNames(state) {
@@ -209,6 +259,18 @@ function copyEntryForPreset(entry) {
     };
 }
 
+function copyPresetForImport(entry) {
+    return copyEntryForPreset({
+        enabled: entry?.enabled !== false,
+        name: String(entry?.name || 'Imported API'),
+        apiUrl: String(entry?.apiUrl || entry?.url || ''),
+        key: String(entry?.key || ''),
+        provider: String(entry?.provider || 'open'),
+        model: String(entry?.model || ''),
+        modelOptions: Array.isArray(entry?.modelOptions) ? entry.modelOptions.map(x => String(x)).filter(Boolean) : [],
+    });
+}
+
 function saveApiPreset(state, entry) {
     if (!entry?.name) return;
     if (!Array.isArray(state.apiPresets)) state.apiPresets = [];
@@ -228,6 +290,10 @@ function saveApiPreset(state, entry) {
     }
     entry.presetId = preset.id;
     delete entry._previousPresetName;
+}
+
+function saveApiPresetIfNamed(state, entry) {
+    if (String(entry?.name || '').trim()) saveApiPreset(state, entry);
 }
 
 function renderPool(state) {
@@ -282,13 +348,15 @@ function fanIcon(expanded) {
             <circle cx="16" cy="17" r="1" fill="currentColor" stroke="none"/>
         </svg>`
         : `<svg ${svgProps}>
+            <!-- 这里是合拢扇子的代码 -->
             <path d="M 15.5 16.5 L 6 5 L 9 3 L 17.5 14.5 Z"/>
             <line x1="7.5" y1="4" x2="16.5" y2="15.5"/>
-            <circle cx="16" cy="17" r="1" fill="currentColor" stroke="none"/>
-            <line x1="16" y1="17" x2="17.5" y2="19.5"/>
-            <circle cx="17.5" cy="19.5" r="1"/>
-            <line x1="17.5" y1="20.5" x2="16" y2="23"/>
-            <line x1="17.5" y1="20.5" x2="19" y2="23"/>
+            <circle cx="16.5" cy="15.5" r="1" fill="currentColor" stroke="none"/>
+            <!-- 顺滑版流苏 (顺着扇身的倾斜角度往右下方延伸) -->
+            <line x1="16.5" y1="15.5" x2="18" y2="17.5"/>
+            <circle cx="18" cy="18" r="0.8"/>
+            <line x1="18.5" y1="19" x2="18.5" y2="22"/>
+            <line x1="17.5" y1="20" x2="21" y2="20.5"/>
         </svg>`;
 }
 
@@ -352,8 +420,8 @@ function renderEntries(state) {
                 </div>
                 <div class="row random-only kf-entry-details">
                     <div class="input-wrapper flex-1"><span class="label">权重</span><input type="number" min="0" class="inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
-                    <div class="input-wrapper flex-1"><span class="label">保底回合</span><input type="number" min="0" class="inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
-                    <div class="input-wrapper flex-1"><span class="label">冷却回合</span><input type="number" min="0" class="inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
+                    <div class="input-wrapper flex-1"><span class="label">保底</span><input type="number" min="0" class="inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
+                    <div class="input-wrapper flex-1"><span class="label">冷却</span><input type="number" min="0" class="inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
                 </div>
             </div>
         `);
@@ -463,17 +531,22 @@ function syncAllFromControls(state) {
     syncFailureFromControls(state);
 }
 
+function syncActivePoolPresets(state) {
+    const pool = getActivePool(state);
+    for (const entry of pool.entries || []) saveApiPresetIfNamed(state, entry);
+}
+
 function saveThemeFromModal(state, setStatus) {
     syncThemeFromControls(state);
     applyTheme(state);
-    saveState(state);
+    persistNow(state);
     closeModal('theme-modal');
     setStatus('美化设置已保存');
 }
 
 function saveFailureSettingsFromModal(state, setStatus) {
     syncFailureFromControls(state);
-    saveState(state);
+    persistNow(state);
     closeModal('settings-modal');
     setStatus('请求设置已保存');
 }
@@ -490,6 +563,15 @@ function equalize(pool) {
     }
 }
 
+function maybeEqualizeWeights(state) {
+    const pool = getActivePool(state);
+    if (pool.mode !== 'random' || !shouldEqualize(pool)) return false;
+    const ok = confirm('当前权重差距较大，是否允许插件按照API数量自动均等权重？');
+    if (!ok) return false;
+    equalize(pool);
+    return true;
+}
+
 function reorderEntriesByIds(state, orderedIds) {
     const pool = getActivePool(state);
     const entries = pool.entries || [];
@@ -501,6 +583,108 @@ function reorderEntriesByIds(state, orderedIds) {
     if (next.length !== entries.length) return false;
     pool.entries = next;
     return true;
+}
+
+function exportJson(filename, payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportStamp() {
+    const date = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate()),
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds()),
+    ].join('');
+}
+
+function exportCurrentPool(state) {
+    syncAllFromControls(state);
+    syncActivePoolPresets(state);
+    const pool = getActivePool(state);
+    exportJson(`ST-KarmaFlip-current-pool-${exportStamp()}.json`, {
+        kind: 'ST-KarmaFlip/pool',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        pool,
+    });
+}
+
+function exportAllPools(state) {
+    syncAllFromControls(state);
+    syncActivePoolPresets(state);
+    exportJson(`ST-KarmaFlip-all-pools-${exportStamp()}.json`, {
+        kind: 'ST-KarmaFlip/pools',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        activePoolId: state.activePoolId,
+        pools: state.pools || [],
+    });
+}
+
+function exportApiPresets(state) {
+    syncAllFromControls(state);
+    syncActivePoolPresets(state);
+    exportJson(`ST-KarmaFlip-api-presets-${exportStamp()}.json`, {
+        kind: 'ST-KarmaFlip/apiPresets',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        apiPresets: state.apiPresets || [],
+    });
+}
+
+function readImportPools(payload) {
+    if (payload?.kind === 'ST-KarmaFlip/pool' && payload.pool) return [payload.pool];
+    if (payload?.kind === 'ST-KarmaFlip/pools' && Array.isArray(payload.pools)) return payload.pools;
+    if (payload?.pool && payload.pool.entries) return [payload.pool];
+    if (Array.isArray(payload?.pools)) return payload.pools;
+    if (payload?.entries && payload?.name) return [payload];
+    return [];
+}
+
+function readImportPresets(payload) {
+    if (payload?.kind === 'ST-KarmaFlip/apiPresets' && Array.isArray(payload.apiPresets)) return payload.apiPresets;
+    if (Array.isArray(payload?.apiPresets)) return payload.apiPresets;
+    if (Array.isArray(payload?.entries) && !payload.name) return payload.entries;
+    if (Array.isArray(payload) && payload.some(item => item?.apiUrl || item?.url || item?.key || item?.model)) return payload;
+    if (payload?.apiUrl || payload?.url || payload?.key || payload?.model) return [payload];
+    return [];
+}
+
+function importConfigPayload(state, payload) {
+    const pools = readImportPools(payload).map(clonePoolForImport);
+    const presets = readImportPresets(payload).map(copyPresetForImport);
+    if (!pools.length && !presets.length) {
+        throw new Error('未识别到可导入的组合或 API 条目');
+    }
+    if (!Array.isArray(state.pools)) state.pools = [];
+    if (!Array.isArray(state.apiPresets)) state.apiPresets = [];
+    state.pools.push(...pools);
+    state.apiPresets.push(...presets);
+    if (pools.length) state.activePoolId = pools[pools.length - 1].id;
+    return { pools: pools.length, presets: presets.length };
+}
+
+async function importFromFile(state, file, rerender, setStatus) {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const result = importConfigPayload(state, payload);
+    persistNow(state);
+    rerender();
+    closeModal('import-export-modal');
+    setStatus(`已导入 ${result.pools} 个组合，${result.presets} 个 API 条目`);
 }
 
 function closeModal(id) {
@@ -623,6 +807,7 @@ function openGroupPicker(state, rerender) {
         const pool = (state.pools || []).find(item => item.name === name);
         if (!pool) return;
         state.activePoolId = pool.id;
+        persistHot(state);
         rerender();
     });
 }
@@ -646,7 +831,7 @@ function renameActivePool(state, rerender, setStatus) {
         return;
     }
     pool.name = name;
-    saveState(state);
+    persistNow(state);
     closeRenamePoolModal();
     rerender();
     setStatus('组合名称已修改');
@@ -665,12 +850,14 @@ function openEntryNamePicker(state, row, input, rerender) {
         } else {
             entry.name = name;
         }
+        saveApiPreset(state, entry);
+        persistNow(state);
     }, {
         deletable: true,
         onDelete: (item) => {
             const deleted = deleteSavedApiEntry(state, item);
             if (!deleted) return showToast('该条目未保存为 API 预设，无法从预设列表删除', 'warning');
-            saveState(state);
+            persistNow(state);
             showToast('API 条目已删除', 'info');
             openEntryNamePicker(state, row, input, rerender);
         },
@@ -683,6 +870,8 @@ function openEntryModelPicker(state, row, input, rerender) {
     if (!entry) return;
     openOptionPicker(input, getModelOptions(entry), '选择模型', (model) => {
         entry.model = model;
+        saveApiPreset(state, entry);
+        persistHot(state);
         rerender();
     });
 }
@@ -828,7 +1017,7 @@ function bindLongPress(state, rerender, setStatus) {
         timer = setTimeout(() => {
             state.enabled = !(state.enabled !== false);
             area.removeClass('pressing-on pressing-off');
-            saveState(state);
+            persistNow(state);
             rerender();
             setStatus(state.enabled !== false ? '插件全局生效' : '插件已关闭');
         }, 800);
@@ -928,7 +1117,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
         const changed = reorderEntriesByIds(state, orderedIds);
         cleanup();
         if (changed) {
-            saveState(state);
+            persistHot(state);
             rerender();
             setStatus('条目顺序已更新');
         }
@@ -1002,10 +1191,13 @@ function bind(state, rerender, setStatus) {
     $('#mode-fixed,#mode-random').off('change.kf').on('change.kf', function () {
         const pool = getActivePool(state);
         pool.mode = String($(this).val()) === 'random' ? 'random' : 'fixed';
+        maybeEqualizeWeights(state);
+        persistHot(state);
         rerender();
     });
     $('#kf-no-streak').off('change.kf').on('change.kf', function () {
         getActivePool(state).random.noConsecutive = $(this).prop('checked');
+        persistHot(state);
         setStatus('避免连续命中已更新');
     });
     $('#kf-btn-new-pool').off('click.kf').on('click.kf', () => {
@@ -1013,7 +1205,7 @@ function bind(state, rerender, setStatus) {
         const pool = mkPool();
         state.pools.push(pool);
         state.activePoolId = pool.id;
-        saveState(state);
+        persistNow(state);
         rerender();
     });
     $('#kf-btn-copy-pool').off('click.kf').on('click.kf', () => {
@@ -1021,7 +1213,7 @@ function bind(state, rerender, setStatus) {
         const pool = clonePool(getActivePool(state));
         state.pools.push(pool);
         state.activePoolId = pool.id;
-        saveState(state);
+        persistNow(state);
         rerender();
     });
     $('#kf-btn-rename-pool').off('click.kf').on('click.kf', () => openRenamePoolModal(state));
@@ -1029,12 +1221,12 @@ function bind(state, rerender, setStatus) {
         if (state.pools.length <= 1) return setStatus('至少保留一个组合');
         state.pools = state.pools.filter(p => p.id !== state.activePoolId);
         state.activePoolId = state.pools[0].id;
-        saveState(state);
+        persistNow(state);
         rerender();
     });
     $('#kf-btn-add-entry').off('click.kf').on('click.kf', () => {
         addEntry(getActivePool(state));
-        saveState(state);
+        persistNow(state);
         rerender();
     });
 
@@ -1052,8 +1244,26 @@ function bind(state, rerender, setStatus) {
             rerender();
         }
         saveApiPreset(state, entry);
-        saveState(state);
+        persistNow(state);
         setStatus('API条目名称已保存');
+    });
+    $('#kf-entry-list').on('input.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
+        const row = $(this).closest('.entry-block');
+        const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
+        if (!entry) return;
+        syncEntryFromRow(entry, row);
+        saveApiPresetIfNamed(state, entry);
+        persistHot(state);
+    });
+    $('#kf-entry-list').on('change.kf', '.kf-entry-enabled,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
+        const row = $(this).closest('.entry-block');
+        const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
+        if (!entry) return;
+        syncEntryFromRow(entry, row);
+        saveApiPresetIfNamed(state, entry);
+        const equalized = $(this).hasClass('kf-entry-weight') && maybeEqualizeWeights(state);
+        persistHot(state);
+        if (equalized) rerender();
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-name', function () {
         const row = $(this).closest('.entry-block');
@@ -1078,6 +1288,8 @@ function bind(state, rerender, setStatus) {
             const option = options.find(item => item.label === label);
             if (!option) return;
             entry.provider = option.value;
+            saveApiPresetIfNamed(state, entry);
+            persistHot(state);
             rerender();
         });
     });
@@ -1112,13 +1324,14 @@ function bind(state, rerender, setStatus) {
         if (!entry) return;
         syncEntryFromRow(entry, row);
         entry.collapsed = !entry.collapsed;
+        persistHot(state);
         rerender();
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);
         const id = $(this).closest('.entry-block').data('id');
         pool.entries = pool.entries.filter(e => e.id !== id);
-        saveState(state);
+        persistNow(state);
         rerender();
     });
     bindEntryDragSort(state, rerender, setStatus);
@@ -1133,7 +1346,8 @@ function bind(state, rerender, setStatus) {
         }
         try {
             const models = await fetchOpenAICompatibleModels(entry);
-            saveState(state);
+            saveApiPresetIfNamed(state, entry);
+            persistNow(state);
             rerender();
             setStatus(`已获取 ${models.length} 个模型`);
         } catch (error) {
@@ -1168,30 +1382,43 @@ function bind(state, rerender, setStatus) {
     });
 
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#settings-modal').addClass('show'));
-    $('#kf-btn-save').off('click.kf').on('click.kf', () => {
-        const saveButton = $('#kf-btn-save');
-        syncAllFromControls(state);
-        const pool = getActivePool(state);
-        for (const entry of pool.entries || []) saveApiPreset(state, entry);
-        if (pool.mode === 'random' && shouldEqualize(pool)) {
-            const ok = confirm('当前权重差距较大，是否允许插件按照API数量自动均等权重？');
-            if (ok) equalize(pool);
+    $('#kf-btn-import-export').off('click.kf').on('click.kf', () => $('#import-export-modal').addClass('show'));
+    $('#kf-import-export-close').off('click.kf').on('click.kf', () => closeModal('import-export-modal'));
+    $('#kf-export-current-pool').off('click.kf').on('click.kf', () => {
+        exportCurrentPool(state);
+        setStatus('当前组合已导出');
+    });
+    $('#kf-export-all-pools').off('click.kf').on('click.kf', () => {
+        exportAllPools(state);
+        setStatus('全部组合已导出');
+    });
+    $('#kf-export-api-presets').off('click.kf').on('click.kf', () => {
+        exportApiPresets(state);
+        setStatus('API 条目已导出');
+    });
+    $('#kf-import-config').off('click.kf').on('click.kf', () => $('#kf-import-file').val('').trigger('click'));
+    $('#kf-import-file').off('change.kf').on('change.kf', async function () {
+        const file = this.files?.[0];
+        if (!file) return;
+        try {
+            await importFromFile(state, file, rerender, setStatus);
+        } catch (error) {
+            const message = String(error?.message || error || '导入失败');
+            showToast(message, 'error');
+            setStatus('导入失败');
         }
-        saveState(state);
-        rerender();
-        $('#kf-btn-save').text('保存完成');
-        window.clearTimeout(saveButton.data('kfSaveDoneTimer'));
-        const timer = window.setTimeout(() => {
-            $('#kf-btn-save').text('保存');
-        }, 900);
-        $('#kf-btn-save').data('kfSaveDoneTimer', timer);
-        setStatus('已保存');
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
         $('#logModal').addClass('show');
         renderLogs(state);
     });
     $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('logModal'));
+    $('#kf-log-clear').off('click.kf').on('click.kf', () => {
+        state.logs = [];
+        persistNow(state);
+        renderLogs(state);
+        setStatus('日志已清空');
+    });
     $('.kf-log-filter').off('click.kf').on('click.kf', function () {
         $('.kf-log-filter').removeClass('active');
         $(this).addClass('active');
@@ -1231,9 +1458,11 @@ function bind(state, rerender, setStatus) {
     $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline,#kf-theme-blur,#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncThemeFromControls(state);
         applyTheme(state);
+        persistHot(state);
     });
     $('#kf-failure-retry-count,#kf-failure-alert-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncFailureFromControls(state);
+        persistHot(state);
     });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
         const input = $('#kf-failure-retry-count');
@@ -1269,6 +1498,9 @@ export async function initUI(setStatus) {
     $(window).off('STKarmaFlip:logs-updated.kf').on('STKarmaFlip:logs-updated.kf', () => {
         if ($('#logModal').hasClass('show')) renderLogs(state);
     });
-    setTimeout(enableStatePersistence, 800);
+    setTimeout(() => {
+        uiPersistenceReady = true;
+        enableStatePersistence();
+    }, 800);
     setStatus('已加载');
 }

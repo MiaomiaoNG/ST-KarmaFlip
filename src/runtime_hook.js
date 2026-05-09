@@ -5,9 +5,21 @@ let chatSettingsBound = false;
 let fetchRetryBound = false;
 let bindRetryTimer = null;
 let originalFetch = null;
-let pendingRequest = null;
+const pendingRequests = new Map();
 
 const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
+const LOG_PERSIST_DELAY = 5000;
+const TRACE_FIELD = 'karmaflip_trace_id';
+const PENDING_TTL = 30000;
+const MVU_PROMPT_PATTERNS = [
+    /<additional_information\b/i,
+    /<past_observe\b/i,
+    /<must>\s*指令/i,
+    /遵循\s*<must>\s*指令/i,
+    /\[Start a new Chat\]/i,
+    /<macro\b/i,
+    /\bMacro\b/i,
+];
 
 function normalizeBaseUrl(apiUrl) {
     return String(apiUrl || '').trim().replace(/\/+$/, '');
@@ -47,6 +59,25 @@ function isTextGeneration(generateData) {
     return TEXT_GENERATION_TYPES.has(generationType(generateData));
 }
 
+function contentToText(content) {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) return content.map(contentToText).filter(Boolean).join('\n');
+    if (content && typeof content === 'object') {
+        return contentToText(content.text || content.content || content.value || '');
+    }
+    return '';
+}
+
+function isMvuAnalysisRequest(generateData) {
+    const messages = Array.isArray(generateData?.messages) ? generateData.messages : [];
+    if (!messages.length) return false;
+    const sampled = messages.length <= 4
+        ? messages
+        : [messages[0], messages[1], messages[messages.length - 2], messages[messages.length - 1]];
+    const text = sampled.map(message => contentToText(message?.content)).join('\n');
+    return MVU_PROMPT_PATTERNS.some(pattern => pattern.test(text));
+}
+
 function isGenerateFetch(input) {
     const url = typeof input === 'string' ? input : input?.url;
     return String(url || '').includes('/api/backends/chat-completions/generate');
@@ -61,6 +92,7 @@ function patchGenerateData(generateData, member) {
 
 function patchBodyForMember(body, member) {
     const payload = JSON.parse(String(body));
+    delete payload[TRACE_FIELD];
     patchGenerateData(payload, member);
     return JSON.stringify(payload);
 }
@@ -151,10 +183,12 @@ function businessErrorMessage(payload) {
 }
 
 async function responseBusinessFailure(response) {
+    const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
+    if (contentType.includes('text/event-stream')) return { failed: false, detail: '' };
+
     if (!response.ok) {
         return { failed: true, detail: await responseText(response) };
     }
-    const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
     if (!contentType.includes('application/json')) return { failed: false, detail: '' };
     const text = await responseText(response);
     const payload = parseJson(text);
@@ -165,7 +199,7 @@ async function responseBusinessFailure(response) {
 function queueLog(state, entry) {
     setTimeout(() => {
         pushLog(state, entry);
-        saveStateAsync(state);
+        saveStateAsync(state, LOG_PERSIST_DELAY);
     }, 0);
 }
 
@@ -186,23 +220,57 @@ function makeRetryInit(init, member) {
     };
 }
 
+function makeTraceId() {
+    if (globalThis.crypto?.randomUUID) return `kf_${globalThis.crypto.randomUUID()}`;
+    return `kf_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
 function startPendingRequest(state, pool, picked, member, type) {
-    pendingRequest = {
-        id: crypto.randomUUID(),
+    const id = makeTraceId();
+    pendingRequests.set(id, {
+        id,
         state,
         pool,
         picked,
         member,
         type,
-        expiresAt: Date.now() + 30000,
-    };
+        expiresAt: Date.now() + PENDING_TTL,
+    });
+    return id;
 }
 
-function consumePendingRequest() {
-    const pending = pendingRequest;
-    pendingRequest = null;
+function consumePendingRequest(id) {
+    const pending = pendingRequests.get(id);
+    pendingRequests.delete(id);
     if (!pending || pending.expiresAt < Date.now()) return null;
     return pending;
+}
+
+function cleanupPendingRequests() {
+    const now = Date.now();
+    for (const [id, pending] of pendingRequests.entries()) {
+        if (!pending || pending.expiresAt < now) pendingRequests.delete(id);
+    }
+}
+
+function readTraceRequest(init) {
+    const body = String(init?.body || '');
+    if (!body.includes(TRACE_FIELD)) return null;
+    try {
+        const payload = JSON.parse(body);
+        const traceId = String(payload?.[TRACE_FIELD] || '');
+        if (!traceId) return null;
+        delete payload[TRACE_FIELD];
+        return {
+            traceId,
+            init: {
+                ...init,
+                body: JSON.stringify(payload),
+            },
+        };
+    } catch {
+        return null;
+    }
 }
 
 async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
@@ -324,9 +392,12 @@ function bindRetryFetch(onStatus) {
         if (!isGenerateFetch(input) || !init?.body || typeof init.body !== 'string') {
             return originalFetch(input, init);
         }
-        const pending = consumePendingRequest();
-        if (!pending) return originalFetch(input, init);
-        return runRetryPlan(input, init, pending, onStatus);
+        const traced = readTraceRequest(init);
+        if (!traced) return originalFetch(input, init);
+        cleanupPendingRequests();
+        const pending = consumePendingRequest(traced.traceId);
+        if (!pending) return originalFetch(input, traced.init);
+        return runRetryPlan(input, traced.init, pending, onStatus);
     };
     fetchRetryBound = true;
 }
@@ -352,6 +423,7 @@ function bindChatCompletionSettings(onStatus) {
         const state = loadState();
         if (state.enabled === false) return;
         if (!isTextGeneration(generateData) || isBackgroundRequest(generateData)) return;
+        if (isMvuAnalysisRequest(generateData)) return;
 
         const pool = getActivePool(state);
         if (!Array.isArray(pool.entries) || !pool.entries.length) return;
@@ -364,7 +436,7 @@ function bindChatCompletionSettings(onStatus) {
         patchGenerateData(generateData, member);
 
         const type = generationType(generateData);
-        startPendingRequest(state, pool, picked, member, type);
+        generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type);
         queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
         if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
     });

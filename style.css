@@ -630,9 +630,10 @@
     min-width: 52px;
     padding: 4px 8px;
     font-size: 12px;
-    height: 32px;
-    min-height: 32px;
     box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 .kf-mobile-option-row .kf-option-label {
     flex: 1 1 auto;
@@ -641,8 +642,6 @@
     background: transparent;
     text-align: left;
     word-break: break-word;
-    height: 32px;
-    min-height: 32px;
     padding: 4px 8px;
     box-sizing: border-box;
     display: flex;
