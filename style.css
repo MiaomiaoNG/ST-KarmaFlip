@@ -14,7 +14,7 @@
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 8px;
     font-family: "Microsoft YaHei", sans-serif;
 }
 
@@ -40,7 +40,7 @@
 #kf-root .block {
     background-color: var(--bg-main);
     color: var(--text-main);
-    padding: 20px;
+    padding: 12px 15px;
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     isolation: isolate;
@@ -50,9 +50,9 @@
 #kf-root .entry-block {
     background-color: var(--bg-sub);
     color: var(--text-sub);
-    padding: 15px;
+    padding: 10px;
     border-radius: 6px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     isolation: isolate;
     transition: background-color 0.3s, color 0.3s, transform 0.18s ease;
     cursor: grab;
@@ -728,5 +728,16 @@
 @media (max-width: 650px) {
     #kf-root .responsive-controls { grid-template-columns: repeat(2, 1fr); }
     #kf-root .entry-main-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    #kf-root .row { flex-wrap: wrap; }
+    #kf-root .row { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; } /* 缩小手机上同行元素的间距 */
+    
+    /* 手机端进一步压缩边缘空白，避免撑破屏幕 */
+    #kf-root .block { padding: 8px; } 
+    #kf-root .entry-block { padding: 8px; margin-bottom: 6px; }
+    #kf-root .title { margin-bottom: 10px; font-size: 16px; }
+    
+    /* 稍微调小手机端的按钮和输入框的“胖瘦度”与字号（不改字体，只改大小），避免占满屏幕 */
+    #kf-root .marker-btn { padding: 4px 8px; font-size: 13px; }
+    #kf-root .select-wrapper .inner-select { padding: 6px 8px; font-size: 13px; }
+    #kf-root .input-wrapper .inner-input { font-size: 13px; }
+    #kf-root .input-wrapper .label { font-size: 12px; margin-right: 4px; }
 }
