@@ -134,6 +134,19 @@ function toast(type, message) {
     else console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
 }
 
+function isModelAlertEnabled(state) {
+    const latest = loadState();
+    return !!(latest.failure?.modelAlertEnabled || state.failure?.modelAlertEnabled);
+}
+
+function showModelAlert(state, member) {
+    if (!isModelAlertEnabled(state)) return;
+    const message = `翻牌！本轮抽到的是[${member?.model || '未填模型'}]`;
+    const shower = window.STKarmaFlip?.showToast;
+    if (typeof shower === 'function') shower(message, 'info', 2600);
+    else toast('info', message);
+}
+
 async function askFailureDecision(message, actions, fallback) {
     const opener = window.STKarmaFlip?.openFailureDecision;
     if (typeof opener !== 'function') {
@@ -310,6 +323,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
             currentMember = currentPicked?.member;
             if (!currentMember) break;
             queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: true });
+            showModelAlert(state, currentMember);
             if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(currentMember)} | ${pending.type}`);
         }
 
@@ -438,6 +452,7 @@ function bindChatCompletionSettings(onStatus) {
         const type = generationType(generateData);
         generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type);
         queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
+        showModelAlert(state, member);
         if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
     });
 

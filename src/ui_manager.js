@@ -83,6 +83,7 @@ function applyTheme(state) {
     $('#kf-theme-blur').prop('disabled', simple);
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
+    $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
 }
 
 function mkPool(name = null) {
@@ -522,6 +523,7 @@ function syncThemeFromControls(state) {
 function syncFailureFromControls(state) {
     state.failure.retryCount = Math.max(1, toInt($('#kf-failure-retry-count').val() || 3));
     state.failure.alertEnabled = $('#kf-failure-alert-enabled').prop('checked');
+    state.failure.modelAlertEnabled = $('#kf-model-alert-enabled').prop('checked');
 }
 
 function syncAllFromControls(state) {
@@ -728,11 +730,25 @@ function openFailureDecision(message, actions) {
 window.STKarmaFlip = window.STKarmaFlip || {};
 window.STKarmaFlip.openFailureDecision = openFailureDecision;
 
-function showToast(message, type = 'info', timeout = 2800) {
-    const layer = $('#kf-toast-layer');
-    if (!layer.length) {
-        return console[type === 'error' ? 'error' : 'log'](`[KarmaFlip] ${message}`);
+function ensureToastLayer() {
+    let layer = $('#kf-toast-layer');
+    if (layer.length) {
+        if (layer.get(0).parentElement !== document.body) document.body.appendChild(layer.get(0));
+        layer.attr('data-global-toast', 'true');
+        return layer;
     }
+    layer = $('<div id="kf-toast-layer" class="kf-toast-layer"></div>');
+    layer.attr('data-global-toast', 'true');
+    document.body.appendChild(layer.get(0));
+    const state = loadState();
+    const root = document.getElementById('kf-root');
+    const resolvedBrush = root?.dataset?.brush || state.theme?.brush || 'simple';
+    layer.get(0).dataset.brush = resolvedBrush === 'marker' ? 'marker' : 'simple';
+    return layer;
+}
+
+function showToast(message, type = 'info', timeout = 2800) {
+    const layer = ensureToastLayer();
     const item = $(`<div class="kf-toast kf-toast-${esc(type)} brush-stroke"></div>`).text(message || '');
     layer.append(item);
     requestAnimationFrame(() => item.addClass('show'));
@@ -1460,7 +1476,7 @@ function bind(state, rerender, setStatus) {
         applyTheme(state);
         persistHot(state);
     });
-    $('#kf-failure-retry-count,#kf-failure-alert-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('#kf-failure-retry-count,#kf-failure-alert-enabled,#kf-model-alert-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncFailureFromControls(state);
         persistHot(state);
     });

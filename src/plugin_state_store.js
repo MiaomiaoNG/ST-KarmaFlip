@@ -43,6 +43,7 @@ export function getDefaultState() {
         failure: {
             retryCount: 3,
             alertEnabled: false,
+            modelAlertEnabled: false,
         },
         runtime: {},
         logs: [],
@@ -113,6 +114,7 @@ function normalizeState(raw) {
         ...(s.failure || {}),
         retryCount: Math.max(1, toInt(s.failure?.retryCount || 3)),
         alertEnabled: !!s.failure?.alertEnabled,
+        modelAlertEnabled: !!s.failure?.modelAlertEnabled,
     };
     if (!Array.isArray(s.logs)) s.logs = [];
     if (s.logs.length > MAX_STORED_LOGS) s.logs = s.logs.slice(0, MAX_STORED_LOGS);

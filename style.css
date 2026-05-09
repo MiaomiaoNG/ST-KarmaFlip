@@ -687,19 +687,20 @@
 
 .kf-toast-layer {
     position: fixed;
-    top: 18px;
+    top: max(18px, env(safe-area-inset-top));
     left: 50%;
     transform: translateX(-50%);
-    z-index: 10080;
+    z-index: 100000;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
     pointer-events: none;
-    --bg-main: #ffffff;
-    --text-main: #000000;
-    --underline-color: #617b9b;
-    --underline-rgb: 97, 123, 155;
+    width: min(560px, calc(100vw - 24px));
+    --toast-bg: var(--bg-main, rgba(255, 255, 255, 0.96));
+    --toast-text: var(--text-main, #182230);
+    --toast-border: #617b9b;
+    --toast-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
     --marker-rgb: 208, 222, 239;
     --marker-blur: 0.6px;
     --brush-blend: multiply;
@@ -711,12 +712,14 @@
     position: relative;
     z-index: 1;
     min-width: 180px;
-    max-width: min(520px, calc(100vw - 32px));
+    width: fit-content;
+    max-width: 100%;
     padding: 9px 16px;
     border-radius: 6px;
-    background: var(--bg-main, #ffffff);
-    color: var(--text-main, #000000);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    background: var(--toast-bg);
+    color: var(--toast-text);
+    border: 1px solid var(--toast-border) !important;
+    box-shadow: var(--toast-shadow);
     text-align: center;
     font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
     line-height: 1.35;
@@ -734,10 +737,12 @@
 
 .kf-toast-error {
     --marker-rgb: 239, 168, 168;
+    --toast-border: #c94f4f;
 }
 
 .kf-toast-warning {
     --marker-rgb: 239, 210, 145;
+    --toast-border: #b98218;
 }
 
 .kf-toast.brush-stroke::before {
