@@ -41,7 +41,7 @@ function silenceLongPressTransition() {
 function applyBrush(root, style) {
     let blend = 'multiply';
     let opacity = '1';
-    const resolvedStyle = style === 'simple' ? 'simple' : 'marker';
+    const resolvedStyle = ['simple', 'marker', 'native'].includes(style) ? style : 'simple';
     root.style.setProperty('--brush-blend', blend);
     root.style.setProperty('--brush-opacity', opacity);
     root.dataset.brush = resolvedStyle;
@@ -52,6 +52,16 @@ function applyBrush(root, style) {
     }
     const toastLayer = document.getElementById('kf-toast-layer');
     if (toastLayer) toastLayer.dataset.brush = resolvedStyle;
+    applyNativeClasses(resolvedStyle === 'native');
+}
+
+function applyNativeClasses(enabled) {
+    const root = $('#kf-root');
+    const modals = $('.kf-modal-overlay');
+    const scope = root.add(modals);
+    scope.find('.marker-btn').toggleClass('menu_button', enabled);
+    scope.find('.inner-input,.inner-select,select,textarea,.kf-stepper-input').toggleClass('text_pole', enabled);
+    modals.toggleClass('popup kf-native-popup', enabled);
 }
 
 function applyTheme(state) {
@@ -77,10 +87,11 @@ function applyTheme(state) {
     $('#kf-theme-bg-sub').val(theme.bgSub || '#f7f9fc');
     $('#kf-theme-underline').val(theme.underline || '#617b9b');
     $('#kf-theme-blur').val(theme.blur || '0.6');
-    $('#kf-theme-brush').val(theme.brush === 'simple' ? 'simple' : 'marker');
-    const simple = theme.brush === 'simple';
-    $('#kf-theme-blur-row').toggle(!simple);
-    $('#kf-theme-blur').prop('disabled', simple);
+    const resolvedBrush = ['simple', 'marker', 'native'].includes(theme.brush) ? theme.brush : 'simple';
+    $('#kf-theme-brush').val(resolvedBrush);
+    const marker = resolvedBrush === 'marker';
+    $('#kf-theme-blur-row').toggle(marker);
+    $('#kf-theme-blur').prop('disabled', !marker);
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
     $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
@@ -516,8 +527,9 @@ function syncThemeFromControls(state) {
     state.theme.bgMain = $('#kf-theme-bg-main').val();
     state.theme.bgSub = $('#kf-theme-bg-sub').val();
     state.theme.underline = $('#kf-theme-underline').val();
-    state.theme.brush = String($('#kf-theme-brush').val() || 'simple');
-    if (state.theme.brush !== 'simple') state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
+    const brush = String($('#kf-theme-brush').val() || 'simple');
+    state.theme.brush = ['simple', 'marker', 'native'].includes(brush) ? brush : 'simple';
+    if (state.theme.brush === 'marker') state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
 }
 
 function syncFailureFromControls(state) {
@@ -743,7 +755,7 @@ function ensureToastLayer() {
     const state = loadState();
     const root = document.getElementById('kf-root');
     const resolvedBrush = root?.dataset?.brush || state.theme?.brush || 'simple';
-    layer.get(0).dataset.brush = resolvedBrush === 'marker' ? 'marker' : 'simple';
+    layer.get(0).dataset.brush = ['simple', 'marker', 'native'].includes(resolvedBrush) ? resolvedBrush : 'simple';
     return layer;
 }
 
@@ -1453,7 +1465,7 @@ function bind(state, rerender, setStatus) {
         if (event.key === 'Escape') closeRenamePoolModal();
     });
     $('#kf-dropdown-close').off('click.kf').on('click.kf', () => closeDropdown());
-    $('.modal-overlay').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
+    $('.kf-modal-overlay').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf', function (event) {
             event.stopPropagation();
         })
@@ -1462,7 +1474,7 @@ function bind(state, rerender, setStatus) {
             if (this.id === 'failure-modal') return;
             if (event.target === this) $(this).removeClass('show');
         });
-    $('.modal-overlay .modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
+    $('.kf-modal-overlay .modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf click.kf', function (event) {
             event.stopPropagation();
         });

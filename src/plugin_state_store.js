@@ -108,7 +108,7 @@ function normalizeState(raw) {
     s.enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : activePool?.enabled !== false;
     s.runtime = {};
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
-    s.theme.brush = s.theme.brush === 'marker' ? 'marker' : 'simple';
+    s.theme.brush = ['simple', 'marker', 'native'].includes(s.theme.brush) ? s.theme.brush : 'simple';
     s.failure = {
         ...getDefaultState().failure,
         ...(s.failure || {}),

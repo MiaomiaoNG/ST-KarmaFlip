@@ -61,7 +61,7 @@
 </div>
 </div>
 
-<div class="modal-overlay" id="logModal">
+<div class="modal-overlay kf-modal-overlay" id="logModal">
     <div class="modal-box">
         <div class="modal-header">系统日志 <span class="close-btn" id="kf-log-close">✖</span></div>
         <div class="log-filter-row">
@@ -74,14 +74,14 @@
     </div>
 </div>
 
-<div class="modal-overlay" id="dropdownModal">
+<div class="modal-overlay kf-modal-overlay" id="dropdownModal">
     <div class="modal-box">
         <div class="modal-header"><span id="kf-dropdown-title">选择</span> <span class="close-btn" id="kf-dropdown-close">✖</span></div>
         <div class="kf-mobile-options" id="kf-mobile-options"></div>
     </div>
 </div>
 
-<div class="modal-overlay" id="settings-modal">
+<div class="modal-overlay kf-modal-overlay" id="settings-modal">
     <div class="modal-box">
         <div class="modal-header">请求设置 <span class="close-btn" id="kf-settings-close">✖</span></div>
         <div class="kf-settings-row">
@@ -115,7 +115,7 @@
     </div>
 </div>
 
-<div class="modal-overlay" id="failure-modal">
+<div class="modal-overlay kf-modal-overlay" id="failure-modal">
     <div class="modal-box">
         <div class="modal-header">API请求失败</div>
         <div class="kf-modal-message" id="kf-failure-message"></div>
@@ -123,7 +123,7 @@
     </div>
 </div>
 
-<div class="modal-overlay" id="api-test-modal">
+<div class="modal-overlay kf-modal-overlay" id="api-test-modal">
     <div class="modal-box">
         <div class="modal-header">API连通测试 <span class="close-btn" id="kf-api-test-close">✖</span></div>
         <div class="kf-test-status" id="kf-api-test-status"></div>
@@ -131,7 +131,7 @@
     </div>
 </div>
 
-<div class="modal-overlay" id="rename-pool-modal">
+<div class="modal-overlay kf-modal-overlay" id="rename-pool-modal">
     <div class="modal-box">
         <div class="modal-header">修改组合名称 <span class="close-btn" id="kf-rename-pool-close">✖</span></div>
         <div class="input-wrapper">
@@ -145,7 +145,7 @@
     </div>
 </div>
 
-<div class="modal-overlay" id="import-export-modal">
+<div class="modal-overlay kf-modal-overlay" id="import-export-modal">
     <div class="modal-box">
         <div class="modal-header">导入/导出 <span class="close-btn" id="kf-import-export-close">✖</span></div>
         <div class="kf-modal-actions">
@@ -160,7 +160,7 @@
 
 <div id="kf-toast-layer" class="kf-toast-layer"></div>
 
-<div class="modal-overlay" id="theme-modal">
+<div class="modal-overlay kf-modal-overlay" id="theme-modal">
     <div class="modal-box">
         <div class="modal-header">界面美化 <span class="close-btn" id="kf-theme-close">✖</span></div>
         <div class="color-picker-row">
@@ -180,6 +180,7 @@
             <select id="kf-theme-brush" class="inner-input">
                 <option value="simple">简约风格</option>
                 <option value="marker">马克笔风格</option>
+                <option value="native">酒馆原生风格</option>
             </select>
         </div>
         <div class="color-picker-row" id="kf-theme-blur-row">

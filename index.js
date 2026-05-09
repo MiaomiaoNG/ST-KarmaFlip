@@ -26,6 +26,7 @@ const KarmaFlip = (() => {
         console.log(`[${moduleName}] Initializing...`);
 
         ensureStylesheet('st-karmaflip-theme-simple', `${extensionFolderPath}styles/theme-simple.css`);
+        ensureStylesheet('st-karmaflip-theme-native', `${extensionFolderPath}styles/theme-native.css`);
 
         const html = await $.get(`${extensionFolderPath}index.html`);
         $('#extensions_settings').append(html);
