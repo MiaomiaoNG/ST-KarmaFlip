@@ -4,86 +4,86 @@
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
-<div class="plugin-container" id="kf-root" data-mode="fixed" data-brush="simple">
-    <div class="block">
-        <div class="title">组合管理</div>
-        <div class="row">
-            <div class="select-wrapper two-strokes brush-stroke flex-1" id="group-select-wrapper">
-                <input type="text" id="group-select-display" class="inner-select dropdown-input">
-                <button class="dropdown-arrow" id="group-select-arrow" type="button">▼</button>
+<div class="kf-plugin-container" id="kf-root" data-mode="fixed" data-brush="simple">
+    <div class="kf-block">
+        <div class="kf-title">组合管理</div>
+        <div class="kf-row">
+            <div class="kf-select-wrapper kf-two-strokes kf-accent-fill kf-flex-1" id="kf-pool-picker">
+                <input type="text" id="kf-pool-picker-display" class="kf-inner-select kf-dropdown-input">
+                <button class="kf-dropdown-arrow" id="kf-pool-picker-arrow" type="button">▼</button>
             </div>
         </div>
-        <div class="row">
-            <div class="btn-group-even">
-                <button id="kf-btn-new-pool" class="marker-btn brush-stroke">添加</button>
-                <button id="kf-btn-copy-pool" class="marker-btn brush-stroke">复制</button>
-                <button id="kf-btn-rename-pool" class="marker-btn brush-stroke">修改</button>
-                <button id="kf-btn-delete-pool" class="marker-btn brush-stroke">删除</button>
+        <div class="kf-row">
+            <div class="kf-btn-group-even">
+                <button id="kf-btn-new-pool" class="kf-action-btn kf-accent-fill">添加</button>
+                <button id="kf-btn-copy-pool" class="kf-action-btn kf-accent-fill">复制</button>
+                <button id="kf-btn-rename-pool" class="kf-action-btn kf-accent-fill">修改</button>
+                <button id="kf-btn-delete-pool" class="kf-action-btn kf-accent-fill">删除</button>
             </div>
         </div>
     </div>
 
-    <div class="block">
-        <div class="title">API条目</div>
-        <div class="responsive-controls">
-            <label class="marker-checkbox kf-mode-control">
-                <input type="radio" name="api-mode" id="mode-fixed" value="fixed">
+    <div class="kf-block">
+        <div class="kf-title">API条目</div>
+        <div class="kf-responsive-controls">
+            <label class="kf-toggle-chip kf-mode-control">
+                <input type="radio" name="kf-api-mode" id="kf-mode-fixed" value="fixed">
                 <span class="kf-check-box"></span>
-                <span class="text brush-stroke">固定模式</span>
+                <span class="kf-check-text kf-accent-fill">固定模式</span>
             </label>
-            <label class="marker-checkbox kf-mode-control">
-                <input type="radio" name="api-mode" id="mode-random" value="random">
+            <label class="kf-toggle-chip kf-mode-control">
+                <input type="radio" name="kf-api-mode" id="kf-mode-random" value="random">
                 <span class="kf-check-box"></span>
-                <span class="text brush-stroke">随机模式</span>
+                <span class="kf-check-text kf-accent-fill">随机模式</span>
             </label>
-            <label class="marker-checkbox kf-mode-control" title="避免连续使用同一个API">
+            <label class="kf-toggle-chip kf-mode-control" title="避免连续使用同一个API">
                 <input type="checkbox" id="kf-no-streak">
                 <span class="kf-check-box"></span>
-                <span class="text brush-stroke">避免连续</span>
+                <span class="kf-check-text kf-accent-fill">避免连续</span>
             </label>
-            <button class="marker-btn brush-stroke" id="kf-btn-add-entry">添加条目</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-btn-add-entry">添加条目</button>
         </div>
-        <div class="entries-container" id="kf-entry-list"></div>
+        <div class="kf-entries-container" id="kf-entry-list"></div>
     </div>
 
-    <div class="block">
-        <div class="btn-group-even">
-            <button class="marker-btn brush-stroke" id="kf-btn-settings">设置</button>
-            <button class="marker-btn brush-stroke" id="kf-btn-logs">日志</button>
-            <button class="marker-btn brush-stroke" id="kf-btn-theme">美化</button>
-            <button class="marker-btn brush-stroke" id="kf-btn-import-export">导入/出</button>
+    <div class="kf-block">
+        <div class="kf-btn-group-even">
+            <button class="kf-action-btn kf-accent-fill" id="kf-btn-settings">设置</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-btn-logs">日志</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-btn-theme">美化</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-btn-import-export">导入/出</button>
         </div>
-        <div class="long-press-row two-strokes brush-stroke" id="kf-long-press">
-            <span class="long-press-text" id="kf-long-press-text">插件已关闭（长按启动）</span>
+        <div class="kf-long-press-row kf-two-strokes kf-accent-fill" id="kf-long-press">
+            <span class="kf-long-press-text" id="kf-long-press-text">插件已关闭（长按启动）</span>
         </div>
     </div>
 </div>
 </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="logModal">
-    <div class="modal-box">
-        <div class="modal-header">系统日志 <span class="close-btn" id="kf-log-close">✖</span></div>
-        <div class="log-filter-row">
-            <button class="marker-btn brush-stroke kf-log-filter active" data-filter="all">全部</button>
-            <button class="marker-btn brush-stroke kf-log-filter" data-filter="error">报错</button>
-            <button class="marker-btn brush-stroke kf-log-filter" data-filter="pick">抽选记录</button>
-            <button class="marker-btn brush-stroke" id="kf-log-clear">清空</button>
+<div class="kf-modal-overlay" id="kf-log-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">系统日志 <span class="kf-close-btn" id="kf-log-close">✖</span></div>
+        <div class="kf-log-filter-row">
+            <button class="kf-action-btn kf-accent-fill kf-log-filter kf-active" data-filter="all">全部</button>
+            <button class="kf-action-btn kf-accent-fill kf-log-filter" data-filter="error">报错</button>
+            <button class="kf-action-btn kf-accent-fill kf-log-filter" data-filter="pick">抽选记录</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-log-clear">清空</button>
         </div>
         <div id="kf-logs-list" class="kf-logs-list" role="log" aria-live="polite"></div>
     </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="dropdownModal">
-    <div class="modal-box">
-        <div class="modal-header"><span id="kf-dropdown-title">选择</span> <span class="close-btn" id="kf-dropdown-close">✖</span></div>
+<div class="kf-modal-overlay" id="kf-dropdown-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header"><span id="kf-dropdown-title">选择</span> <span class="kf-close-btn" id="kf-dropdown-close">✖</span></div>
         <div class="kf-mobile-options" id="kf-mobile-options"></div>
     </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="settings-modal">
-    <div class="modal-box">
-        <div class="modal-header">请求设置 <span class="close-btn" id="kf-settings-close">✖</span></div>
+<div class="kf-modal-overlay" id="kf-settings-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">请求设置 <span class="kf-close-btn" id="kf-settings-close">✖</span></div>
         <div class="kf-settings-row">
             <span class="kf-settings-label">API失败自动重试次数</span>
             <div class="kf-stepper" title="单轮次数">
@@ -109,50 +109,50 @@
             </label>
         </div>
         <div class="kf-modal-actions kf-modal-actions-two">
-            <button class="marker-btn brush-stroke" id="kf-settings-confirm">确认</button>
-            <button class="marker-btn brush-stroke" id="kf-settings-cancel">取消</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-settings-confirm">确认</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-settings-cancel">取消</button>
         </div>
     </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="failure-modal">
-    <div class="modal-box">
-        <div class="modal-header">API请求失败</div>
+<div class="kf-modal-overlay" id="kf-failure-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">API请求失败</div>
         <div class="kf-modal-message" id="kf-failure-message"></div>
         <div class="kf-modal-actions" id="kf-failure-actions"></div>
     </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="api-test-modal">
-    <div class="modal-box">
-        <div class="modal-header">API连通测试 <span class="close-btn" id="kf-api-test-close">✖</span></div>
+<div class="kf-modal-overlay" id="kf-api-test-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">API连通测试 <span class="kf-close-btn" id="kf-api-test-close">✖</span></div>
         <div class="kf-test-status" id="kf-api-test-status"></div>
         <pre class="kf-test-detail" id="kf-api-test-detail"></pre>
     </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="rename-pool-modal">
-    <div class="modal-box">
-        <div class="modal-header">修改组合名称 <span class="close-btn" id="kf-rename-pool-close">✖</span></div>
-        <div class="input-wrapper">
-            <span class="label">名称</span>
-            <input type="text" class="inner-input" id="kf-rename-pool-input">
+<div class="kf-modal-overlay" id="kf-rename-pool-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">修改组合名称 <span class="kf-close-btn" id="kf-rename-pool-close">✖</span></div>
+        <div class="kf-input-wrapper">
+            <span class="kf-label">名称</span>
+            <input type="text" class="kf-inner-input" id="kf-rename-pool-input">
         </div>
         <div class="kf-modal-actions kf-modal-actions-two">
-            <button class="marker-btn brush-stroke" id="kf-rename-pool-confirm">确认</button>
-            <button class="marker-btn brush-stroke" id="kf-rename-pool-cancel">取消</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-rename-pool-confirm">确认</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-rename-pool-cancel">取消</button>
         </div>
     </div>
 </div>
 
-<div class="modal-overlay kf-modal-overlay" id="import-export-modal">
-    <div class="modal-box">
-        <div class="modal-header">导入/导出 <span class="close-btn" id="kf-import-export-close">✖</span></div>
+<div class="kf-modal-overlay" id="kf-import-export-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">导入/导出 <span class="kf-close-btn" id="kf-import-export-close">✖</span></div>
         <div class="kf-modal-actions">
-            <button class="marker-btn brush-stroke" id="kf-export-current-pool">导出当前组合</button>
-            <button class="marker-btn brush-stroke" id="kf-export-all-pools">导出全部组合</button>
-            <button class="marker-btn brush-stroke" id="kf-export-api-presets">导出API条目</button>
-            <button class="marker-btn brush-stroke" id="kf-import-config">导入</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-export-current-pool">导出当前组合</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-export-all-pools">导出全部组合</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-export-api-presets">导出API条目</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-import-config">导入</button>
         </div>
         <input type="file" id="kf-import-file" accept="application/json,.json" style="display: none;">
     </div>
@@ -160,37 +160,32 @@
 
 <div id="kf-toast-layer" class="kf-toast-layer"></div>
 
-<div class="modal-overlay kf-modal-overlay" id="theme-modal">
-    <div class="modal-box">
-        <div class="modal-header">界面美化 <span class="close-btn" id="kf-theme-close">✖</span></div>
-        <div class="color-picker-row">
+<div class="kf-modal-overlay" id="kf-theme-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">界面美化 <span class="kf-close-btn" id="kf-theme-close">✖</span></div>
+        <div class="kf-color-picker-row">
             <span>背景底色 (大块)</span>
             <input type="color" id="kf-theme-bg-main" value="#ffffff">
         </div>
-        <div class="color-picker-row">
+        <div class="kf-color-picker-row">
             <span>条目底色 (小块)</span>
             <input type="color" id="kf-theme-bg-sub" value="#f7f9fc">
         </div>
-        <div class="color-picker-row">
+        <div class="kf-color-picker-row">
             <span>下划线/按钮颜色</span>
             <input type="color" id="kf-theme-underline" value="#617b9b">
         </div>
-        <div class="color-picker-row">
+        <div class="kf-color-picker-row">
             <span>界面风格</span>
-            <select id="kf-theme-brush" class="inner-input">
+            <select id="kf-theme-brush" class="kf-inner-input">
                 <option value="simple">简约风格</option>
-                <option value="marker">马克笔风格</option>
                 <option value="native">酒馆原生风格</option>
             </select>
         </div>
-        <div class="color-picker-row" id="kf-theme-blur-row">
-            <span>笔触模糊度</span>
-            <input type="range" id="kf-theme-blur" min="0" max="3" step="0.1" value="0.6">
-        </div>
         <div style="font-size: 12px; color: #888; margin-top: 10px; text-align: center;">字体颜色会自动适应底色切换为黑或白</div>
         <div class="kf-modal-actions kf-modal-actions-two">
-            <button class="marker-btn brush-stroke" id="kf-theme-confirm">确认</button>
-            <button class="marker-btn brush-stroke" id="kf-theme-cancel">取消</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-theme-confirm">确认</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-theme-cancel">取消</button>
         </div>
     </div>
 </div>

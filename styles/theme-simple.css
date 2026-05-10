@@ -1,18 +1,18 @@
-﻿#kf-root[data-brush="simple"] {
+#kf-root[data-brush="simple"] {
     --simple-control-height: 32px;
     --simple-radius: 6px;
 }
 
-#kf-root[data-brush="simple"] .brush-stroke::before,
-#kf-root[data-brush="simple"] .brush-stroke::after,
-.kf-modal-overlay[data-brush="simple"] .brush-stroke::before,
-.kf-modal-overlay[data-brush="simple"] .brush-stroke::after {
+#kf-root[data-brush="simple"] .kf-accent-fill::before,
+#kf-root[data-brush="simple"] .kf-accent-fill::after,
+.kf-modal-overlay[data-brush="simple"] .kf-accent-fill::before,
+.kf-modal-overlay[data-brush="simple"] .kf-accent-fill::after {
     display: none;
 }
 
-#kf-root[data-brush="simple"] .input-wrapper,
-#kf-root[data-brush="simple"] .select-wrapper,
-#kf-root[data-brush="simple"] .marker-btn {
+#kf-root[data-brush="simple"] .kf-input-wrapper,
+#kf-root[data-brush="simple"] .kf-select-wrapper,
+#kf-root[data-brush="simple"] .kf-action-btn {
     min-height: var(--simple-control-height);
     height: var(--simple-control-height);
     border: 1px solid var(--underline-color) !important;
@@ -21,38 +21,38 @@
     align-items: center;
 }
 
-#kf-root[data-brush="simple"] .input-wrapper {
+#kf-root[data-brush="simple"] .kf-input-wrapper {
     padding: 0 10px;
 }
 
-#kf-root[data-brush="simple"] .input-wrapper .label {
+#kf-root[data-brush="simple"] .kf-input-wrapper .kf-label {
     font-size: var(--kf-font-control);
     line-height: 1;
     margin-right: 10px;
 }
 
-#kf-root[data-brush="simple"] .input-wrapper .inner-input {
+#kf-root[data-brush="simple"] .kf-input-wrapper .kf-inner-input {
     height: 100%;
     line-height: var(--simple-control-height);
 }
 
-#kf-root[data-brush="simple"] .select-wrapper .inner-select {
+#kf-root[data-brush="simple"] .kf-select-wrapper .kf-inner-select {
     height: 100%;
     line-height: var(--simple-control-height);
     padding: 0 28px 0 10px;
 }
 
-#kf-root[data-brush="simple"] .marker-btn {
+#kf-root[data-brush="simple"] .kf-action-btn {
     justify-content: center;
     padding: 0 12px;
 }
 
-#kf-root[data-brush="simple"] .marker-checkbox {
+#kf-root[data-brush="simple"] .kf-toggle-chip {
     justify-content: flex-start;
     gap: 0;
 }
 
-#kf-root[data-brush="simple"] .responsive-controls .kf-mode-control {
+#kf-root[data-brush="simple"] .kf-responsive-controls .kf-mode-control {
     justify-content: center;
 }
 
@@ -86,80 +86,81 @@
     line-height: 1;
 }
 
-#kf-root[data-brush="simple"] .marker-checkbox .text {
+#kf-root[data-brush="simple"] .kf-toggle-chip .kf-check-text {
     padding: 0;
 }
 
-#kf-root[data-brush="simple"] .marker-checkbox input:checked + .kf-check-box::after {
+#kf-root[data-brush="simple"] .kf-toggle-chip input:checked + .kf-check-box::after {
     content: '✓';
     font-size: var(--kf-font-small);
     line-height: 1;
     transform: translateY(-1px);
 }
 
-#kf-root[data-brush="simple"] .marker-checkbox input:checked ~ .text.brush-stroke::after {
+#kf-root[data-brush="simple"] .kf-toggle-chip input:checked ~ .kf-check-text.kf-accent-fill::after {
     display: none !important;
 }
 
-#kf-root[data-brush="simple"] .long-press-row {
+#kf-root[data-brush="simple"] .kf-long-press-row {
     border: 1px solid var(--underline-color) !important;
     border-radius: var(--simple-radius);
     overflow: hidden;
 }
 
-#kf-root[data-brush="simple"] .long-press-row.active .long-press-text {
+#kf-root[data-brush="simple"] .kf-long-press-row.kf-active .kf-long-press-text {
     color: var(--text-accent);
 }
 
-#kf-root[data-brush="simple"] .long-press-row.brush-stroke::before,
-#kf-root[data-brush="simple"] .long-press-row.brush-stroke::after {
+#kf-root[data-brush="simple"] .kf-long-press-row.kf-accent-fill::before,
+#kf-root[data-brush="simple"] .kf-long-press-row.kf-accent-fill::after {
     display: block;
     z-index: 1;
     top: 0;
     bottom: auto;
     left: 0;
-    width: 0%;
+    width: 100%;
     height: 100%;
     border-radius: 0;
-    transform: none;
+    transform-origin: left center;
+    transform: scaleX(0);
     background: var(--underline-color);
     filter: none;
     mix-blend-mode: normal;
     opacity: 1;
 }
 
-#kf-root[data-brush="simple"] .long-press-row.brush-stroke::after {
+#kf-root[data-brush="simple"] .kf-long-press-row.kf-accent-fill::after {
     display: none;
 }
 
-#kf-root[data-brush="simple"] .long-press-row.pressing-on.brush-stroke::before,
-#kf-root[data-brush="simple"] .long-press-row.active.brush-stroke::before {
-    width: 100%;
+#kf-root[data-brush="simple"] .kf-long-press-row.pressing-on.kf-accent-fill::before,
+#kf-root[data-brush="simple"] .kf-long-press-row.kf-active.kf-accent-fill::before {
+    transform: scaleX(1);
 }
 
-#kf-root[data-brush="simple"] .long-press-row.pressing-off.brush-stroke::before {
-    width: 0%;
+#kf-root[data-brush="simple"] .kf-long-press-row.pressing-off.kf-accent-fill::before {
+    transform: scaleX(0);
 }
 
-.kf-modal-overlay[data-brush="simple"] .marker-btn,
-.kf-modal-overlay[data-brush="simple"] .input-wrapper,
+.kf-modal-overlay[data-brush="simple"] .kf-action-btn,
+.kf-modal-overlay[data-brush="simple"] .kf-input-wrapper,
 .kf-modal-overlay[data-brush="simple"] .kf-stepper-input,
 .kf-modal-overlay[data-brush="simple"] select {
     border: 1px solid var(--underline-color, #617b9b) !important;
     border-radius: 6px;
 }
 
-.kf-modal-overlay[data-brush="simple"] .marker-btn {
+.kf-modal-overlay[data-brush="simple"] .kf-action-btn {
     min-height: 32px;
     padding: 0 12px;
 }
 
-.kf-modal-overlay[data-brush="simple"] .input-wrapper {
+.kf-modal-overlay[data-brush="simple"] .kf-input-wrapper {
     min-height: 32px;
     padding: 0 10px;
 }
 
-.kf-modal-overlay[data-brush="simple"] .input-wrapper .label {
+.kf-modal-overlay[data-brush="simple"] .kf-input-wrapper .kf-label {
     font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
 }
 
@@ -195,8 +196,8 @@
     border-color: currentColor !important;
 }
 
-.kf-toast-layer[data-brush="simple"] .kf-toast.brush-stroke::before,
-.kf-toast-layer[data-brush="simple"] .kf-toast.brush-stroke::after {
+.kf-toast-layer[data-brush="simple"] .kf-toast.kf-accent-fill::before,
+.kf-toast-layer[data-brush="simple"] .kf-toast.kf-accent-fill::after {
     display: none;
 }
 

@@ -1,3 +1,5 @@
+import { makeId } from './compat.js';
+
 const MODULE_KEY = 'STApiSwitcher';
 const OLD_STORAGE_KEY = 'karmaflip_state_v4';
 const MAX_STORED_LOGS = 200;
@@ -37,7 +39,6 @@ export function getDefaultState() {
             bgMain: '#ffffff',
             bgSub: '#f7f9fc',
             underline: '#617b9b',
-            blur: '0.6',
             brush: 'simple',
         },
         failure: {
@@ -63,7 +64,7 @@ function extensionSettings() {
 
 function normalizeEntry(entry) {
     const e = { ...(entry || {}) };
-    e.id = String(e.id || `e_${crypto.randomUUID()}`);
+    e.id = String(e.id || makeId('e'));
     e.presetId = e.presetId ? String(e.presetId) : '';
     e.enabled = e.enabled !== false;
     e.name = String(e.name || 'New API');
@@ -83,13 +84,13 @@ function normalizeEntry(entry) {
 
 function normalizePreset(preset) {
     const p = normalizeEntry(preset);
-    p.id = String(p.id || `preset_${crypto.randomUUID()}`);
+    p.id = String(p.id || makeId('preset'));
     return p;
 }
 
 function normalizePool(pool) {
     const p = { ...defaultPool(), ...(pool || {}) };
-    p.id = String(p.id || `pool_${crypto.randomUUID()}`);
+    p.id = String(p.id || makeId('pool'));
     p.name = String(p.name || '默认组合');
     p.mode = p.mode === 'random' ? 'random' : 'fixed';
     p.enabled = p.enabled !== false;
@@ -108,7 +109,8 @@ function normalizeState(raw) {
     s.enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : activePool?.enabled !== false;
     s.runtime = {};
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
-    s.theme.brush = ['simple', 'marker', 'native'].includes(s.theme.brush) ? s.theme.brush : 'simple';
+    delete s.theme.blur;
+    s.theme.brush = ['simple', 'native'].includes(s.theme.brush) ? s.theme.brush : 'simple';
     s.failure = {
         ...getDefaultState().failure,
         ...(s.failure || {}),

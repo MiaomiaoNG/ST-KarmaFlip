@@ -1,5 +1,6 @@
 import { getActivePool, loadState, pushLog, saveStateAsync, toInt } from './plugin_state_store.js';
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
+import { makeId } from './compat.js';
 
 let chatSettingsBound = false;
 let fetchRetryBound = false;
@@ -147,6 +148,17 @@ function showModelAlert(state, member) {
     else toast('info', message);
 }
 
+function showRuntimeToast(message, type = 'info', timeout = 2800) {
+    const shower = window.STKarmaFlip?.showToast;
+    if (typeof shower === 'function') shower(message, type, timeout);
+    else toast(type, message);
+}
+
+function reportRuntimeError(stage, error) {
+    console.error(`[KarmaFlip] ${stage}，已放弃本次插件接管:`, error);
+    showRuntimeToast('KarmaFlip 插件运行出错，本次请求将使用酒馆默认 API', 'error', 4200);
+}
+
 async function askFailureDecision(message, actions, fallback) {
     const opener = window.STKarmaFlip?.openFailureDecision;
     if (typeof opener !== 'function') {
@@ -234,8 +246,7 @@ function makeRetryInit(init, member) {
 }
 
 function makeTraceId() {
-    if (globalThis.crypto?.randomUUID) return `kf_${globalThis.crypto.randomUUID()}`;
-    return `kf_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    return makeId('kf');
 }
 
 function startPendingRequest(state, pool, picked, member, type) {
@@ -337,7 +348,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         }
 
         if (onlyOneAvailable) {
-            await askFailureDecision(onlyActiveFailureMessage(), [{ value: 'ok', label: '确认' }], 'ok');
+            showRuntimeToast(onlyActiveFailureMessage(), 'error', 4200);
             break;
         }
 
@@ -430,26 +441,30 @@ function bindChatCompletionSettings(onStatus) {
     }
 
     eventSource.on(eventName, (generateData) => {
-        const state = loadState();
-        if (state.enabled === false) return;
-        if (!isTextGeneration(generateData) || isBackgroundRequest(generateData)) return;
-        if (isMvuAnalysisRequest(generateData)) return;
+        try {
+            const state = loadState();
+            if (state.enabled === false) return;
+            if (!isTextGeneration(generateData) || isBackgroundRequest(generateData)) return;
+            if (isMvuAnalysisRequest(generateData)) return;
 
-        const pool = getActivePool(state);
-        if (!Array.isArray(pool.entries) || !pool.entries.length) return;
-        if (!validRuntimeEntries(pool).length) return;
+            const pool = getActivePool(state);
+            if (!Array.isArray(pool.entries) || !pool.entries.length) return;
+            if (!validRuntimeEntries(pool).length) return;
 
-        const picked = pickMember(state, pool);
-        if (!picked?.member) return;
+            const picked = pickMember(state, pool);
+            if (!picked?.member) return;
 
-        const member = picked.member;
-        patchGenerateData(generateData, member);
+            const member = picked.member;
+            patchGenerateData(generateData, member);
 
-        const type = generationType(generateData);
-        generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type);
-        queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
-        showModelAlert(state, member);
-        if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
+            const type = generationType(generateData);
+            generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type);
+            queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
+            showModelAlert(state, member);
+            if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
+        } catch (error) {
+            reportRuntimeError('CHAT_COMPLETION_SETTINGS_READY 处理失败', error);
+        }
     });
 
     chatSettingsBound = true;

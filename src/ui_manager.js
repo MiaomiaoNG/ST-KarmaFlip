@@ -1,6 +1,7 @@
 import { enableStatePersistence, getActivePool, loadState, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['logModal', 'dropdownModal', 'theme-modal', 'settings-modal', 'failure-modal', 'api-test-modal', 'rename-pool-modal', 'import-export-modal'];
+const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 let uiPersistenceReady = false;
 
@@ -41,7 +42,7 @@ function silenceLongPressTransition() {
 function applyBrush(root, style) {
     let blend = 'multiply';
     let opacity = '1';
-    const resolvedStyle = ['simple', 'marker', 'native'].includes(style) ? style : 'simple';
+    const resolvedStyle = ['simple', 'native'].includes(style) ? style : 'simple';
     root.style.setProperty('--brush-blend', blend);
     root.style.setProperty('--brush-opacity', opacity);
     root.dataset.brush = resolvedStyle;
@@ -59,8 +60,8 @@ function applyNativeClasses(enabled) {
     const root = $('#kf-root');
     const modals = $('.kf-modal-overlay');
     const scope = root.add(modals);
-    scope.find('.marker-btn').toggleClass('menu_button', enabled);
-    scope.find('.inner-input,.inner-select,select,textarea,.kf-stepper-input').toggleClass('text_pole', enabled);
+    scope.find('.kf-action-btn').toggleClass('menu_button', enabled);
+    scope.find('.kf-inner-input,.kf-inner-select,select,textarea,.kf-stepper-input').toggleClass('text_pole', enabled);
     modals.toggleClass('popup kf-native-popup', enabled);
 }
 
@@ -79,19 +80,14 @@ function applyTheme(state) {
         target.style.setProperty('--text-accent', contrastText(underline));
         target.style.setProperty('--underline-color', underline);
         target.style.setProperty('--underline-rgb', hexToRgb(underline));
-        target.style.setProperty('--marker-blur', `${theme.blur || '0.6'}px`);
     }
     applyBrush(root, theme.brush || 'simple');
 
     $('#kf-theme-bg-main').val(theme.bgMain || '#ffffff');
     $('#kf-theme-bg-sub').val(theme.bgSub || '#f7f9fc');
     $('#kf-theme-underline').val(theme.underline || '#617b9b');
-    $('#kf-theme-blur').val(theme.blur || '0.6');
-    const resolvedBrush = ['simple', 'marker', 'native'].includes(theme.brush) ? theme.brush : 'simple';
+    const resolvedBrush = ['simple', 'native'].includes(theme.brush) ? theme.brush : 'simple';
     $('#kf-theme-brush').val(resolvedBrush);
-    const marker = resolvedBrush === 'marker';
-    $('#kf-theme-blur-row').toggle(marker);
-    $('#kf-theme-blur').prop('disabled', !marker);
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
     $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
@@ -99,7 +95,7 @@ function applyTheme(state) {
 
 function mkPool(name = null) {
     return {
-        id: `pool_${crypto.randomUUID()}`,
+        id: makeId('pool'),
         name: name || `新组合_${new Date().toLocaleTimeString()}`,
         mode: 'fixed',
         enabled: true,
@@ -110,15 +106,15 @@ function mkPool(name = null) {
 
 function clonePool(pool) {
     const p = JSON.parse(JSON.stringify(pool));
-    p.id = `pool_${crypto.randomUUID()}`;
+    p.id = makeId('pool');
     p.name = `${pool.name}_副本`;
-    p.entries = p.entries.map(e => ({ ...e, id: `e_${crypto.randomUUID()}` }));
+    p.entries = p.entries.map(e => ({ ...e, id: makeId('e') }));
     return p;
 }
 
 function cloneEntry(entry) {
     return {
-        id: `e_${crypto.randomUUID()}`,
+        id: makeId('e'),
         presetId: '',
         enabled: entry?.enabled !== false,
         name: String(entry?.name || 'New API'),
@@ -137,7 +133,7 @@ function cloneEntry(entry) {
 
 function clonePoolForImport(pool) {
     const cloned = {
-        id: `pool_${crypto.randomUUID()}`,
+        id: makeId('pool'),
         name: String(pool?.name || `导入组合_${new Date().toLocaleTimeString()}`),
         mode: pool?.mode === 'random' ? 'random' : 'fixed',
         enabled: pool?.enabled !== false,
@@ -150,7 +146,7 @@ function clonePoolForImport(pool) {
 
 function addEntry(pool) {
     pool.entries.push({
-        id: `e_${crypto.randomUUID()}`,
+        id: makeId('e'),
         enabled: true,
         name: 'New API',
         apiUrl: '',
@@ -259,7 +255,7 @@ function applyEntryPreset(target, preset) {
 
 function copyEntryForPreset(entry) {
     return {
-        id: `preset_${crypto.randomUUID()}`,
+        id: makeId('preset'),
         presetId: '',
         enabled: entry.enabled !== false,
         name: String(entry.name || ''),
@@ -312,13 +308,13 @@ function renderPool(state) {
     const pool = getActivePool(state);
     silenceLongPressTransition();
     const longPress = $('#kf-long-press');
-    $('#group-select-display').val(pool.name);
-    $('#group-select-wrapper').show();
+    $('#kf-pool-picker-display').val(pool.name);
+    $('#kf-pool-picker').show();
     $('#kf-root').attr('data-mode', pool.mode);
-    $('#mode-fixed').prop('checked', pool.mode === 'fixed');
-    $('#mode-random').prop('checked', pool.mode === 'random');
+    $('#kf-mode-fixed').prop('checked', pool.mode === 'fixed');
+    $('#kf-mode-random').prop('checked', pool.mode === 'random');
     $('#kf-no-streak').prop('checked', !!pool.random?.noConsecutive);
-    longPress.toggleClass('active', state.enabled !== false);
+    longPress.toggleClass('kf-active', state.enabled !== false);
     $('#kf-long-press-text').text(state.enabled !== false ? '插件全局生效（长按关闭）' : '插件已关闭（长按启动）');
 }
 
@@ -331,9 +327,9 @@ function providerSelect(entry) {
     ];
     const selected = options.find(([value]) => value === entry.provider)?.[1] || options[0][1];
     return `
-        <div class="select-wrapper provider-wrapper two-strokes brush-stroke flex-3">
-            <input type="text" class="inner-select dropdown-input kf-entry-provider-display" value="${esc(selected)}" data-provider="${esc(entry.provider || 'open')}" readonly>
-            <button class="dropdown-arrow kf-entry-provider-arrow" type="button">▼</button>
+        <div class="kf-select-wrapper kf-provider-wrapper kf-two-strokes kf-accent-fill kf-flex-3">
+            <input type="text" class="kf-inner-select kf-dropdown-input kf-entry-provider-display" value="${esc(selected)}" data-provider="${esc(entry.provider || 'open')}" readonly>
+            <button class="kf-dropdown-arrow kf-entry-provider-arrow" type="button">▼</button>
         </div>
     `;
 }
@@ -390,50 +386,50 @@ function renderEntries(state) {
     for (const entry of pool.entries || []) {
         const enabledChecked = entry.enabled !== false ? 'checked' : '';
         const collapsed = !!entry.collapsed;
-        const collapsedClass = collapsed ? ' collapsed' : '';
+        const collapsedClass = collapsed ? ' kf-collapsed' : '';
         const collapseIcon = fanIcon(!collapsed);
         const collapseLabel = collapsed ? '展开 API 条目' : '折叠 API 条目';
         const nameHasOptions = apiPresetNames.some(name => name !== entry.name);
         const modelHasOptions = getModelOptions(entry).some(model => model !== entry.model);
-        const nameArrow = nameHasOptions ? '<button class="dropdown-arrow kf-entry-name-arrow" type="button">▼</button>' : '';
-        const modelArrow = modelHasOptions ? '<button class="dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
+        const nameArrow = nameHasOptions ? '<button class="kf-dropdown-arrow kf-entry-name-arrow" type="button">▼</button>' : '';
+        const modelArrow = modelHasOptions ? '<button class="kf-dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
         root.append(`
-            <div class="entry-block${collapsedClass}" data-id="${esc(entry.id)}">
-                <div class="row kf-entry-row-top">
-                    <label class="marker-checkbox kf-entry-enabled-wrap">
+            <div class="kf-entry-block${collapsedClass}" data-id="${esc(entry.id)}">
+                <div class="kf-row kf-entry-row-top">
+                    <label class="kf-toggle-chip kf-entry-enabled-wrap">
                         <input type="checkbox" class="kf-entry-enabled" ${enabledChecked}>
                         <span class="kf-check-box"></span>
-                        <span class="text brush-stroke">启用</span>
+                        <span class="kf-check-text kf-accent-fill">启用</span>
                     </label>
-                    <div class="input-wrapper kf-entry-name-wrap"><span class="label">名称</span><input type="text" class="inner-input dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
+                    <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
                     <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
                     <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
                 </div>
-                <div class="row kf-entry-details">
-                    <div class="input-wrapper flex-7"><span class="label">URL</span><input type="text" class="inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
+                <div class="kf-row kf-entry-details">
+                    <div class="kf-input-wrapper kf-flex-7"><span class="kf-label">URL</span><input type="text" class="kf-inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
                     ${providerSelect(entry)}
                 </div>
-                <div class="row kf-entry-details">
-                    <div class="input-wrapper flex-1 kf-entry-key-wrap">
-                        <span class="label">KEY</span>
-                        <input type="password" class="inner-input kf-entry-key" value="${esc(entry.key)}">
+                <div class="kf-row kf-entry-details">
+                    <div class="kf-input-wrapper kf-flex-1 kf-entry-key-wrap">
+                        <span class="kf-label">KEY</span>
+                        <input type="password" class="kf-inner-input kf-entry-key" value="${esc(entry.key)}">
                         <button class="kf-eye-btn kf-key-eye" type="button" aria-label="显示 KEY" title="显示 KEY">
                             <i class="fa-regular fa-eye"></i>
                         </button>
                     </div>
-                    <button class="marker-btn brush-stroke kf-test-api" type="button">测试</button>
+                    <button class="kf-action-btn kf-accent-fill kf-test-api" type="button">测试</button>
                 </div>
-                <div class="row kf-entry-details">
-                    <div class="input-wrapper flex-1"><span class="label">模型</span><input type="text" class="inner-input dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
-                    <button class="marker-btn brush-stroke kf-fetch-models">拉取模型</button>
+                <div class="kf-row kf-entry-details">
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">模型</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
+                    <button class="kf-action-btn kf-accent-fill kf-fetch-models">拉取模型</button>
                 </div>
-                <div class="row fixed-only kf-entry-details">
-                    <div class="input-wrapper flex-1"><span class="label">运行次数</span><input type="number" min="1" class="inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
+                <div class="kf-row kf-fixed-only kf-entry-details">
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">运行次数</span><input type="number" min="1" class="kf-inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
                 </div>
-                <div class="row random-only kf-entry-details">
-                    <div class="input-wrapper flex-1"><span class="label">权重</span><input type="number" min="0" class="inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
-                    <div class="input-wrapper flex-1"><span class="label">保底</span><input type="number" min="0" class="inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
-                    <div class="input-wrapper flex-1"><span class="label">冷却</span><input type="number" min="0" class="inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
+                <div class="kf-row kf-random-only kf-entry-details">
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">权重</span><input type="number" min="0" class="kf-inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">保底</span><input type="number" min="0" class="kf-inner-input kf-entry-pity" value="${esc(entry.pityTurns)}"></div>
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">冷却</span><input type="number" min="0" class="kf-inner-input kf-entry-cooldown" value="${esc(entry.cooldownTurns)}"></div>
                 </div>
             </div>
         `);
@@ -467,7 +463,7 @@ function formatLog(log) {
 }
 
 function currentLogFilter() {
-    return $('.kf-log-filter.active').data('filter') || 'all';
+    return $('.kf-log-filter.kf-active').data('filter') || 'all';
 }
 
 function renderLogs(state, filter = currentLogFilter()) {
@@ -483,7 +479,7 @@ function renderLogs(state, filter = currentLogFilter()) {
     logBox.text(lines.join('\n'));
     const node = logBox.get(0);
     if (node) {
-        requestAnimationFrame(() => {
+        nextFrame(() => {
             node.scrollTop = node.scrollHeight;
         });
     }
@@ -502,12 +498,12 @@ function syncEntryFromRow(entry, row) {
     entry.weight = toInt(row.find('.kf-entry-weight').val());
     entry.pityTurns = toInt(row.find('.kf-entry-pity').val());
     entry.cooldownTurns = toInt(row.find('.kf-entry-cooldown').val());
-    entry.collapsed = row.hasClass('collapsed');
+    entry.collapsed = row.hasClass('kf-collapsed');
 }
 
 function syncAllEntries(state) {
     const pool = getActivePool(state);
-    $('#kf-entry-list .entry-block').each(function () {
+    $('#kf-entry-list .kf-entry-block').each(function () {
         const id = $(this).data('id');
         const entry = pool.entries.find(e => e.id === id);
         if (entry) syncEntryFromRow(entry, $(this));
@@ -516,9 +512,9 @@ function syncAllEntries(state) {
 
 function syncPoolFromControls(state) {
     const pool = getActivePool(state);
-    const nextName = String($('#group-select-display').val() || '').trim();
+    const nextName = String($('#kf-pool-picker-display').val() || '').trim();
     if (nextName) pool.name = nextName;
-    pool.mode = $('#mode-random').prop('checked') ? 'random' : 'fixed';
+    pool.mode = $('#kf-mode-random').prop('checked') ? 'random' : 'fixed';
     pool.random.noConsecutive = $('#kf-no-streak').prop('checked');
     return pool;
 }
@@ -528,8 +524,7 @@ function syncThemeFromControls(state) {
     state.theme.bgSub = $('#kf-theme-bg-sub').val();
     state.theme.underline = $('#kf-theme-underline').val();
     const brush = String($('#kf-theme-brush').val() || 'simple');
-    state.theme.brush = ['simple', 'marker', 'native'].includes(brush) ? brush : 'simple';
-    if (state.theme.brush === 'marker') state.theme.blur = String($('#kf-theme-blur').val() || '0.6');
+    state.theme.brush = ['simple', 'native'].includes(brush) ? brush : 'simple';
 }
 
 function syncFailureFromControls(state) {
@@ -554,14 +549,14 @@ function saveThemeFromModal(state, setStatus) {
     syncThemeFromControls(state);
     applyTheme(state);
     persistNow(state);
-    closeModal('theme-modal');
+    closeModal('kf-theme-modal');
     setStatus('美化设置已保存');
 }
 
 function saveFailureSettingsFromModal(state, setStatus) {
     syncFailureFromControls(state);
     persistNow(state);
-    closeModal('settings-modal');
+    closeModal('kf-settings-modal');
     setStatus('请求设置已保存');
 }
 
@@ -697,12 +692,12 @@ async function importFromFile(state, file, rerender, setStatus) {
     const result = importConfigPayload(state, payload);
     persistNow(state);
     rerender();
-    closeModal('import-export-modal');
+    closeModal('kf-import-export-modal');
     setStatus(`已导入 ${result.pools} 个组合，${result.presets} 个 API 条目`);
 }
 
 function closeModal(id) {
-    $(`#${id}`).removeClass('show');
+    $(`#${id}`).removeClass('kf-show');
 }
 
 function hoistModals() {
@@ -711,7 +706,7 @@ function hoistModals() {
         if (!node) continue;
         if (node.dataset.kfStopBound) {
             const cleanNode = node.cloneNode(true);
-            node.replaceWith(cleanNode);
+            replaceNode(node, cleanNode);
             node = cleanNode;
         }
         if (node.parentElement !== document.body) document.body.appendChild(node);
@@ -722,20 +717,39 @@ function openFailureDecision(message, actions) {
     return new Promise(resolve => {
         const previousResolver = window.STKarmaFlip.failureResolver;
         if (typeof previousResolver === 'function') previousResolver('cancel');
-        window.STKarmaFlip.failureResolver = resolve;
-        $('#kf-failure-message').text(message || '');
+        let settled = false;
+        let timer = null;
+        const modal = $('#kf-failure-modal');
         const box = $('#kf-failure-actions').empty();
-        for (const action of actions || []) {
-            box.append(`<button class="marker-btn brush-stroke" data-value="${esc(action.value)}">${esc(action.label)}</button>`);
-        }
-        box.off('click.kfFailure').on('click.kfFailure', '.marker-btn', function () {
-            const value = String($(this).data('value') || '');
-            $('#failure-modal').removeClass('show');
+        const finish = (value, notify = false) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            modal.removeClass('kf-show');
             box.off('click.kfFailure');
+            modal.off('click.kfFailureCancel');
+            $(document).off('keydown.kfFailureCancel');
             window.STKarmaFlip.failureResolver = null;
+            if (notify) showToast('已取消轮询', 'warning');
             resolve(value);
+        };
+        window.STKarmaFlip.failureResolver = value => finish(value || 'cancel');
+        $('#kf-failure-message').text(message || '');
+        for (const action of actions || []) {
+            box.append(`<button class="kf-action-btn kf-accent-fill" data-value="${esc(action.value)}">${esc(action.label)}</button>`);
+        }
+        box.off('click.kfFailure').on('click.kfFailure', '.kf-action-btn', function () {
+            finish(String($(this).data('value') || 'cancel'));
         });
-        $('#failure-modal').addClass('show');
+        modal.off('click.kfFailureCancel').on('click.kfFailureCancel', function (event) {
+            if ($(event.target).closest('.kf-action-btn').length) return;
+            finish('cancel', true);
+        });
+        $(document).off('keydown.kfFailureCancel').on('keydown.kfFailureCancel', function (event) {
+            if (event.key === 'Escape') finish('cancel', true);
+        });
+        timer = window.setTimeout(() => finish('cancel', true), 8000);
+        modal.addClass('kf-show');
     });
 }
 
@@ -755,17 +769,17 @@ function ensureToastLayer() {
     const state = loadState();
     const root = document.getElementById('kf-root');
     const resolvedBrush = root?.dataset?.brush || state.theme?.brush || 'simple';
-    layer.get(0).dataset.brush = ['simple', 'marker', 'native'].includes(resolvedBrush) ? resolvedBrush : 'simple';
+    layer.get(0).dataset.brush = ['simple', 'native'].includes(resolvedBrush) ? resolvedBrush : 'simple';
     return layer;
 }
 
 function showToast(message, type = 'info', timeout = 2800) {
     const layer = ensureToastLayer();
-    const item = $(`<div class="kf-toast kf-toast-${esc(type)} brush-stroke"></div>`).text(message || '');
+    const item = $(`<div class="kf-toast kf-toast-${esc(type)} kf-accent-fill"></div>`).text(message || '');
     layer.append(item);
-    requestAnimationFrame(() => item.addClass('show'));
+    nextFrame(() => item.addClass('kf-show'));
     window.setTimeout(() => {
-        item.removeClass('show');
+        item.removeClass('kf-show');
         window.setTimeout(() => item.remove(), 220);
     }, timeout);
 }
@@ -777,7 +791,7 @@ function isMobileWidth() {
 }
 
 function closeDropdown() {
-    $('#dropdownModal').removeClass('show');
+    $('#kf-dropdown-modal').removeClass('kf-show');
     $('#kf-mobile-options').empty();
 }
 
@@ -806,7 +820,7 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
     const box = $('#kf-mobile-options').empty();
     for (const option of unique) {
         const deleteButton = config.deletable
-            ? '<button class="kf-option-delete marker-btn brush-stroke" type="button">删除</button>'
+            ? '<button class="kf-option-delete kf-action-btn kf-accent-fill" type="button">删除</button>'
             : '';
         if (config.deletable) {
             box.append(`<div class="kf-mobile-option-row" data-value="${esc(option.value)}">${deleteButton}<button class="kf-mobile-option kf-option-label kf-option-name" type="button" data-value="${esc(option.value)}">${esc(option.label)}</button></div>`);
@@ -825,11 +839,11 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
         const item = (box.data('kfOptions') || []).find(option => option.value === value)?.item || { name: value };
         config.onDelete?.(item, value);
     });
-    $('#dropdownModal').addClass('show');
+    $('#kf-dropdown-modal').addClass('kf-show');
 }
 
 function openGroupPicker(state, rerender) {
-    const input = $('#group-select-display');
+    const input = $('#kf-pool-picker-display');
     const options = (state.pools || []).map(pool => pool.name);
     openOptionPicker(input, options, '选择组合', (name) => {
         const pool = (state.pools || []).find(item => item.name === name);
@@ -843,12 +857,12 @@ function openGroupPicker(state, rerender) {
 function openRenamePoolModal(state) {
     const pool = getActivePool(state);
     $('#kf-rename-pool-input').val(pool.name || '');
-    $('#rename-pool-modal').addClass('show');
+    $('#kf-rename-pool-modal').addClass('kf-show');
     window.setTimeout(() => $('#kf-rename-pool-input').trigger('focus').trigger('select'), 0);
 }
 
 function closeRenamePoolModal() {
-    closeModal('rename-pool-modal');
+    closeModal('kf-rename-pool-modal');
 }
 
 function renameActivePool(state, rerender, setStatus) {
@@ -1027,11 +1041,11 @@ async function testOpenAICompatibleEntry(entry) {
 
 function showApiTestResult(ok, message, detail = '') {
     $('#kf-api-test-status')
-        .toggleClass('success', !!ok)
-        .toggleClass('error', !ok)
+        .toggleClass('kf-success', !!ok)
+        .toggleClass('kf-error', !ok)
         .text(message || (ok ? '测试成功' : '测试失败'));
     $('#kf-api-test-detail').text(detail || '');
-    $('#api-test-modal').addClass('show');
+    $('#kf-api-test-modal').addClass('kf-show');
 }
 
 function bindLongPress(state, rerender, setStatus) {
@@ -1059,7 +1073,7 @@ function bindLongPress(state, rerender, setStatus) {
 }
 
 function isDragExcluded(target) {
-    return !!$(target).closest('input,textarea,select,button,label,.dropdown-input,.dropdown-arrow,.marker-checkbox,.select-wrapper,.input-wrapper').length;
+    return !!$(target).closest('input,textarea,select,button,label,.kf-dropdown-input,.kf-dropdown-arrow,.kf-toggle-chip,.kf-select-wrapper,.kf-input-wrapper').length;
 }
 
 function bindEntryDragSort(state, rerender, setStatus) {
@@ -1085,7 +1099,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
 
     const orderedIdsFromDom = () => {
         const ids = [];
-        list.children('.entry-block,.kf-drag-placeholder').each(function () {
+        list.children('.kf-entry-block,.kf-drag-placeholder').each(function () {
             const node = $(this);
             if (node.hasClass('kf-drag-placeholder')) {
                 if (drag?.id) ids.push(String(drag.id));
@@ -1099,7 +1113,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
 
     const placePlaceholder = (clientY) => {
         if (!drag) return;
-        const rows = list.children('.entry-block').not(drag.row);
+        const rows = list.children('.kf-entry-block').not(drag.row);
         let placed = false;
         rows.each(function () {
             const row = $(this);
@@ -1179,11 +1193,11 @@ function bindEntryDragSort(state, rerender, setStatus) {
             .on('pointerup.kfEntryDrag pointercancel.kfEntryDrag', finish);
     };
 
-    list.on('pointerdown.kf', '.entry-block', function (event) {
+    list.on('pointerdown.kf', '.kf-entry-block', function (event) {
         if (event.button && event.button !== 0) return;
         if (isDragExcluded(event.target)) return;
         const row = $(this);
-        if (list.children('.entry-block').length < 2) return;
+        if (list.children('.kf-entry-block').length < 2) return;
         clearTimer();
         timer = setTimeout(() => startDrag(row, event), 420);
         $(document)
@@ -1199,7 +1213,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
 }
 
 function bind(state, rerender, setStatus) {
-    $('#group-select-display').prop('readonly', true).off('click.kf keydown.kf').on('click.kf', function () {
+    $('#kf-pool-picker-display').prop('readonly', true).off('click.kf keydown.kf').on('click.kf', function () {
         openGroupPicker(state, rerender);
     }).on('keydown.kf', function (event) {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -1207,7 +1221,7 @@ function bind(state, rerender, setStatus) {
             openGroupPicker(state, rerender);
         }
     });
-    $('#group-select-arrow').off('pointerdown.kf click.kf').on('pointerdown.kf', function (event) {
+    $('#kf-pool-picker-arrow').off('pointerdown.kf click.kf').on('pointerdown.kf', function (event) {
         event.preventDefault();
         event.stopPropagation();
     }).on('click.kf', function (event) {
@@ -1216,7 +1230,7 @@ function bind(state, rerender, setStatus) {
         openGroupPicker(state, rerender);
     });
 
-    $('#mode-fixed,#mode-random').off('change.kf').on('change.kf', function () {
+    $('#kf-mode-fixed,#kf-mode-random').off('change.kf').on('change.kf', function () {
         const pool = getActivePool(state);
         pool.mode = String($(this).val()) === 'random' ? 'random' : 'fixed';
         maybeEqualizeWeights(state);
@@ -1261,7 +1275,7 @@ function bind(state, rerender, setStatus) {
     $('#kf-entry-list').off('.kf');
     $('#kf-entry-list').on('change.kf', '.kf-entry-name', function () {
         const pool = getActivePool(state);
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
@@ -1276,7 +1290,7 @@ function bind(state, rerender, setStatus) {
         setStatus('API条目名称已保存');
     });
     $('#kf-entry-list').on('input.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
@@ -1284,7 +1298,7 @@ function bind(state, rerender, setStatus) {
         persistHot(state);
     });
     $('#kf-entry-list').on('change.kf', '.kf-entry-enabled,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
@@ -1294,21 +1308,21 @@ function bind(state, rerender, setStatus) {
         if (equalized) rerender();
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-name', function () {
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         openEntryNamePicker(state, row, $(this), rerender);
     });
     $('#kf-entry-list').on('pointerdown.kf click.kf', '.kf-entry-name-arrow', function (event) {
         event.preventDefault();
         event.stopPropagation();
         if (event.type !== 'click') return;
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         openEntryNamePicker(state, row, row.find('.kf-entry-name'), rerender);
     });
     $('#kf-entry-list').on('click.kf', '.kf-entry-provider-display,.kf-entry-provider-arrow', function (event) {
         event.preventDefault();
         event.stopPropagation();
         const pool = getActivePool(state);
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         const options = providerOptions();
@@ -1322,21 +1336,21 @@ function bind(state, rerender, setStatus) {
         });
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-model', function () {
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         openEntryModelPicker(state, row, $(this), rerender);
     });
     $('#kf-entry-list').on('pointerdown.kf click.kf', '.kf-entry-model-arrow', function (event) {
         event.preventDefault();
         event.stopPropagation();
         if (event.type !== 'click') return;
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         openEntryModelPicker(state, row, row.find('.kf-entry-model'), rerender);
     });
     $('#kf-entry-list').on('click.kf', '.kf-key-eye', function (event) {
         event.preventDefault();
         event.stopPropagation();
         const button = $(this);
-        const input = button.closest('.input-wrapper').find('.kf-entry-key');
+        const input = button.closest('.kf-input-wrapper').find('.kf-entry-key');
         const reveal = input.attr('type') === 'password';
         input.attr('type', reveal ? 'text' : 'password');
         button.attr('aria-label', reveal ? '隐藏 KEY' : '显示 KEY');
@@ -1347,7 +1361,7 @@ function bind(state, rerender, setStatus) {
         event.preventDefault();
         event.stopPropagation();
         const pool = getActivePool(state);
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
@@ -1357,7 +1371,7 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);
-        const id = $(this).closest('.entry-block').data('id');
+        const id = $(this).closest('.kf-entry-block').data('id');
         pool.entries = pool.entries.filter(e => e.id !== id);
         persistNow(state);
         rerender();
@@ -1365,7 +1379,7 @@ function bind(state, rerender, setStatus) {
     bindEntryDragSort(state, rerender, setStatus);
     $('#kf-entry-list').on('click.kf', '.kf-fetch-models', async function () {
         const pool = getActivePool(state);
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
@@ -1386,7 +1400,7 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-entry-list').on('click.kf', '.kf-test-api', async function () {
         const pool = getActivePool(state);
-        const row = $(this).closest('.entry-block');
+        const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
@@ -1409,9 +1423,9 @@ function bind(state, rerender, setStatus) {
         }
     });
 
-    $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#settings-modal').addClass('show'));
-    $('#kf-btn-import-export').off('click.kf').on('click.kf', () => $('#import-export-modal').addClass('show'));
-    $('#kf-import-export-close').off('click.kf').on('click.kf', () => closeModal('import-export-modal'));
+    $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#kf-settings-modal').addClass('kf-show'));
+    $('#kf-btn-import-export').off('click.kf').on('click.kf', () => $('#kf-import-export-modal').addClass('kf-show'));
+    $('#kf-import-export-close').off('click.kf').on('click.kf', () => closeModal('kf-import-export-modal'));
     $('#kf-export-current-pool').off('click.kf').on('click.kf', () => {
         exportCurrentPool(state);
         setStatus('当前组合已导出');
@@ -1437,10 +1451,10 @@ function bind(state, rerender, setStatus) {
         }
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
-        $('#logModal').addClass('show');
+        $('#kf-log-modal').addClass('kf-show');
         renderLogs(state);
     });
-    $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('logModal'));
+    $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('kf-log-modal'));
     $('#kf-log-clear').off('click.kf').on('click.kf', () => {
         state.logs = [];
         persistNow(state);
@@ -1448,16 +1462,16 @@ function bind(state, rerender, setStatus) {
         setStatus('日志已清空');
     });
     $('.kf-log-filter').off('click.kf').on('click.kf', function () {
-        $('.kf-log-filter').removeClass('active');
-        $(this).addClass('active');
+        $('.kf-log-filter').removeClass('kf-active');
+        $(this).addClass('kf-active');
         renderLogs(state, String($(this).data('filter') || 'all'));
     });
-    $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#theme-modal').addClass('show'));
-    $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeModal('theme-modal'));
-    $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('settings-modal'));
+    $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#kf-theme-modal').addClass('kf-show'));
+    $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeModal('kf-theme-modal'));
+    $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('kf-settings-modal'));
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
     $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, setStatus));
-    $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('api-test-modal'));
+    $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('kf-api-test-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
     $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));
     $('#kf-rename-pool-input').off('keydown.kf').on('keydown.kf', function (event) {
@@ -1471,19 +1485,18 @@ function bind(state, rerender, setStatus) {
         })
         .on('click.kf', function (event) {
             event.stopPropagation();
-            if (this.id === 'failure-modal') return;
-            if (event.target === this) $(this).removeClass('show');
+            if (event.target === this) $(this).removeClass('kf-show');
         });
-    $('.kf-modal-overlay .modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
+    $('.kf-modal-overlay .kf-modal-box').not('#kf-failure-modal .kf-modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf click.kf', function (event) {
             event.stopPropagation();
         });
     $(document).off('mousedown.kfDropdown').on('mousedown.kfDropdown', function (event) {
-        if ($(event.target).closest('#dropdownModal,.dropdown-input').length) return;
+        if ($(event.target).closest('#kf-dropdown-modal,.kf-dropdown-input').length) return;
         closeDropdown();
     });
 
-    $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline,#kf-theme-blur,#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline,#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncThemeFromControls(state);
         applyTheme(state);
         persistHot(state);
@@ -1524,7 +1537,7 @@ export async function initUI(setStatus) {
 
     rerender();
     $(window).off('STKarmaFlip:logs-updated.kf').on('STKarmaFlip:logs-updated.kf', () => {
-        if ($('#logModal').hasClass('show')) renderLogs(state);
+        if ($('#kf-log-modal').hasClass('kf-show')) renderLogs(state);
     });
     setTimeout(() => {
         uiPersistenceReady = true;
