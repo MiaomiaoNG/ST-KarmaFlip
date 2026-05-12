@@ -111,12 +111,11 @@ function updateThemePresetVisibility(state) {
 
 function updateChatShortcut(state) {
     const button = $('#kf-chat-toggle-btn');
-    if (!button.length) return;
     if (state.shortcuts?.enabled === false) {
-        button.hide();
+        button.remove();
         return;
     }
-    button.show();
+    if (!button.length) return;
     const pool = getActivePool(state);
     const enabled = state.enabled !== false;
     const node = button.get(0);
@@ -147,6 +146,10 @@ function emperorIcon() {
 }
 
 function ensureChatShortcut(state, rerender, setStatus) {
+    if (state.shortcuts?.enabled === false) {
+        document.getElementById('kf-chat-toggle-btn')?.remove();
+        return;
+    }
     const host = getInlineReplyHost();
     if (!host) {
         if (!chatShortcutRetryTimer) {
@@ -178,6 +181,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
 function observeChatShortcutHost(state, rerender, setStatus) {
     if (chatShortcutObserver || typeof MutationObserver === 'undefined') return;
     chatShortcutObserver = new MutationObserver(() => {
+        if (state.shortcuts?.enabled === false) return;
         const button = document.getElementById('kf-chat-toggle-btn');
         const host = getInlineReplyHost();
         if (!host || button?.parentElement === host) return;
@@ -1710,7 +1714,8 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-failure-retry-count,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncFailureFromControls(state);
-        updateChatShortcut(state);
+        if (state.shortcuts?.enabled === false) updateChatShortcut(state);
+        else ensureChatShortcut(state, rerender, setStatus);
         persistHot(state);
     });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
