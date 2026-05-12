@@ -50,16 +50,6 @@ function setThemeVars(target, theme) {
     target.style.setProperty('--underline-rgb', hexToRgb(underline));
 }
 
-function silenceLongPressTransition() {
-    const longPress = $('#kf-long-press');
-    if (!longPress.length) return;
-    longPress.addClass('kf-silent-state');
-    window.clearTimeout(longPress.data('kfSilentTimer'));
-    longPress.data('kfSilentTimer', window.setTimeout(() => {
-        longPress.removeClass('kf-silent-state');
-    }, 80));
-}
-
 function applyBrush(root, style) {
     let blend = 'multiply';
     let opacity = '1';
@@ -89,11 +79,11 @@ function applyNativeClasses(enabled) {
     $('#kf-chat-toggle-btn').toggleClass('menu_button', enabled);
 }
 
-function updateLongPressState(state) {
+function updateGlobalToggleState(state) {
     const enabled = state.enabled !== false;
-    const longPress = $('#kf-long-press');
-    longPress.toggleClass('kf-active', enabled);
-    $('#kf-long-press-text').text(enabled ? '插件全局生效（长按关闭）' : '插件已关闭（长按启动）');
+    const toggle = $('#kf-global-toggle');
+    toggle.toggleClass('kf-active', enabled);
+    toggle.text(enabled ? '插件已开启' : '插件已关闭');
 }
 
 function updateModeState(state) {
@@ -193,10 +183,10 @@ function observeChatShortcutHost(state, rerender, setStatus) {
 function toggleGlobalEnabled(state, setStatus) {
     state.enabled = !(state.enabled !== false);
     persistNow(state);
-    updateLongPressState(state);
+    updateGlobalToggleState(state);
     updateChatShortcut(state);
     showToast(state.enabled !== false ? '[已开启插件] 陛下，该翻牌子了~' : '[已关闭插件] 传令！陛下今日不翻牌。', 'info', 2200);
-    setStatus(state.enabled !== false ? '插件全局生效' : '插件已关闭');
+    setStatus(state.enabled !== false ? '插件已开启' : '插件已关闭');
 }
 
 function setPoolMode(state, nextMode, rerender, setStatus) {
@@ -282,7 +272,6 @@ function bindChatShortcut(state, rerender, setStatus) {
 function applyTheme(state) {
     const root = document.getElementById('kf-root');
     if (!root) return;
-    silenceLongPressTransition();
     const theme = state.theme || {};
     const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer')].filter(Boolean);
     for (const target of targets) setThemeVars(target, theme);
@@ -515,11 +504,10 @@ function saveApiPresetIfNamed(state, entry) {
 
 function renderPool(state) {
     const pool = getActivePool(state);
-    silenceLongPressTransition();
     $('#kf-pool-picker-display').val(pool.name);
     $('#kf-pool-picker').show();
     updateModeState(state);
-    updateLongPressState(state);
+    updateGlobalToggleState(state);
     updateChatShortcut(state);
 }
 
@@ -1264,14 +1252,6 @@ function showApiTestResult(ok, message, detail = '') {
     $('#kf-api-test-modal').addClass('kf-show');
 }
 
-function bindLongPress(state, rerender, setStatus) {
-    const area = $('#kf-long-press');
-    bindPressHold(area, {
-        isActive: () => state.enabled !== false,
-        onLong: () => toggleGlobalEnabled(state, setStatus),
-    });
-}
-
 function isDragExcluded(target) {
     return !!$(target).closest('input,textarea,select,button,label,.kf-dropdown-input,.kf-dropdown-arrow,.kf-toggle-chip,.kf-select-wrapper,.kf-input-wrapper').length;
 }
@@ -1724,8 +1704,9 @@ function bind(state, rerender, setStatus) {
         const next = Math.max(1, toInt(input.val() || 3) + delta);
         input.val(next).trigger('change');
     });
-
-    bindLongPress(state, rerender, setStatus);
+    $('#kf-global-toggle').off('click.kf').on('click.kf', function () {
+        toggleGlobalEnabled(state, setStatus);
+    });
 }
 
 export async function initUI(setStatus) {

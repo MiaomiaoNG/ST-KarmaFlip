@@ -27,11 +27,15 @@
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
+    width: 35px !important;
+    height: 35px !important;
+    padding: 6px !important;
+    margin: 0 3px !important;
 }
 
 #kf-chat-toggle-btn .kf-chat-toggle-icon {
-    width: 20px;
-    height: 20px;
+    width: 100%;
+    height: 100%;
     display: block;
     stroke: currentColor;
     fill: none;
@@ -177,6 +181,7 @@
 #kf-root .kf-action-btn.kf-accent-fill::before { top: 25%; left: 2%; width: 96%; height: 50%; transform: rotate(-1deg); }
 #kf-root .kf-action-btn:hover::before { filter: brightness(0.9); }
 #kf-root .kf-action-btn:active { transform: scale(0.95); }
+#kf-root #kf-global-toggle { display: block; width: 100%; margin-top: 15px; }
 
 #kf-root .kf-select-wrapper {
     position: relative;
@@ -329,36 +334,6 @@
     background: rgba(var(--accent-fill-rgb), 0.28);
     outline: 1px dashed var(--underline-color) !important;
 }
-
-#kf-root .kf-long-press-row {
-    margin-top: 15px;
-    padding: 15px 0;
-    text-align: center;
-    cursor: pointer;
-    position: relative;
-    user-select: none;
-    touch-action: manipulation;
-}
-#kf-root .kf-long-press-text { position: relative; z-index: 2; font-weight: bold; display: inline-block; vertical-align: middle; color: inherit; }
-#kf-root .kf-long-press-row.kf-accent-fill::before,
-#kf-root .kf-long-press-row.kf-accent-fill::after {
-    width: 96%;
-    transform-origin: left center;
-    transform: scaleX(0);
-    transition: transform 0.8s linear;
-}
-#kf-root .kf-long-press-row.kf-silent-state.kf-accent-fill::before,
-#kf-root .kf-long-press-row.kf-silent-state.kf-accent-fill::after { transition: none !important; }
-#kf-root .kf-long-press-row.kf-active .kf-long-press-text { color: var(--text-accent); }
-#kf-root .kf-long-press-row.pressing-on.kf-accent-fill::before,
-#kf-root .kf-long-press-row.pressing-on.kf-accent-fill::after { transform: scaleX(1); }
-#kf-root .kf-long-press-row.kf-active.kf-accent-fill::before,
-#kf-root .kf-long-press-row.kf-active.kf-accent-fill::after {
-    transform: scaleX(1);
-    background: linear-gradient(90deg, rgba(var(--underline-rgb), 0) 0%, rgba(var(--underline-rgb), 0.8) 15%, rgba(var(--underline-rgb), 0.8) 85%, rgba(var(--underline-rgb), 0) 100%);
-}
-#kf-root .kf-long-press-row.pressing-off.kf-accent-fill::before,
-#kf-root .kf-long-press-row.pressing-off.kf-accent-fill::after { transform: scaleX(0); }
 
 #kf-root .kf-provider-wrapper .kf-inner-select {
     padding-right: 28px;

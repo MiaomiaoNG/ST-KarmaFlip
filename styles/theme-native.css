@@ -152,20 +152,6 @@
     display: none !important;
 }
 
-#kf-root[data-brush="native"] .kf-long-press-row {
-    border: 1px solid var(--native-border) !important;
-    border-radius: 5px;
-    background: transparent;
-}
-
-#kf-root[data-brush="native"] .kf-long-press-row.kf-active {
-    background: var(--native-hover-bg);
-}
-
-#kf-root[data-brush="native"] .kf-long-press-row.kf-active .kf-long-press-text {
-    color: inherit;
-}
-
 #kf-root[data-brush="native"] .kf-entries-container::-webkit-scrollbar-thumb {
     background: var(--native-border);
 }
