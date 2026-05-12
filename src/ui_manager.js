@@ -1,4 +1,4 @@
-import { enableStatePersistence, getActivePool, loadState, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { enableStatePersistence, getActivePool, loadState, patchEnabledState, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
@@ -64,8 +64,6 @@ function applyBrush(root, style) {
     }
     const toastLayer = document.getElementById('kf-toast-layer');
     if (toastLayer) toastLayer.dataset.brush = resolvedStyle;
-    const chatShortcut = document.getElementById('kf-chat-toggle-btn');
-    if (chatShortcut) chatShortcut.dataset.brush = resolvedStyle;
     applyNativeClasses(resolvedStyle === 'native');
 }
 
@@ -76,7 +74,6 @@ function applyNativeClasses(enabled) {
     scope.find('.kf-action-btn').toggleClass('menu_button', enabled);
     scope.find('.kf-inner-input,.kf-inner-select,select,textarea,.kf-stepper-input').toggleClass('text_pole', enabled);
     modals.toggleClass('popup kf-native-popup', enabled);
-    $('#kf-chat-toggle-btn').toggleClass('menu_button', enabled);
 }
 
 function updateGlobalToggleState(state) {
@@ -181,8 +178,7 @@ function observeChatShortcutHost(state, rerender, setStatus) {
 }
 
 function toggleGlobalEnabled(state, setStatus) {
-    state.enabled = !(state.enabled !== false);
-    persistNow(state);
+    patchEnabledState(state, state.enabled === false);
     updateGlobalToggleState(state);
     updateChatShortcut(state);
     showToast(state.enabled !== false ? '[已开启插件] 陛下，该翻牌子了~' : '[已关闭插件] 传令！陛下今日不翻牌。', 'info', 2200);

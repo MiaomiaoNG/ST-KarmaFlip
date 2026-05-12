@@ -8,6 +8,8 @@ let pendingPersist = false;
 let persistTimer = null;
 let asyncPersistTimer = null;
 let cachedState = null;
+let enabledPersistDirty = false;
+let enabledPersistHooksBound = false;
 const runtimeScopes = {};
 const LOG_EVENT_NAME = 'STKarmaFlip:logs-updated';
 
@@ -155,6 +157,31 @@ function persistSettings() {
     else if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
 }
 
+function clearEnabledPersistDirty() {
+    enabledPersistDirty = false;
+}
+
+function flushEnabledPersist() {
+    if (!enabledPersistDirty) return;
+    clearEnabledPersistDirty();
+    if (!persistenceEnabled) {
+        pendingPersist = true;
+        return;
+    }
+    persistSettings();
+}
+
+function bindEnabledPersistHooks() {
+    if (enabledPersistHooksBound) return;
+    enabledPersistHooksBound = true;
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushEnabledPersist();
+    });
+    window.addEventListener('pagehide', () => {
+        flushEnabledPersist();
+    });
+}
+
 export function enableStatePersistence() {
     persistenceEnabled = true;
     if (!pendingPersist) return;
@@ -166,6 +193,7 @@ export function saveState(state, options = {}) {
     cachedState = normalizeState(state);
     extensionSettings()[MODULE_KEY] = cachedState;
     if (options.persist === false) return;
+    clearEnabledPersistDirty();
     if (!persistenceEnabled) {
         pendingPersist = true;
         return;
@@ -177,6 +205,7 @@ export function saveStateAsync(state, delay = 0) {
     state.runtime = {};
     cachedState = state;
     extensionSettings()[MODULE_KEY] = cachedState;
+    clearEnabledPersistDirty();
     if (!persistenceEnabled) {
         pendingPersist = true;
         return;
@@ -191,11 +220,29 @@ export function saveStateAsync(state, delay = 0) {
 export function saveStateDebounced(state, delay = 400) {
     cachedState = normalizeState(state);
     extensionSettings()[MODULE_KEY] = cachedState;
+    clearEnabledPersistDirty();
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
         persistTimer = null;
         saveState(state);
     }, delay);
+}
+
+export function patchEnabledState(state, enabled) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = enabled !== false;
+    source.enabled = normalized;
+    cachedState = source;
+    const settings = extensionSettings();
+    if (settings[MODULE_KEY] !== source) {
+        settings[MODULE_KEY] = { ...(settings[MODULE_KEY] || {}), enabled: normalized };
+    } else {
+        settings[MODULE_KEY].enabled = normalized;
+    }
+    bindEnabledPersistHooks();
+    enabledPersistDirty = true;
+    if (!persistenceEnabled) pendingPersist = true;
+    return source;
 }
 
 export function getActivePool(state) {
