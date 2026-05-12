@@ -12,6 +12,13 @@ const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 
 const LOG_PERSIST_DELAY = 5000;
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
+const PERF_WARN_MS = {
+    chatSettings: 12,
+    mvuScan: 8,
+    pickMember: 6,
+    traceRead: 4,
+    responseCheck: 20,
+};
 const MVU_PROMPT_PATTERNS = [
     /<additional_information\b/i,
     /<past_observe\b/i,
@@ -24,6 +31,17 @@ const MVU_PROMPT_PATTERNS = [
 
 function normalizeBaseUrl(apiUrl) {
     return String(apiUrl || '').trim().replace(/\/+$/, '');
+}
+
+function nowMs() {
+    if (typeof performance?.now === 'function') return performance.now();
+    return Date.now();
+}
+
+function warnSlowPath(label, startedAt, threshold) {
+    const elapsed = nowMs() - startedAt;
+    if (elapsed < threshold) return;
+    console.warn(`[KarmaFlip] slow path: ${label} ${elapsed.toFixed(1)}ms`);
 }
 
 function context() {
@@ -70,13 +88,16 @@ function contentToText(content) {
 }
 
 function isMvuAnalysisRequest(generateData) {
+    const startedAt = nowMs();
     const messages = Array.isArray(generateData?.messages) ? generateData.messages : [];
     if (!messages.length) return false;
     const sampled = messages.length <= 4
         ? messages
         : [messages[0], messages[1], messages[messages.length - 2], messages[messages.length - 1]];
     const text = sampled.map(message => contentToText(message?.content)).join('\n');
-    return MVU_PROMPT_PATTERNS.some(pattern => pattern.test(text));
+    const matched = MVU_PROMPT_PATTERNS.some(pattern => pattern.test(text));
+    warnSlowPath('mvu-scan', startedAt, PERF_WARN_MS.mvuScan);
+    return matched;
 }
 
 function isGenerateFetch(input) {
@@ -208,17 +229,22 @@ function businessErrorMessage(payload) {
 }
 
 async function responseBusinessFailure(response) {
+    const startedAt = nowMs();
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
     if (contentType.includes('text/event-stream')) return { failed: false, detail: '' };
 
     if (!response.ok) {
-        return { failed: true, detail: await responseText(response) };
+        const result = { failed: true, detail: await responseText(response) };
+        warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
+        return result;
     }
     if (!contentType.includes('application/json')) return { failed: false, detail: '' };
     const text = await responseText(response);
     const payload = parseJson(text);
     const message = businessErrorMessage(payload);
-    return message ? { failed: true, detail: message || text } : { failed: false, detail: '' };
+    const result = message ? { failed: true, detail: message || text } : { failed: false, detail: '' };
+    warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
+    return result;
 }
 
 function queueLog(state, entry) {
@@ -278,19 +304,26 @@ function cleanupPendingRequests() {
 }
 
 function readTraceRequest(init) {
-    const body = String(init?.body || '');
-    if (!body.includes(TRACE_FIELD)) return null;
-    try {
-        const match = body.match(new RegExp(`"${TRACE_FIELD}"\\s*:\\s*"([^"]+)"`));
-        const traceId = String(match?.[1] || '');
-        if (!traceId) return null;
-        return {
-            traceId,
-            init,
-        };
-    } catch {
-        return null;
-    }
+    const startedAt = nowMs();
+    const body = init?.body;
+    if (typeof body !== 'string' || !body.includes(TRACE_FIELD)) return null;
+
+    const keyIndex = body.indexOf(`"${TRACE_FIELD}"`);
+    if (keyIndex === -1) return null;
+    const colonIndex = body.indexOf(':', keyIndex + TRACE_FIELD.length + 2);
+    if (colonIndex === -1) return null;
+    const valueQuoteStart = body.indexOf('"', colonIndex + 1);
+    if (valueQuoteStart === -1) return null;
+    const valueQuoteEnd = body.indexOf('"', valueQuoteStart + 1);
+    if (valueQuoteEnd === -1) return null;
+
+    const traceId = body.slice(valueQuoteStart + 1, valueQuoteEnd);
+    if (!traceId) return null;
+    warnSlowPath('trace-read', startedAt, PERF_WARN_MS.traceRead);
+    return {
+        traceId,
+        init,
+    };
 }
 
 async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
@@ -441,6 +474,7 @@ function bindChatCompletionSettings(onStatus) {
     }
 
     eventSource.on(eventName, (generateData) => {
+        const startedAt = nowMs();
         try {
             const state = loadState();
             if (state.enabled === false) return;
@@ -451,7 +485,9 @@ function bindChatCompletionSettings(onStatus) {
             if (!Array.isArray(pool.entries) || !pool.entries.length) return;
             if (!validRuntimeEntries(pool).length) return;
 
+            const pickStartedAt = nowMs();
             const picked = pickMember(state, pool);
+            warnSlowPath('pick-member', pickStartedAt, PERF_WARN_MS.pickMember);
             if (!picked?.member) return;
 
             const member = picked.member;
@@ -464,6 +500,8 @@ function bindChatCompletionSettings(onStatus) {
             if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
         } catch (error) {
             reportRuntimeError('CHAT_COMPLETION_SETTINGS_READY 处理失败', error);
+        } finally {
+            warnSlowPath('chat-settings', startedAt, PERF_WARN_MS.chatSettings);
         }
     });
 
