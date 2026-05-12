@@ -40,11 +40,15 @@ export function getDefaultState() {
             bgSub: '#f7f9fc',
             underline: '#617b9b',
             brush: 'simple',
+            preset: 'default',
         },
         failure: {
             retryCount: 3,
             alertEnabled: false,
             modelAlertEnabled: false,
+        },
+        shortcuts: {
+            enabled: true,
         },
         runtime: {},
         logs: [],
@@ -111,12 +115,18 @@ function normalizeState(raw) {
     s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
     delete s.theme.blur;
     s.theme.brush = ['simple', 'native'].includes(s.theme.brush) ? s.theme.brush : 'simple';
+    s.theme.preset = String(s.theme.preset || 'default');
     s.failure = {
         ...getDefaultState().failure,
         ...(s.failure || {}),
         retryCount: Math.max(1, toInt(s.failure?.retryCount || 3)),
         alertEnabled: !!s.failure?.alertEnabled,
         modelAlertEnabled: !!s.failure?.modelAlertEnabled,
+    };
+    s.shortcuts = {
+        ...getDefaultState().shortcuts,
+        ...(s.shortcuts || {}),
+        enabled: s.shortcuts?.enabled !== false,
     };
     if (!Array.isArray(s.logs)) s.logs = [];
     if (s.logs.length > MAX_STORED_LOGS) s.logs = s.logs.slice(0, MAX_STORED_LOGS);

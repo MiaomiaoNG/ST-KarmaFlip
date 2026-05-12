@@ -108,6 +108,13 @@
                 <span class="kf-square-box"></span>
             </label>
         </div>
+        <div class="kf-settings-row">
+            <span class="kf-settings-label">开启快捷键</span>
+            <label class="kf-square-check" title="在快捷回复栏显示 KarmaFlip 按钮">
+                <input type="checkbox" id="kf-shortcut-enabled">
+                <span class="kf-square-box"></span>
+            </label>
+        </div>
         <div class="kf-modal-actions kf-modal-actions-two">
             <button class="kf-action-btn kf-accent-fill" id="kf-settings-confirm">确认</button>
             <button class="kf-action-btn kf-accent-fill" id="kf-settings-cancel">取消</button>
@@ -180,6 +187,16 @@
             <select id="kf-theme-brush" class="kf-inner-input">
                 <option value="simple">简约风格</option>
                 <option value="native">酒馆原生风格</option>
+            </select>
+        </div>
+        <div class="kf-color-picker-row" id="kf-theme-preset-row">
+            <span>预设颜色搭配</span>
+            <select id="kf-theme-preset" class="kf-inner-input">
+                <option value="default">默认配色</option>
+                <option value="deep-space">深空青灰</option>
+                <option value="black-coffee">醇厚黑咖</option>
+                <option value="night-fir">暗夜冷杉</option>
+                <option value="soft-dark">柔和极暗</option>
             </select>
         </div>
         <div style="font-size: 12px; color: #888; margin-top: 10px; text-align: center;">字体颜色会自动适应底色切换为黑或白</div>

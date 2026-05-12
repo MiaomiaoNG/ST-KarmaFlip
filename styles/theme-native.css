@@ -49,12 +49,12 @@
 
 #kf-root[data-brush="native"] .kf-input-wrapper,
 #kf-root[data-brush="native"] .kf-select-wrapper {
-    background: transparent !important;
-    border: none !important;
+    background: var(--native-panel-bg) !important;
+    border: 1px solid var(--native-border) !important;
     border-radius: 5px;
     color: inherit;
     min-height: 32px;
-    padding: 0;
+    padding: 4px 8px;
 }
 
 #kf-root[data-brush="native"] .kf-input-wrapper .kf-label,
@@ -77,15 +77,38 @@
     appearance: auto !important;
     -webkit-appearance: auto !important;
     -moz-appearance: auto !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
     color: inherit;
     font-family: inherit;
     font-weight: normal;
     text-align: left;
 }
 
+#kf-root[data-brush="native"] .kf-select-wrapper .kf-inner-select {
+    padding: 0 28px 0 0;
+}
+
+#kf-root[data-brush="native"] .kf-dropdown-arrow,
+#kf-root[data-brush="native"] .kf-eye-btn,
+#kf-root[data-brush="native"] .kf-icon-btn {
+    border-radius: 4px;
+}
+
+#kf-root[data-brush="native"] .kf-input-wrapper:focus-within,
+#kf-root[data-brush="native"] .kf-select-wrapper:focus-within {
+    border-color: var(--SmartThemeQuoteColor, var(--native-border)) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--SmartThemeQuoteColor, #5aa9ff) 45%, transparent);
+}
+
 #kf-root[data-brush="native"] .kf-action-btn,
 #kf-root[data-brush="native"] .kf-icon-btn,
 #kf-root[data-brush="native"] .kf-eye-btn {
+    background: var(--native-panel-bg) !important;
+    border: 1px solid var(--native-border) !important;
+    box-shadow: none !important;
+    border-radius: 5px;
     color: inherit;
     min-height: 32px;
     font-family: inherit;
@@ -167,6 +190,14 @@
     border-radius: 5px;
     color: inherit;
     font-family: inherit;
+}
+
+.kf-modal-overlay[data-brush="native"] .kf-action-btn {
+    background: var(--SmartThemeBlurTintColor, var(--bg-main, rgba(255, 255, 255, 0.96))) !important;
+}
+
+.kf-modal-overlay[data-brush="native"] .kf-input-wrapper {
+    background: var(--SmartThemeBlurTintColor, var(--bg-main, rgba(255, 255, 255, 0.96))) !important;
 }
 
 .kf-modal-overlay[data-brush="native"] .kf-input-wrapper .kf-label,

@@ -4,6 +4,14 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 let uiPersistenceReady = false;
+let chatShortcutRetryTimer = null;
+const THEME_PRESETS = {
+    default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
+    'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
+    'black-coffee': { bgMain: '#24211e', bgSub: '#302c28', underline: '#ad7c59' },
+    'night-fir': { bgMain: '#1b211d', bgSub: '#242c26', underline: '#688e73' },
+    'soft-dark': { bgMain: '#141414', bgSub: '#1f1f1f', underline: '#666666' },
+};
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -27,6 +35,18 @@ function hexToRgb(hex) {
     const g = parseInt(value.slice(2, 4), 16);
     const b = parseInt(value.slice(4, 6), 16);
     return [r, g, b].map(x => Number.isFinite(x) ? x : 0).join(', ');
+}
+
+function setThemeVars(target, theme) {
+    if (!target) return;
+    const underline = theme.underline || '#617b9b';
+    target.style.setProperty('--bg-main', theme.bgMain || '#ffffff');
+    target.style.setProperty('--bg-sub', theme.bgSub || '#f7f9fc');
+    target.style.setProperty('--text-main', contrastText(theme.bgMain || '#ffffff'));
+    target.style.setProperty('--text-sub', contrastText(theme.bgSub || '#f7f9fc'));
+    target.style.setProperty('--text-accent', contrastText(underline));
+    target.style.setProperty('--underline-color', underline);
+    target.style.setProperty('--underline-rgb', hexToRgb(underline));
 }
 
 function silenceLongPressTransition() {
@@ -53,6 +73,8 @@ function applyBrush(root, style) {
     }
     const toastLayer = document.getElementById('kf-toast-layer');
     if (toastLayer) toastLayer.dataset.brush = resolvedStyle;
+    const chatShortcut = document.getElementById('kf-chat-toggle-btn');
+    if (chatShortcut) chatShortcut.dataset.brush = resolvedStyle;
     applyNativeClasses(resolvedStyle === 'native');
 }
 
@@ -63,6 +85,180 @@ function applyNativeClasses(enabled) {
     scope.find('.kf-action-btn').toggleClass('menu_button', enabled);
     scope.find('.kf-inner-input,.kf-inner-select,select,textarea,.kf-stepper-input').toggleClass('text_pole', enabled);
     modals.toggleClass('popup kf-native-popup', enabled);
+    $('#kf-chat-toggle-btn').toggleClass('menu_button', enabled);
+}
+
+function updateLongPressState(state) {
+    const enabled = state.enabled !== false;
+    const longPress = $('#kf-long-press');
+    longPress.toggleClass('kf-active', enabled);
+    $('#kf-long-press-text').text(enabled ? '插件全局生效（长按关闭）' : '插件已关闭（长按启动）');
+}
+
+function updateModeState(state) {
+    const pool = getActivePool(state);
+    $('#kf-root').attr('data-mode', pool.mode);
+    $('#kf-mode-fixed').prop('checked', pool.mode === 'fixed');
+    $('#kf-mode-random').prop('checked', pool.mode === 'random');
+    $('#kf-no-streak').prop('checked', !!pool.random?.noConsecutive);
+}
+
+function updateThemePresetVisibility(state) {
+    const brush = state.theme?.brush === 'native' ? 'native' : 'simple';
+    $('#kf-theme-preset-row').toggle(brush === 'simple');
+}
+
+function updateChatShortcut(state) {
+    const button = $('#kf-chat-toggle-btn');
+    if (!button.length) return;
+    if (state.shortcuts?.enabled === false) {
+        button.hide();
+        return;
+    }
+    button.show();
+    const pool = getActivePool(state);
+    const enabled = state.enabled !== false;
+    const node = button.get(0);
+    node.dataset.mode = pool.mode;
+    node.dataset.enabled = enabled ? 'true' : 'false';
+    button.toggleClass('kf-active', enabled).toggleClass('kf-disabled', !enabled);
+    button.attr('title', `点击切换固定/随机，长按${enabled ? '关闭' : '启动'}插件`);
+    button.attr('aria-label', `KarmaFlip 快捷按钮，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}，插件${enabled ? '已启用' : '已关闭'}`);
+}
+
+function getInlineReplyHost() {
+    return document.querySelector('#qr--bar > .qr--buttons') || document.querySelector('#qr--bar');
+}
+
+function emperorIcon() {
+    return `
+        <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="7" y1="3" x2="17" y2="3" />
+            <line x1="12" y1="3" x2="12" y2="21" />
+            <line x1="9.5" y1="7" x2="14.5" y2="7" />
+            <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
+            <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
+            <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
+        </svg>
+    `;
+}
+
+function ensureChatShortcut(state, rerender, setStatus) {
+    const host = getInlineReplyHost();
+    if (!host) {
+        if (!chatShortcutRetryTimer) {
+            chatShortcutRetryTimer = window.setTimeout(() => {
+                chatShortcutRetryTimer = null;
+                ensureChatShortcut(state, rerender, setStatus);
+            }, 1200);
+        }
+        return;
+    }
+    if (chatShortcutRetryTimer) {
+        window.clearTimeout(chatShortcutRetryTimer);
+        chatShortcutRetryTimer = null;
+    }
+
+    let shell = document.getElementById('kf-chat-toggle-shell');
+    if (!shell) {
+        shell = document.createElement('button');
+        shell.id = 'kf-chat-toggle-btn';
+        shell.type = 'button';
+        shell.className = 'remote-ctrl-btn qr--button menu_button interactable';
+        shell.innerHTML = emperorIcon();
+    }
+    if (shell.parentElement !== host) host.prepend(shell);
+    bindChatShortcut(state, rerender, setStatus);
+    updateChatShortcut(state);
+}
+
+function toggleGlobalEnabled(state, setStatus) {
+    state.enabled = !(state.enabled !== false);
+    persistNow(state);
+    updateLongPressState(state);
+    updateChatShortcut(state);
+    showToast(state.enabled !== false ? '[已开启插件] 陛下，该翻牌子了~' : '[已关闭插件] 传令！陛下今日不翻牌。', 'info', 2200);
+    setStatus(state.enabled !== false ? '插件全局生效' : '插件已关闭');
+}
+
+function setPoolMode(state, nextMode, rerender, setStatus) {
+    const pool = getActivePool(state);
+    const mode = nextMode === 'random' ? 'random' : 'fixed';
+    if (pool.mode === mode) {
+        updateModeState(state);
+        updateChatShortcut(state);
+        return;
+    }
+    pool.mode = mode;
+    const equalized = maybeEqualizeWeights(state);
+    persistHot(state);
+    updateModeState(state);
+    updateChatShortcut(state);
+    showToast(`切换成[${mode === 'random' ? '随机模式' : '固定模式'}] 太后让我选这个！`, 'info', 2200);
+    setStatus(mode === 'random' ? '已切换到随机模式' : '已切换到固定模式');
+    if (equalized) rerender();
+}
+
+function bindPressHold(area, options = {}) {
+    let timer = null;
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let longTriggered = false;
+    const threshold = Number(options.threshold) || 560;
+    const moveTolerance = Number(options.moveTolerance) || 8;
+    const clear = () => {
+        if (timer) window.clearTimeout(timer);
+        timer = null;
+        pointerId = null;
+        area.removeClass('pressing-on pressing-off');
+    };
+
+    area.off('.kfHold');
+    area.on('pointerdown.kfHold', function (event) {
+        if (event.button && event.button !== 0) return;
+        const active = typeof options.isActive === 'function' ? !!options.isActive() : false;
+        pointerId = event.pointerId;
+        startX = Number(event.clientX || 0);
+        startY = Number(event.clientY || 0);
+        longTriggered = false;
+        area.addClass(active ? 'pressing-off' : 'pressing-on');
+        area.get(0)?.setPointerCapture?.(event.pointerId);
+        timer = window.setTimeout(() => {
+            longTriggered = true;
+            clear();
+            options.onLong?.(event);
+        }, threshold);
+    });
+    area.on('pointermove.kfHold', function (event) {
+        if (pointerId !== event.pointerId) return;
+        const movedX = Math.abs(Number(event.clientX || 0) - startX);
+        const movedY = Math.abs(Number(event.clientY || 0) - startY);
+        if (movedX > moveTolerance || movedY > moveTolerance) clear();
+    });
+    area.on('pointerup.kfHold', function (event) {
+        if (pointerId !== null && pointerId !== event.pointerId) return;
+        const shouldRunShort = !longTriggered;
+        clear();
+        if (shouldRunShort) options.onShort?.(event);
+    });
+    area.on('pointercancel.kfHold pointerleave.kfHold', function (event) {
+        if (pointerId !== null && pointerId !== event.pointerId) return;
+        clear();
+    });
+}
+
+function bindChatShortcut(state, rerender, setStatus) {
+    const button = $('#kf-chat-toggle-btn');
+    if (!button.length) return;
+    bindPressHold(button, {
+        isActive: () => state.enabled !== false,
+        onShort: () => {
+            const pool = getActivePool(state);
+            setPoolMode(state, pool.mode === 'random' ? 'fixed' : 'random', rerender, setStatus);
+        },
+        onLong: () => toggleGlobalEnabled(state, setStatus),
+    });
 }
 
 function applyTheme(state) {
@@ -71,16 +267,7 @@ function applyTheme(state) {
     silenceLongPressTransition();
     const theme = state.theme || {};
     const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer')].filter(Boolean);
-    for (const target of targets) {
-        const underline = theme.underline || '#617b9b';
-        target.style.setProperty('--bg-main', theme.bgMain || '#ffffff');
-        target.style.setProperty('--bg-sub', theme.bgSub || '#f7f9fc');
-        target.style.setProperty('--text-main', contrastText(theme.bgMain || '#ffffff'));
-        target.style.setProperty('--text-sub', contrastText(theme.bgSub || '#f7f9fc'));
-        target.style.setProperty('--text-accent', contrastText(underline));
-        target.style.setProperty('--underline-color', underline);
-        target.style.setProperty('--underline-rgb', hexToRgb(underline));
-    }
+    for (const target of targets) setThemeVars(target, theme);
     applyBrush(root, theme.brush || 'simple');
 
     $('#kf-theme-bg-main').val(theme.bgMain || '#ffffff');
@@ -88,9 +275,13 @@ function applyTheme(state) {
     $('#kf-theme-underline').val(theme.underline || '#617b9b');
     const resolvedBrush = ['simple', 'native'].includes(theme.brush) ? theme.brush : 'simple';
     $('#kf-theme-brush').val(resolvedBrush);
+    $('#kf-theme-preset').val(String(theme.preset || 'default'));
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
     $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
+    $('#kf-shortcut-enabled').prop('checked', state.shortcuts?.enabled !== false);
+    updateThemePresetVisibility(state);
+    updateChatShortcut(state);
 }
 
 function mkPool(name = null) {
@@ -307,15 +498,11 @@ function saveApiPresetIfNamed(state, entry) {
 function renderPool(state) {
     const pool = getActivePool(state);
     silenceLongPressTransition();
-    const longPress = $('#kf-long-press');
     $('#kf-pool-picker-display').val(pool.name);
     $('#kf-pool-picker').show();
-    $('#kf-root').attr('data-mode', pool.mode);
-    $('#kf-mode-fixed').prop('checked', pool.mode === 'fixed');
-    $('#kf-mode-random').prop('checked', pool.mode === 'random');
-    $('#kf-no-streak').prop('checked', !!pool.random?.noConsecutive);
-    longPress.toggleClass('kf-active', state.enabled !== false);
-    $('#kf-long-press-text').text(state.enabled !== false ? '插件全局生效（长按关闭）' : '插件已关闭（长按启动）');
+    updateModeState(state);
+    updateLongPressState(state);
+    updateChatShortcut(state);
 }
 
 function providerSelect(entry) {
@@ -525,12 +712,23 @@ function syncThemeFromControls(state) {
     state.theme.underline = $('#kf-theme-underline').val();
     const brush = String($('#kf-theme-brush').val() || 'simple');
     state.theme.brush = ['simple', 'native'].includes(brush) ? brush : 'simple';
+    state.theme.preset = String($('#kf-theme-preset').val() || 'default');
+}
+
+function applyThemePreset(state, presetKey) {
+    const preset = THEME_PRESETS[presetKey] || THEME_PRESETS.default;
+    state.theme.bgMain = preset.bgMain;
+    state.theme.bgSub = preset.bgSub;
+    state.theme.underline = preset.underline;
+    state.theme.preset = presetKey in THEME_PRESETS ? presetKey : 'default';
 }
 
 function syncFailureFromControls(state) {
     state.failure.retryCount = Math.max(1, toInt($('#kf-failure-retry-count').val() || 3));
     state.failure.alertEnabled = $('#kf-failure-alert-enabled').prop('checked');
     state.failure.modelAlertEnabled = $('#kf-model-alert-enabled').prop('checked');
+    state.shortcuts = state.shortcuts || {};
+    state.shortcuts.enabled = $('#kf-shortcut-enabled').prop('checked');
 }
 
 function syncAllFromControls(state) {
@@ -1049,27 +1247,11 @@ function showApiTestResult(ok, message, detail = '') {
 }
 
 function bindLongPress(state, rerender, setStatus) {
-    let timer = null;
     const area = $('#kf-long-press');
-    area.off('.kfLP');
-    const start = (event) => {
-        if (event.button === 2) return;
-        const enabled = state.enabled !== false;
-        area.addClass(enabled ? 'pressing-off' : 'pressing-on');
-        timer = setTimeout(() => {
-            state.enabled = !(state.enabled !== false);
-            area.removeClass('pressing-on pressing-off');
-            persistNow(state);
-            rerender();
-            setStatus(state.enabled !== false ? '插件全局生效' : '插件已关闭');
-        }, 800);
-    };
-    const cancel = () => {
-        clearTimeout(timer);
-        area.removeClass('pressing-on pressing-off');
-    };
-    area.on('mousedown.kfLP touchstart.kfLP', start);
-    $(window).off('mouseup.kfLP touchend.kfLP').on('mouseup.kfLP touchend.kfLP', cancel);
+    bindPressHold(area, {
+        isActive: () => state.enabled !== false,
+        onLong: () => toggleGlobalEnabled(state, setStatus),
+    });
 }
 
 function isDragExcluded(target) {
@@ -1231,15 +1413,12 @@ function bind(state, rerender, setStatus) {
     });
 
     $('#kf-mode-fixed,#kf-mode-random').off('change.kf').on('change.kf', function () {
-        const pool = getActivePool(state);
-        pool.mode = String($(this).val()) === 'random' ? 'random' : 'fixed';
-        maybeEqualizeWeights(state);
-        persistHot(state);
-        rerender();
+        setPoolMode(state, String($(this).val()), rerender, setStatus);
     });
     $('#kf-no-streak').off('change.kf').on('change.kf', function () {
         getActivePool(state).random.noConsecutive = $(this).prop('checked');
         persistHot(state);
+        updateChatShortcut(state);
         setStatus('避免连续命中已更新');
     });
     $('#kf-btn-new-pool').off('click.kf').on('click.kf', () => {
@@ -1496,13 +1675,28 @@ function bind(state, rerender, setStatus) {
         closeDropdown();
     });
 
-    $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline,#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncThemeFromControls(state);
+        updateThemePresetVisibility(state);
         applyTheme(state);
         persistHot(state);
     });
-    $('#kf-failure-retry-count,#kf-failure-alert-enabled,#kf-model-alert-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('#kf-theme-preset').off('change.kf').on('change.kf', function () {
+        const presetKey = String($(this).val() || 'default');
+        applyThemePreset(state, presetKey);
+        applyTheme(state);
+        persistHot(state);
+    });
+    $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline').off('input.kf change.kf').on('input.kf change.kf', function () {
+        syncThemeFromControls(state);
+        state.theme.preset = 'default';
+        $('#kf-theme-preset').val('default');
+        applyTheme(state);
+        persistHot(state);
+    });
+    $('#kf-failure-retry-count,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncFailureFromControls(state);
+        updateChatShortcut(state);
         persistHot(state);
     });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
@@ -1536,6 +1730,7 @@ export async function initUI(setStatus) {
     };
 
     rerender();
+    ensureChatShortcut(state, rerender, setStatus);
     $(window).off('STKarmaFlip:logs-updated.kf').on('STKarmaFlip:logs-updated.kf', () => {
         if ($('#kf-log-modal').hasClass('kf-show')) renderLogs(state);
     });

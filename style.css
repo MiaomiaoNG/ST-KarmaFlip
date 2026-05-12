@@ -22,6 +22,23 @@
     font-family: "Microsoft YaHei", sans-serif;
 }
 
+#kf-chat-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+#kf-chat-toggle-btn .kf-chat-toggle-icon {
+    width: 20px;
+    height: 20px;
+    display: block;
+    stroke: currentColor;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 #kf-root, #kf-root * {
     box-sizing: border-box;
     border: none !important;
@@ -320,6 +337,7 @@
     cursor: pointer;
     position: relative;
     user-select: none;
+    touch-action: manipulation;
 }
 #kf-root .kf-long-press-text { position: relative; z-index: 2; font-weight: bold; display: inline-block; vertical-align: middle; color: inherit; }
 #kf-root .kf-long-press-row.kf-accent-fill::before,
@@ -327,8 +345,7 @@
     width: 96%;
     transform-origin: left center;
     transform: scaleX(0);
-    transition: transform 0.8s ease-in-out;
-    will-change: transform;
+    transition: transform 0.8s linear;
 }
 #kf-root .kf-long-press-row.kf-silent-state.kf-accent-fill::before,
 #kf-root .kf-long-press-row.kf-silent-state.kf-accent-fill::after { transition: none !important; }
@@ -376,6 +393,7 @@
 .kf-modal-overlay .kf-modal-header { font-weight: bold; margin-bottom: 15px; font-size: var(--kf-font-modal-title, clamp(15px, 1.7vw, 16px)); display: flex; justify-content: space-between; }
 .kf-modal-overlay .kf-close-btn { cursor: pointer; color: #888; }
 .kf-modal-overlay .kf-color-picker-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px)); }
+.kf-modal-overlay .kf-color-picker-row.kf-hidden { display: none; }
 .kf-modal-overlay .kf-color-picker-row input[type="color"] { width: 30px; height: 30px; padding: 0; background: transparent; cursor: pointer; }
 .kf-modal-overlay .kf-color-picker-row input[type="range"],
 .kf-modal-overlay .kf-color-picker-row select { width: 120px; }
@@ -688,7 +706,7 @@
 
 .kf-toast-layer {
     position: fixed;
-    top: max(18px, env(safe-area-inset-top));
+    top: calc(max(18px, env(safe-area-inset-top)) + 80px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 100000;
@@ -754,6 +772,7 @@
 }
 
 @media (max-width: 650px) {
+    #kf-chat-toggle-btn .kf-chat-toggle-icon { width: 18px; height: 18px; }
     #kf-root .kf-responsive-controls { grid-template-columns: repeat(2, 1fr); }
     #kf-root .kf-row { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; } /* 缩小手机上同行元素的间距 */
     
