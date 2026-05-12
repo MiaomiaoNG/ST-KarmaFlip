@@ -5,6 +5,7 @@ const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-se
 const HOT_SAVE_DELAY = 1000;
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
+let chatShortcutObserver = null;
 const THEME_PRESETS = {
     default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
     'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
@@ -121,13 +122,17 @@ function updateChatShortcut(state) {
     const node = button.get(0);
     node.dataset.mode = pool.mode;
     node.dataset.enabled = enabled ? 'true' : 'false';
-    button.toggleClass('kf-active', enabled).toggleClass('kf-disabled', !enabled);
+    button.toggleClass('kf-active', true).toggleClass('kf-disabled', false);
     button.attr('title', `点击切换固定/随机，长按${enabled ? '关闭' : '启动'}插件`);
     button.attr('aria-label', `KarmaFlip 快捷按钮，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}，插件${enabled ? '已启用' : '已关闭'}`);
 }
 
 function getInlineReplyHost() {
-    return document.querySelector('#qr--bar > .qr--buttons') || document.querySelector('#qr--bar');
+    return document.querySelector('#qr--bar > .qr--buttons')
+        || document.querySelector('#send_form #qr--bar > .qr--buttons')
+        || document.querySelector('.qr--buttons')
+        || document.querySelector('#qr--bar')
+        || document.querySelector('#send_form');
 }
 
 function emperorIcon() {
@@ -170,6 +175,17 @@ function ensureChatShortcut(state, rerender, setStatus) {
     if (shell.parentElement !== host) host.prepend(shell);
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
+}
+
+function observeChatShortcutHost(state, rerender, setStatus) {
+    if (chatShortcutObserver || typeof MutationObserver === 'undefined') return;
+    chatShortcutObserver = new MutationObserver(() => {
+        const button = document.getElementById('kf-chat-toggle-btn');
+        const host = getInlineReplyHost();
+        if (!host || button?.parentElement === host) return;
+        ensureChatShortcut(state, rerender, setStatus);
+    });
+    chatShortcutObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function toggleGlobalEnabled(state, setStatus) {
@@ -1731,6 +1747,7 @@ export async function initUI(setStatus) {
 
     rerender();
     ensureChatShortcut(state, rerender, setStatus);
+    observeChatShortcutHost(state, rerender, setStatus);
     $(window).off('STKarmaFlip:logs-updated.kf').on('STKarmaFlip:logs-updated.kf', () => {
         if ($('#kf-log-modal').hasClass('kf-show')) renderLogs(state);
     });
