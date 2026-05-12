@@ -129,10 +129,8 @@ function updateChatShortcut(state) {
 
 function getInlineReplyHost() {
     return document.querySelector('#qr--bar > .qr--buttons')
-        || document.querySelector('#send_form #qr--bar > .qr--buttons')
         || document.querySelector('.qr--buttons')
-        || document.querySelector('#qr--bar')
-        || document.querySelector('#send_form');
+        || document.querySelector('#qr--bar');
 }
 
 function emperorIcon() {
@@ -164,7 +162,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
         chatShortcutRetryTimer = null;
     }
 
-    let shell = document.getElementById('kf-chat-toggle-shell');
+    let shell = document.getElementById('kf-chat-toggle-btn');
     if (!shell) {
         shell = document.createElement('button');
         shell.id = 'kf-chat-toggle-btn';
