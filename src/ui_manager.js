@@ -1,8 +1,9 @@
-import { clearLogs, enableStatePersistence, getActivePool, getUsageStats, loadState, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { clearLogs, enableStatePersistence, getActivePool, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
+const STRUCTURE_SAVE_DELAY = 5000;
 const CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
@@ -401,6 +402,10 @@ function persistHot(state, delay = HOT_SAVE_DELAY) {
         return;
     }
     saveStateDebounced(state, delay);
+}
+
+function persistStructure(state) {
+    persistHot(state, STRUCTURE_SAVE_DELAY);
 }
 
 function persistNow(state) {
@@ -1083,8 +1088,7 @@ function openGroupPicker(state, rerender) {
     openOptionPicker(input, options, '选择组合', (name) => {
         const pool = (state.pools || []).find(item => item.name === name);
         if (!pool) return;
-        state.activePoolId = pool.id;
-        persistHot(state);
+        patchActivePoolId(state, pool.id);
         rerender();
     });
 }
@@ -1148,7 +1152,7 @@ function openEntryModelPicker(state, row, input, rerender) {
     openOptionPicker(input, getModelOptions(entry), '选择模型', (model) => {
         entry.model = model;
         saveApiPreset(state, entry);
-        persistHot(state);
+        persistStructure(state);
         rerender();
     });
 }
@@ -1370,7 +1374,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
         const changed = reorderEntriesByIds(state, orderedIds);
         cleanup();
         if (changed) {
-            persistHot(state);
+            persistStructure(state);
             rerender();
             setStatus('条目顺序已更新');
         }
@@ -1446,7 +1450,7 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-no-streak').off('change.kf').on('change.kf', function () {
         getActivePool(state).random.noConsecutive = $(this).prop('checked');
-        persistHot(state);
+        persistStructure(state);
         updateChatShortcut(state);
         setStatus('避免连续命中已更新');
     });
@@ -1494,7 +1498,7 @@ function bind(state, rerender, setStatus) {
             rerender();
         }
         saveApiPreset(state, entry);
-        persistHot(state);
+        persistStructure(state);
         setStatus('API条目名称已保存');
     });
     $('#kf-entry-list').on('input.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
@@ -1502,7 +1506,7 @@ function bind(state, rerender, setStatus) {
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
-        persistHot(state);
+        persistStructure(state);
     });
     $('#kf-entry-list').on('change.kf', '.kf-entry-enabled', function () {
         const pool = getActivePool(state);
@@ -1511,7 +1515,6 @@ function bind(state, rerender, setStatus) {
         const enabled = $(this).prop('checked');
         const entry = patchEntryEnabledState(state, pool.id, entryId, enabled);
         if (!entry) return;
-        persistHot(state);
     });
     $('#kf-entry-list').on('change.kf', '.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
         const row = $(this).closest('.kf-entry-block');
@@ -1519,7 +1522,7 @@ function bind(state, rerender, setStatus) {
         if (!entry) return;
         syncEntryFromRow(entry, row);
         const equalized = $(this).hasClass('kf-entry-weight') && maybeEqualizeWeights(state);
-        persistHot(state);
+        persistStructure(state);
         if (equalized) rerender();
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-name', function () {
@@ -1545,7 +1548,7 @@ function bind(state, rerender, setStatus) {
             const option = options.find(item => item.label === label);
         if (!option) return;
         entry.provider = option.value;
-        persistHot(state);
+        persistStructure(state);
         rerender();
     });
     });
@@ -1581,7 +1584,6 @@ function bind(state, rerender, setStatus) {
         if (!entry) return;
         const nextCollapsed = !entry.collapsed;
         patchEntryCollapsedState(state, pool.id, entryId, nextCollapsed);
-        persistHot(state);
         updateEntryCollapsedRow(row, nextCollapsed);
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
@@ -1712,26 +1714,26 @@ function bind(state, rerender, setStatus) {
         syncThemeFromControls(state);
         updateThemePresetVisibility(state);
         applyTheme(state);
-        persistHot(state);
+        persistStructure(state);
     });
     $('#kf-theme-preset').off('change.kf').on('change.kf', function () {
         const presetKey = String($(this).val() || 'default');
         applyThemePreset(state, presetKey);
         applyTheme(state);
-        persistHot(state);
+        persistStructure(state);
     });
     $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncThemeFromControls(state);
         state.theme.preset = 'default';
         $('#kf-theme-preset').val('default');
         applyTheme(state);
-        persistHot(state);
+        persistStructure(state);
     });
     $('#kf-failure-retry-count,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncFailureFromControls(state);
         if (state.shortcuts?.enabled === false) updateChatShortcut(state);
         else ensureChatShortcut(state, rerender, setStatus);
-        persistHot(state);
+        persistStructure(state);
     });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
         const input = $('#kf-failure-retry-count');

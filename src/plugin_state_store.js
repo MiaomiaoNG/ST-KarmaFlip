@@ -11,6 +11,7 @@ let persistDueAt = 0;
 let cachedState = null;
 let enabledPersistDirty = false;
 let modePersistDirty = false;
+let lightPersistDirty = false;
 let pendingState = null;
 let persistHooksBound = false;
 const runtimeScopes = {};
@@ -158,6 +159,12 @@ function normalizeState(raw) {
     };
     s.logs = [];
     return s;
+}
+
+function findSettingsPoolEntry(poolId, entryId) {
+    const targetState = extensionSettings()[MODULE_KEY];
+    const hit = findPoolEntry(targetState, poolId, entryId);
+    return { state: targetState, ...hit };
 }
 
 function hasOwn(obj, key) {
@@ -343,6 +350,16 @@ function clearModePersistDirty() {
     modePersistDirty = false;
 }
 
+function markLightPersistDirty() {
+    bindPersistHooks();
+    lightPersistDirty = true;
+    if (!persistenceEnabled) pendingPersist = true;
+}
+
+function clearLightPersistDirty() {
+    lightPersistDirty = false;
+}
+
 function clearPersistTimer() {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = null;
@@ -387,9 +404,20 @@ function flushModePersist() {
     persistSettings();
 }
 
+function flushLightPersist() {
+    if (!lightPersistDirty) return;
+    clearLightPersistDirty();
+    if (!persistenceEnabled) {
+        pendingPersist = true;
+        return;
+    }
+    persistSettings();
+}
+
 function flushPendingPersistence() {
     flushEnabledPersist();
     flushModePersist();
+    flushLightPersist();
     flushScheduledPersist();
 }
 
@@ -435,7 +463,7 @@ function queuePersistDebounced(source, delay = DEFAULT_PERSIST_DELAY) {
 export function enableStatePersistence() {
     persistenceEnabled = true;
     bindPersistHooks();
-    if (!pendingPersist && !enabledPersistDirty) return;
+    if (!pendingPersist && !enabledPersistDirty && !modePersistDirty && !lightPersistDirty) return;
     flushPendingPersistence();
 }
 
@@ -445,6 +473,7 @@ export function saveState(state, options = {}) {
     if (options.persist === false) return;
     clearEnabledPersistDirty();
     clearModePersistDirty();
+    clearLightPersistDirty();
     pendingState = null;
     pendingPersist = false;
     clearPersistTimer();
@@ -460,6 +489,7 @@ export function saveStateAsync(state, delay = 0) {
     const source = state && typeof state === 'object' ? state : loadState();
     cachedState = source;
     clearEnabledPersistDirty();
+    clearLightPersistDirty();
     queuePersistBackground(source, delay);
 }
 
@@ -467,6 +497,7 @@ export function saveStateDebounced(state, delay = 400) {
     const source = state && typeof state === 'object' ? state : loadState();
     cachedState = source;
     clearEnabledPersistDirty();
+    clearLightPersistDirty();
     queuePersistDebounced(source, delay);
 }
 
@@ -511,6 +542,23 @@ export function patchPoolMode(state, mode) {
     return pool;
 }
 
+export function patchActivePoolId(state, poolId) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = String(poolId || '');
+    const pool = Array.isArray(source.pools) ? source.pools.find(item => item.id === normalized) : null;
+    if (!pool) return null;
+    source.activePoolId = normalized;
+    cachedState = source;
+    const settings = extensionSettings();
+    if (settings[MODULE_KEY] !== source) {
+        settings[MODULE_KEY] = { ...(settings[MODULE_KEY] || {}), activePoolId: normalized };
+    } else {
+        settings[MODULE_KEY].activePoolId = normalized;
+    }
+    markLightPersistDirty();
+    return pool;
+}
+
 export function patchEntryEnabledState(state, poolId, entryId, enabled) {
     const source = state && typeof state === 'object' ? state : loadState();
     const normalized = enabled !== false;
@@ -520,6 +568,11 @@ export function patchEntryEnabledState(state, poolId, entryId, enabled) {
     const preset = findPresetByEntry(source, hit.entry);
     if (preset) preset.enabled = normalized;
     cachedState = source;
+    const settingsHit = findSettingsPoolEntry(poolId, entryId);
+    if (settingsHit.entry) settingsHit.entry.enabled = normalized;
+    const settingsPreset = findPresetByEntry(settingsHit.state, hit.entry);
+    if (settingsPreset) settingsPreset.enabled = normalized;
+    markLightPersistDirty();
     return hit.entry;
 }
 
@@ -530,6 +583,9 @@ export function patchEntryCollapsedState(state, poolId, entryId, collapsed) {
     if (!hit.entry) return null;
     hit.entry.collapsed = normalized;
     cachedState = source;
+    const settingsHit = findSettingsPoolEntry(poolId, entryId);
+    if (settingsHit.entry) settingsHit.entry.collapsed = normalized;
+    markLightPersistDirty();
     return hit.entry;
 }
 
