@@ -1,4 +1,4 @@
-import { getActivePool, loadState, pushLog, saveStateAsync, toInt } from './plugin_state_store.js';
+import { getActivePool, loadState, pushLog, toInt } from './plugin_state_store.js';
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 import { makeId } from './compat.js';
 
@@ -9,7 +9,6 @@ let originalFetch = null;
 const pendingRequests = new Map();
 
 const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
-const LOG_PERSIST_DELAY = 5000;
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
 const PERF_WARN_MS = {
@@ -250,7 +249,6 @@ async function responseBusinessFailure(response) {
 function queueLog(state, entry) {
     setTimeout(() => {
         pushLog(state, entry);
-        saveStateAsync(state, LOG_PERSIST_DELAY);
     }, 0);
 }
 
@@ -433,7 +431,6 @@ async function runRetryPlan(input, init, pending, onStatus) {
         }
     }
 
-    saveStateAsync(state);
     if (lastError) throw lastError;
     if (lastResponse) return lastResponse;
     return originalFetch(input, init);

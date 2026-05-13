@@ -433,6 +433,12 @@
     gap: 10px;
     margin-bottom: 12px;
 }
+.kf-modal-overlay .kf-log-actions {
+    margin-top: 12px;
+}
+.kf-modal-overlay .kf-log-actions .kf-action-btn {
+    width: 100%;
+}
 .kf-modal-overlay .kf-action-btn {
     background: transparent;
     color: inherit;

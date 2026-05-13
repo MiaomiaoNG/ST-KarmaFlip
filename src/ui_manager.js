@@ -1,4 +1,4 @@
-import { enableStatePersistence, getActivePool, loadState, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, saveState, saveStateDebounced, saveStatePatchedDebounced, toInt } from './plugin_state_store.js';
+import { clearLogs, enableStatePersistence, getActivePool, getUsageStats, loadState, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
@@ -106,10 +106,6 @@ function updateChatShortcut(state) {
     if (!button.length) return;
     const pool = getActivePool(state);
     const enabled = state.enabled !== false;
-    const node = button.get(0);
-    node.dataset.mode = pool.mode;
-    node.dataset.enabled = enabled ? 'true' : 'false';
-    button.toggleClass('kf-active', true).toggleClass('kf-disabled', false);
     button.attr('title', `点击切换固定/随机，长按${enabled ? '关闭' : '启动'}插件`);
     button.attr('aria-label', `KarmaFlip 快捷按钮，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}，插件${enabled ? '已启用' : '已关闭'}`);
 }
@@ -123,7 +119,7 @@ function getInlineReplyHost() {
 function emperorIcon() {
     return `
         <div class="qr--button-label" aria-hidden="true">
-            <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="7" y1="3" x2="17" y2="3" />
                 <line x1="12" y1="3" x2="12" y2="21" />
                 <line x1="9.5" y1="7" x2="14.5" y2="7" />
@@ -162,7 +158,6 @@ function ensureChatShortcut(state, rerender, setStatus) {
         wrapper.id = CHAT_SHORTCUT_WRAPPER_ID;
         wrapper.className = 'qr--buttons qr--color';
         wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
-        wrapper.dataset.kfChatShortcut = 'true';
     }
     if (!shell) {
         shell = document.createElement('button');
@@ -205,12 +200,11 @@ function setPoolMode(state, nextMode, rerender, setStatus) {
         updateChatShortcut(state);
         return;
     }
-    pool.mode = mode;
+    patchPoolMode(state, mode);
     const equalized = maybeEqualizeWeights(state);
-    persistHot(state);
     updateModeState(state);
     updateChatShortcut(state);
-    showToast(`切换成[${mode === 'random' ? '随机模式' : '固定模式'}] 太后让我朕这个！`, 'info', 2200);
+    showToast(`切换成[${mode === 'random' ? '随机模式' : '固定模式'}] 太后让朕这个！`, 'info', 2200);
     setStatus(mode === 'random' ? '已切换到随机模式' : '已切换到固定模式');
     if (equalized) rerender();
 }
@@ -409,14 +403,6 @@ function persistHot(state, delay = HOT_SAVE_DELAY) {
     saveStateDebounced(state, delay);
 }
 
-function persistHotPatched(state, delay = HOT_SAVE_DELAY) {
-    if (!uiPersistenceReady) {
-        saveState(state, { persist: false });
-        return;
-    }
-    saveStatePatchedDebounced(state, delay);
-}
-
 function persistNow(state) {
     if (!uiPersistenceReady) {
         saveState(state, { persist: false });
@@ -477,7 +463,6 @@ function copyEntryForPreset(entry) {
         key: String(entry.key || ''),
         provider: String(entry.provider || 'open'),
         model: String(entry.model || ''),
-        modelOptions: Array.isArray(entry.modelOptions) ? [...entry.modelOptions] : [],
     };
 }
 
@@ -506,6 +491,7 @@ function saveApiPreset(state, entry) {
     if (index < 0) index = state.apiPresets.findIndex(item => String(item.name || '').trim() === name);
     if (index >= 0) {
         preset.id = state.apiPresets[index].id || preset.id;
+        preset.modelOptions = Array.isArray(state.apiPresets[index].modelOptions) ? [...state.apiPresets[index].modelOptions] : [];
         state.apiPresets[index] = preset;
     } else {
         state.apiPresets.push(preset);
@@ -682,19 +668,37 @@ function formatLog(log) {
     return `[${type}][${timestamp}]${parts.join(' - ')}${status ? ` - ${status}` : ''}${error ? ` - ${error}` : ''}${detail ? ` - ${detail}` : ''}`;
 }
 
+function formatUsageStat(stat) {
+    const date = new Date(stat.lastTime);
+    const pad = value => String(value).padStart(2, '0');
+    const timestamp = Number.isNaN(date.getTime())
+        ? String(stat.lastTime || '')
+        : [
+            date.getFullYear(),
+            pad(date.getMonth() + 1),
+            pad(date.getDate()),
+        ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':');
+    return `[${stat.apiName || '未命名'}] [${stat.model || '未填模型'}] 调取次数(包括固定和随机模式) - ${stat.count || 0} - ${timestamp}`;
+}
+
 function currentLogFilter() {
     return $('.kf-log-filter.kf-active').data('filter') || 'all';
 }
 
 function renderLogs(state, filter = currentLogFilter()) {
     const source = loadState();
-    const logs = [...(source.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-    const filtered = logs.filter(log => {
-        if (filter === 'error') return log.success === false || String(log.event || '').includes('error');
-        if (filter === 'pick') return ['pick', 'request'].includes(log.event);
-        return true;
-    });
-    const lines = filtered.slice(-50).map(formatLog);
+    let lines = [];
+    if (filter === 'stats') {
+        lines = getUsageStats().slice(0, 50).map(formatUsageStat);
+    } else {
+        const logs = [...(source.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        const filtered = logs.filter(log => {
+            if (filter === 'error') return log.success === false || String(log.event || '').includes('error');
+            if (filter === 'pick') return ['pick', 'request'].includes(log.event);
+            return String(log.event || '') !== 'stats';
+        });
+        lines = filtered.slice(-50).map(formatLog);
+    }
     const logBox = $('#kf-logs-list');
     logBox.text(lines.join('\n'));
     const node = logBox.get(0);
@@ -1490,7 +1494,7 @@ function bind(state, rerender, setStatus) {
             rerender();
         }
         saveApiPreset(state, entry);
-        persistNow(state);
+        persistHot(state);
         setStatus('API条目名称已保存');
     });
     $('#kf-entry-list').on('input.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
@@ -1498,7 +1502,6 @@ function bind(state, rerender, setStatus) {
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
-        saveApiPresetIfNamed(state, entry);
         persistHot(state);
     });
     $('#kf-entry-list').on('change.kf', '.kf-entry-enabled', function () {
@@ -1508,14 +1511,13 @@ function bind(state, rerender, setStatus) {
         const enabled = $(this).prop('checked');
         const entry = patchEntryEnabledState(state, pool.id, entryId, enabled);
         if (!entry) return;
-        persistHotPatched(state);
+        persistHot(state);
     });
     $('#kf-entry-list').on('change.kf', '.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
         const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
-        saveApiPresetIfNamed(state, entry);
         const equalized = $(this).hasClass('kf-entry-weight') && maybeEqualizeWeights(state);
         persistHot(state);
         if (equalized) rerender();
@@ -1541,12 +1543,11 @@ function bind(state, rerender, setStatus) {
         const options = providerOptions();
         openOptionPicker($(this), options.map(option => option.label), '选择接口', (label) => {
             const option = options.find(item => item.label === label);
-            if (!option) return;
-            entry.provider = option.value;
-            saveApiPresetIfNamed(state, entry);
-            persistHot(state);
-            rerender();
-        });
+        if (!option) return;
+        entry.provider = option.value;
+        persistHot(state);
+        rerender();
+    });
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-model', function () {
         const row = $(this).closest('.kf-entry-block');
@@ -1580,7 +1581,7 @@ function bind(state, rerender, setStatus) {
         if (!entry) return;
         const nextCollapsed = !entry.collapsed;
         patchEntryCollapsedState(state, pool.id, entryId, nextCollapsed);
-        persistHotPatched(state);
+        persistHot(state);
         updateEntryCollapsedRow(row, nextCollapsed);
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
@@ -1602,8 +1603,6 @@ function bind(state, rerender, setStatus) {
         }
         try {
             const models = await fetchOpenAICompatibleModels(entry);
-            saveApiPresetIfNamed(state, entry);
-            persistNow(state);
             rerender();
             setStatus(`已获取 ${models.length} 个模型`);
         } catch (error) {
@@ -1670,8 +1669,7 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('kf-log-modal'));
     $('#kf-log-clear').off('click.kf').on('click.kf', () => {
-        state.logs = [];
-        persistNow(state);
+        clearLogs(state);
         renderLogs(state);
         setStatus('日志已清空');
     });

@@ -2,17 +2,20 @@ import { makeId } from './compat.js';
 
 const MODULE_KEY = 'STApiSwitcher';
 const OLD_STORAGE_KEY = 'karmaflip_state_v4';
-const MAX_STORED_LOGS = 200;
+const MAX_STORED_LOGS = 50;
+const DEFAULT_PERSIST_DELAY = 1200;
 let persistenceEnabled = false;
 let pendingPersist = false;
 let persistTimer = null;
-let asyncPersistTimer = null;
-let patchedPersistTimer = null;
+let persistDueAt = 0;
 let cachedState = null;
 let enabledPersistDirty = false;
-let enabledPersistHooksBound = false;
+let modePersistDirty = false;
+let pendingState = null;
+let persistHooksBound = false;
 const runtimeScopes = {};
 const LOG_EVENT_NAME = 'STKarmaFlip:logs-updated';
+const usageStats = new Map();
 
 export function toInt(value) {
     const n = Number(value);
@@ -25,7 +28,6 @@ function defaultPool() {
         id: 'pool_default',
         name: '默认组合',
         mode: 'fixed',
-        enabled: true,
         random: { noConsecutive: false },
         entries: [],
     };
@@ -69,24 +71,28 @@ function extensionSettings() {
     return ctx.extensionSettings;
 }
 
+function copyModelOptions(list) {
+    return Array.isArray(list) ? list.map(x => String(x)).filter(Boolean) : [];
+}
+
 function normalizeEntry(entry) {
-    const e = { ...(entry || {}) };
-    e.id = String(e.id || makeId('e'));
-    e.presetId = e.presetId ? String(e.presetId) : '';
-    e.enabled = e.enabled !== false;
-    e.name = String(e.name || 'New API');
-    e.apiUrl = String(e.apiUrl || e.url || '');
-    e.key = String(e.key || '');
-    e.provider = String(e.provider || 'open');
-    e.model = String(e.model || '');
-    e.fixedRuns = Math.max(1, toInt(e.fixedRuns || 1));
-    e.weight = toInt(e.weight || 0);
-    e.pityTurns = toInt(e.pityTurns || 0);
-    e.cooldownTurns = toInt(e.cooldownTurns || 0);
-    e.collapsed = !!e.collapsed;
-    delete e.disabledByFailure;
-    e.modelOptions = Array.isArray(e.modelOptions) ? e.modelOptions.map(x => String(x)).filter(Boolean) : [];
-    return e;
+    const e = entry || {};
+    return {
+        id: String(e.id || makeId('e')),
+        presetId: e.presetId ? String(e.presetId) : '',
+        enabled: e.enabled !== false,
+        name: String(e.name || 'New API'),
+        apiUrl: String(e.apiUrl || e.url || ''),
+        key: String(e.key || ''),
+        provider: String(e.provider || 'open'),
+        model: String(e.model || ''),
+        fixedRuns: Math.max(1, toInt(e.fixedRuns || 1)),
+        weight: toInt(e.weight || 0),
+        pityTurns: toInt(e.pityTurns || 0),
+        cooldownTurns: toInt(e.cooldownTurns || 0),
+        collapsed: !!e.collapsed,
+        modelOptions: copyModelOptions(e.modelOptions),
+    };
 }
 
 function normalizePreset(preset) {
@@ -100,7 +106,6 @@ function normalizePool(pool) {
     p.id = String(p.id || makeId('pool'));
     p.name = String(p.name || '默认组合');
     p.mode = p.mode === 'random' ? 'random' : 'fixed';
-    p.enabled = p.enabled !== false;
     p.random = { noConsecutive: false, ...(p.random || {}) };
     p.entries = Array.isArray(p.entries) ? p.entries.map(normalizeEntry) : [];
     return p;
@@ -151,24 +156,171 @@ function normalizeState(raw) {
         ...(s.shortcuts || {}),
         enabled: s.shortcuts?.enabled !== false,
     };
-    if (!Array.isArray(s.logs)) s.logs = [];
-    if (s.logs.length > MAX_STORED_LOGS) s.logs = s.logs.slice(0, MAX_STORED_LOGS);
+    s.logs = [];
     return s;
+}
+
+function hasOwn(obj, key) {
+    return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function hasLegacyStateData(raw) {
+    if (!raw || typeof raw !== 'object') return false;
+    if (hasOwn(raw, 'logs')) return true;
+    if (hasOwn(raw, 'runtime')) return true;
+    if (hasOwn(raw?.theme, 'blur')) return true;
+    const pools = Array.isArray(raw.pools) ? raw.pools : [];
+    if (pools.some(pool =>
+        hasOwn(pool, 'enabled') ||
+        (Array.isArray(pool?.entries) && pool.entries.some(entry => hasOwn(entry, 'modelOptions')))
+    )) return true;
+    const presets = Array.isArray(raw.apiPresets) ? raw.apiPresets : [];
+    if (presets.some(preset => hasOwn(preset, 'modelOptions'))) return true;
+    return false;
+}
+
+function buildPersistedEntry(entry) {
+    const normalized = normalizeEntry(entry);
+    return {
+        id: normalized.id,
+        presetId: normalized.presetId,
+        enabled: normalized.enabled,
+        name: normalized.name,
+        apiUrl: normalized.apiUrl,
+        key: normalized.key,
+        provider: normalized.provider,
+        model: normalized.model,
+        fixedRuns: normalized.fixedRuns,
+        weight: normalized.weight,
+        pityTurns: normalized.pityTurns,
+        cooldownTurns: normalized.cooldownTurns,
+        collapsed: normalized.collapsed,
+    };
+}
+
+function buildPersistedPreset(preset) {
+    const normalized = normalizePreset(preset);
+    return {
+        id: normalized.id,
+        enabled: normalized.enabled,
+        name: normalized.name,
+        apiUrl: normalized.apiUrl,
+        key: normalized.key,
+        provider: normalized.provider,
+        model: normalized.model,
+    };
+}
+
+function buildLivePresetFromEntry(entry, presetId) {
+    const normalized = normalizeEntry(entry);
+    return {
+        id: String(presetId || makeId('preset')),
+        presetId: '',
+        enabled: normalized.enabled,
+        name: normalized.name,
+        apiUrl: normalized.apiUrl,
+        key: normalized.key,
+        provider: normalized.provider,
+        model: normalized.model,
+        modelOptions: copyModelOptions(entry?.modelOptions),
+    };
+}
+
+function findPresetIndex(presets, entry) {
+    const presetId = String(entry?.presetId || '').trim();
+    const entryId = String(entry?.id || '').trim();
+    const previousName = String(entry?._previousPresetName || '').trim();
+    const name = String(entry?.name || '').trim();
+    let index = presetId ? presets.findIndex(item => String(item?.id || '').trim() === presetId) : -1;
+    if (index < 0 && entryId) index = presets.findIndex(item => String(item?.id || '').trim() === entryId);
+    if (index < 0 && previousName) index = presets.findIndex(item => String(item?.name || '').trim() === previousName);
+    if (index < 0 && name) index = presets.findIndex(item => String(item?.name || '').trim() === name);
+    return index;
+}
+
+function syncApiPresetsInPlace(state) {
+    if (!Array.isArray(state?.apiPresets)) state.apiPresets = [];
+    for (const pool of state?.pools || []) {
+        for (const entry of pool?.entries || []) {
+            const name = String(entry?.name || '').trim();
+            if (!name) continue;
+            const index = findPresetIndex(state.apiPresets, entry);
+            const existing = index >= 0 ? state.apiPresets[index] : null;
+            const preset = buildLivePresetFromEntry(entry, existing?.id || entry?.presetId || undefined);
+            if (index >= 0) state.apiPresets[index] = preset;
+            else state.apiPresets.push(preset);
+            entry.presetId = preset.id;
+            delete entry._previousPresetName;
+        }
+    }
+}
+
+function createPersistedState(source) {
+    const base = source && typeof source === 'object' ? source : getDefaultState();
+    syncApiPresetsInPlace(base);
+    const pools = Array.isArray(base.pools) && base.pools.length ? base.pools : [defaultPool()];
+    const activePoolId = pools.find(pool => pool.id === base.activePoolId)?.id || pools[0].id;
+    const snapshot = {
+        version: 5,
+        enabled: base.enabled !== false,
+        activePoolId,
+        pools: pools.map(pool => ({
+            id: String(pool?.id || makeId('pool')),
+            name: String(pool?.name || '默认组合'),
+            mode: pool?.mode === 'random' ? 'random' : 'fixed',
+            random: { noConsecutive: !!pool?.random?.noConsecutive },
+            entries: Array.isArray(pool?.entries) ? pool.entries.map(buildPersistedEntry) : [],
+        })),
+        apiPresets: Array.isArray(base.apiPresets) ? base.apiPresets.map(buildPersistedPreset) : [],
+        theme: {
+            ...getDefaultState().theme,
+            ...(base.theme || {}),
+            brush: ['simple', 'native'].includes(base?.theme?.brush) ? base.theme.brush : 'simple',
+            preset: String(base?.theme?.preset || 'default'),
+        },
+        failure: {
+            ...getDefaultState().failure,
+            ...(base.failure || {}),
+            retryCount: Math.max(1, toInt(base?.failure?.retryCount || 3)),
+            alertEnabled: !!base?.failure?.alertEnabled,
+            modelAlertEnabled: !!base?.failure?.modelAlertEnabled,
+        },
+        shortcuts: {
+            ...getDefaultState().shortcuts,
+            ...(base.shortcuts || {}),
+            enabled: base?.shortcuts?.enabled !== false,
+        },
+    };
+    return normalizeState(snapshot);
 }
 
 export function loadState() {
     if (cachedState) return cachedState;
     const settings = extensionSettings();
+    const rawState = settings[MODULE_KEY];
+    const legacyDetected = hasLegacyStateData(rawState);
+    const legacyLocalState = localStorage.getItem(OLD_STORAGE_KEY);
+    let migratedFromLocal = false;
     if (!settings[MODULE_KEY]?.pools?.length) {
         try {
-            const old = localStorage.getItem(OLD_STORAGE_KEY);
-            if (old) settings[MODULE_KEY] = normalizeState(JSON.parse(old));
+            if (legacyLocalState) {
+                settings[MODULE_KEY] = normalizeState(JSON.parse(legacyLocalState));
+                migratedFromLocal = true;
+            }
         } catch {
             settings[MODULE_KEY] = getDefaultState();
         }
     }
-    cachedState = normalizeState(settings[MODULE_KEY]);
-    settings[MODULE_KEY] = cachedState;
+    const cleaned = createPersistedState(settings[MODULE_KEY]);
+    settings[MODULE_KEY] = cleaned;
+    cachedState = normalizeState(cleaned);
+    if (legacyLocalState) {
+        try { localStorage.removeItem(OLD_STORAGE_KEY); } catch {}
+    }
+    if (legacyDetected || migratedFromLocal) {
+        pendingState = cachedState;
+        pendingPersist = true;
+    }
     return cachedState;
 }
 
@@ -178,8 +330,41 @@ function persistSettings() {
     else if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
 }
 
+function persistSnapshot(source) {
+    extensionSettings()[MODULE_KEY] = createPersistedState(source);
+    persistSettings();
+}
+
 function clearEnabledPersistDirty() {
     enabledPersistDirty = false;
+}
+
+function clearModePersistDirty() {
+    modePersistDirty = false;
+}
+
+function clearPersistTimer() {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = null;
+    persistDueAt = 0;
+}
+
+function flushScheduledPersist() {
+    if (!pendingState) {
+        pendingPersist = false;
+        clearPersistTimer();
+        return;
+    }
+    const source = pendingState;
+    pendingState = null;
+    pendingPersist = false;
+    clearPersistTimer();
+    if (!persistenceEnabled) {
+        pendingState = source;
+        pendingPersist = true;
+        return;
+    }
+    persistSnapshot(source);
 }
 
 function flushEnabledPersist() {
@@ -192,90 +377,97 @@ function flushEnabledPersist() {
     persistSettings();
 }
 
-function bindEnabledPersistHooks() {
-    if (enabledPersistHooksBound) return;
-    enabledPersistHooksBound = true;
+function flushModePersist() {
+    if (!modePersistDirty) return;
+    clearModePersistDirty();
+    if (!persistenceEnabled) {
+        pendingPersist = true;
+        return;
+    }
+    persistSettings();
+}
+
+function flushPendingPersistence() {
+    flushEnabledPersist();
+    flushModePersist();
+    flushScheduledPersist();
+}
+
+function bindPersistHooks() {
+    if (persistHooksBound) return;
+    persistHooksBound = true;
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') flushEnabledPersist();
+        if (document.visibilityState === 'hidden') flushPendingPersistence();
     });
     window.addEventListener('pagehide', () => {
-        flushEnabledPersist();
+        flushPendingPersistence();
     });
+}
+
+function queuePersistBackground(source, delay = DEFAULT_PERSIST_DELAY) {
+    bindPersistHooks();
+    pendingState = source;
+    pendingPersist = true;
+    if (!persistenceEnabled) return;
+    const safeDelay = Math.max(0, Number(delay) || 0);
+    const nextDueAt = Date.now() + safeDelay;
+    if (persistTimer && persistDueAt && persistDueAt <= nextDueAt) return;
+    clearPersistTimer();
+    persistDueAt = nextDueAt;
+    persistTimer = setTimeout(() => {
+        flushScheduledPersist();
+    }, safeDelay);
+}
+
+function queuePersistDebounced(source, delay = DEFAULT_PERSIST_DELAY) {
+    bindPersistHooks();
+    pendingState = source;
+    pendingPersist = true;
+    if (!persistenceEnabled) return;
+    const safeDelay = Math.max(0, Number(delay) || 0);
+    clearPersistTimer();
+    persistDueAt = Date.now() + safeDelay;
+    persistTimer = setTimeout(() => {
+        flushScheduledPersist();
+    }, safeDelay);
 }
 
 export function enableStatePersistence() {
     persistenceEnabled = true;
-    if (!pendingPersist) return;
-    pendingPersist = false;
-    persistSettings();
+    bindPersistHooks();
+    if (!pendingPersist && !enabledPersistDirty) return;
+    flushPendingPersistence();
 }
 
 export function saveState(state, options = {}) {
-    cachedState = normalizeState(state);
-    extensionSettings()[MODULE_KEY] = cachedState;
+    const source = state && typeof state === 'object' ? state : loadState();
+    cachedState = source;
     if (options.persist === false) return;
     clearEnabledPersistDirty();
-    if (patchedPersistTimer) {
-        clearTimeout(patchedPersistTimer);
-        patchedPersistTimer = null;
-    }
+    clearModePersistDirty();
+    pendingState = null;
+    pendingPersist = false;
+    clearPersistTimer();
     if (!persistenceEnabled) {
+        pendingState = source;
         pendingPersist = true;
         return;
     }
-    persistSettings();
+    persistSnapshot(source);
 }
 
 export function saveStateAsync(state, delay = 0) {
-    state.runtime = {};
-    cachedState = state;
-    extensionSettings()[MODULE_KEY] = cachedState;
+    const source = state && typeof state === 'object' ? state : loadState();
+    cachedState = source;
     clearEnabledPersistDirty();
-    if (patchedPersistTimer) {
-        clearTimeout(patchedPersistTimer);
-        patchedPersistTimer = null;
-    }
-    if (!persistenceEnabled) {
-        pendingPersist = true;
-        return;
-    }
-    if (asyncPersistTimer) clearTimeout(asyncPersistTimer);
-    asyncPersistTimer = setTimeout(() => {
-        asyncPersistTimer = null;
-        persistSettings();
-    }, delay);
+    queuePersistBackground(source, delay);
 }
 
 export function saveStateDebounced(state, delay = 400) {
-    cachedState = normalizeState(state);
-    extensionSettings()[MODULE_KEY] = cachedState;
-    clearEnabledPersistDirty();
-    if (patchedPersistTimer) {
-        clearTimeout(patchedPersistTimer);
-        patchedPersistTimer = null;
-    }
-    if (persistTimer) clearTimeout(persistTimer);
-    persistTimer = setTimeout(() => {
-        persistTimer = null;
-        saveState(state);
-    }, delay);
-}
-
-export function saveStatePatchedDebounced(state, delay = 400) {
     const source = state && typeof state === 'object' ? state : loadState();
-    source.runtime = {};
     cachedState = source;
-    extensionSettings()[MODULE_KEY] = cachedState;
     clearEnabledPersistDirty();
-    if (!persistenceEnabled) {
-        pendingPersist = true;
-        return;
-    }
-    if (patchedPersistTimer) clearTimeout(patchedPersistTimer);
-    patchedPersistTimer = setTimeout(() => {
-        patchedPersistTimer = null;
-        persistSettings();
-    }, delay);
+    queuePersistDebounced(source, delay);
 }
 
 export function patchEnabledState(state, enabled) {
@@ -289,10 +481,34 @@ export function patchEnabledState(state, enabled) {
     } else {
         settings[MODULE_KEY].enabled = normalized;
     }
-    bindEnabledPersistHooks();
+    bindPersistHooks();
     enabledPersistDirty = true;
     if (!persistenceEnabled) pendingPersist = true;
     return source;
+}
+
+export function patchPoolMode(state, mode) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = mode === 'random' ? 'random' : 'fixed';
+    const pool = getActivePool(source);
+    if (!pool) return null;
+    pool.mode = normalized;
+    cachedState = source;
+    const settings = extensionSettings();
+    const targetState = settings[MODULE_KEY];
+    if (targetState === source) {
+        const targetPool = Array.isArray(targetState?.pools)
+            ? targetState.pools.find(item => item.id === pool.id)
+            : null;
+        if (targetPool) targetPool.mode = normalized;
+    } else if (targetState && Array.isArray(targetState.pools)) {
+        const targetPool = targetState.pools.find(item => item.id === pool.id);
+        if (targetPool) targetPool.mode = normalized;
+    }
+    bindPersistHooks();
+    modePersistDirty = true;
+    if (!persistenceEnabled) pendingPersist = true;
+    return pool;
 }
 
 export function patchEntryEnabledState(state, poolId, entryId, enabled) {
@@ -304,7 +520,6 @@ export function patchEntryEnabledState(state, poolId, entryId, enabled) {
     const preset = findPresetByEntry(source, hit.entry);
     if (preset) preset.enabled = normalized;
     cachedState = source;
-    extensionSettings()[MODULE_KEY] = cachedState;
     return hit.entry;
 }
 
@@ -315,12 +530,42 @@ export function patchEntryCollapsedState(state, poolId, entryId, collapsed) {
     if (!hit.entry) return null;
     hit.entry.collapsed = normalized;
     cachedState = source;
-    extensionSettings()[MODULE_KEY] = cachedState;
     return hit.entry;
 }
 
 export function getActivePool(state) {
     return state.pools.find(p => p.id === state.activePoolId) || state.pools[0];
+}
+
+function usageStatKey(apiName, model) {
+    return `${String(apiName || '').trim()}||${String(model || '').trim()}`;
+}
+
+function updateUsageStats(log) {
+    if (String(log?.event || '') !== 'pick') return;
+    const apiName = String(log?.apiName || '').trim() || '未命名';
+    const model = String(log?.model || '').trim() || '未填模型';
+    const key = usageStatKey(apiName, model);
+    const previous = usageStats.get(key);
+    usageStats.set(key, {
+        apiName,
+        model,
+        count: (previous?.count || 0) + 1,
+        lastTime: String(log?.time || new Date().toISOString()),
+    });
+}
+
+export function getUsageStats() {
+    return [...usageStats.values()].sort((a, b) => {
+        if ((b.count || 0) !== (a.count || 0)) return (b.count || 0) - (a.count || 0);
+        return String(b.lastTime || '').localeCompare(String(a.lastTime || ''));
+    });
+}
+
+export function clearLogs(state) {
+    if (state && typeof state === 'object') state.logs = [];
+    usageStats.clear();
+    window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
 }
 
 export function getRuntimeScope(state) {
@@ -348,7 +593,9 @@ export function getRuntimeScope(state) {
 
 export function pushLog(state, entry) {
     if (!Array.isArray(state.logs)) state.logs = [];
-    state.logs.unshift({ time: new Date().toISOString(), ...entry });
+    const log = { time: new Date().toISOString(), ...entry };
+    state.logs.unshift(log);
     if (state.logs.length > MAX_STORED_LOGS) state.logs = state.logs.slice(0, MAX_STORED_LOGS);
+    updateUsageStats(log);
     window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
 }
