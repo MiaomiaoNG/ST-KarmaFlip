@@ -3,6 +3,7 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
+const CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
@@ -99,7 +100,7 @@ function updateThemePresetVisibility(state) {
 function updateChatShortcut(state) {
     const button = $('#kf-chat-toggle-btn');
     if (state.shortcuts?.enabled === false) {
-        button.remove();
+        document.getElementById(CHAT_SHORTCUT_WRAPPER_ID)?.remove();
         return;
     }
     if (!button.length) return;
@@ -136,7 +137,7 @@ function emperorIcon() {
 
 function ensureChatShortcut(state, rerender, setStatus) {
     if (state.shortcuts?.enabled === false) {
-        document.getElementById('kf-chat-toggle-btn')?.remove();
+        document.getElementById(CHAT_SHORTCUT_WRAPPER_ID)?.remove();
         return;
     }
     const host = getInlineReplyHost();
@@ -154,7 +155,15 @@ function ensureChatShortcut(state, rerender, setStatus) {
         chatShortcutRetryTimer = null;
     }
 
+    let wrapper = document.getElementById(CHAT_SHORTCUT_WRAPPER_ID);
     let shell = document.getElementById('kf-chat-toggle-btn');
+    if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.id = CHAT_SHORTCUT_WRAPPER_ID;
+        wrapper.className = 'qr--buttons qr--color';
+        wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
+        wrapper.dataset.kfChatShortcut = 'true';
+    }
     if (!shell) {
         shell = document.createElement('button');
         shell.id = 'kf-chat-toggle-btn';
@@ -162,7 +171,8 @@ function ensureChatShortcut(state, rerender, setStatus) {
         shell.className = 'remote-ctrl-btn qr--button menu_button interactable';
         shell.innerHTML = emperorIcon();
     }
-    if (shell.parentElement !== host) host.prepend(shell);
+    if (shell.parentElement !== wrapper) wrapper.appendChild(shell);
+    if (wrapper.parentElement !== host) host.prepend(wrapper);
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
 }
@@ -171,9 +181,9 @@ function observeChatShortcutHost(state, rerender, setStatus) {
     if (chatShortcutObserver || typeof MutationObserver === 'undefined') return;
     chatShortcutObserver = new MutationObserver(() => {
         if (state.shortcuts?.enabled === false) return;
-        const button = document.getElementById('kf-chat-toggle-btn');
+        const wrapper = document.getElementById(CHAT_SHORTCUT_WRAPPER_ID);
         const host = getInlineReplyHost();
-        if (!host || button?.parentElement === host) return;
+        if (!host || wrapper?.parentElement === host) return;
         ensureChatShortcut(state, rerender, setStatus);
     });
     chatShortcutObserver.observe(document.body, { childList: true, subtree: true });
@@ -200,7 +210,7 @@ function setPoolMode(state, nextMode, rerender, setStatus) {
     persistHot(state);
     updateModeState(state);
     updateChatShortcut(state);
-    showToast(`切换成[${mode === 'random' ? '随机模式' : '固定模式'}] 太后让我选这个！`, 'info', 2200);
+    showToast(`切换成[${mode === 'random' ? '随机模式' : '固定模式'}] 太后让我朕这个！`, 'info', 2200);
     setStatus(mode === 'random' ? '已切换到随机模式' : '已切换到固定模式');
     if (equalized) rerender();
 }

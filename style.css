@@ -38,8 +38,12 @@
     stroke-linejoin: round;
 }
 
+#kf-chat-toggle-wrapper {
+    display: contents;
+}
+
 #kf-chat-toggle-btn .qr--button-label {
-    display: inline-flex;
+    display: flex !important;
     align-items: center;
     justify-content: center;
     width: 100%;
