@@ -30,33 +30,20 @@
 
 #kf-chat-toggle-btn .kf-chat-toggle-icon {
     display: block;
-    width: 100%;
-    height: 100%;
+    width: 1em;
+    height: 1em;
     stroke: currentColor;
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
 }
 
-#kf-chat-toggle-btn {
-    --kf-chat-shortcut-size: 32px;
-    --kf-chat-shortcut-inner-size: calc(var(--kf-chat-shortcut-size) * 0.7);
-    inline-size: var(--kf-chat-shortcut-size);
-    block-size: var(--kf-chat-shortcut-size);
-    min-inline-size: var(--kf-chat-shortcut-size);
-    min-block-size: var(--kf-chat-shortcut-size);
-    padding: 0 !important;
-    aspect-ratio: 1 / 1;
-    flex: 0 0 var(--kf-chat-shortcut-size);
-}
-
-#kf-chat-toggle-btn .kf-chat-toggle-icon-box {
-    inline-size: var(--kf-chat-shortcut-inner-size);
-    block-size: var(--kf-chat-shortcut-inner-size);
+#kf-chat-toggle-btn .qr--button-label {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 auto;
+    width: 100%;
+    height: 100%;
 }
 
 #kf-root input,

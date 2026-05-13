@@ -1,4 +1,4 @@
-import { enableStatePersistence, getActivePool, loadState, patchEnabledState, patchEntryEnabledState, saveState, saveStateDebounced, saveStatePatchedDebounced, toInt } from './plugin_state_store.js';
+import { enableStatePersistence, getActivePool, loadState, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, saveState, saveStateDebounced, saveStatePatchedDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
@@ -6,8 +6,6 @@ const HOT_SAVE_DELAY = 1000;
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
-let chatShortcutResizeObserver = null;
-let chatShortcutResizeBound = false;
 const THEME_PRESETS = {
     default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
     'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
@@ -121,60 +119,9 @@ function getInlineReplyHost() {
         || document.querySelector('#qr--bar');
 }
 
-function cssNumber(value) {
-    const parsed = parseFloat(String(value || ''));
-    return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function getChatShortcutPeer(host) {
-    return host?.querySelector('.qr--button:not(#kf-chat-toggle-btn), .menu_button:not(#kf-chat-toggle-btn)') || null;
-}
-
-function fallbackChatShortcutSize(node) {
-    const styles = window.getComputedStyle?.(node);
-    if (!styles) return 32;
-    const fontSize = cssNumber(styles.fontSize) || 14;
-    const lineHeight = cssNumber(styles.lineHeight) || (fontSize * 1.25);
-    const paddingY = cssNumber(styles.paddingTop) + cssNumber(styles.paddingBottom);
-    const borderY = cssNumber(styles.borderTopWidth) + cssNumber(styles.borderBottomWidth);
-    return Math.max(24, Math.round(lineHeight + paddingY + borderY));
-}
-
-function resolveChatShortcutSize(button, host) {
-    const peer = getChatShortcutPeer(host);
-    const peerHeight = peer?.getBoundingClientRect?.().height || 0;
-    if (peerHeight > 0) return Math.max(24, Math.round(peerHeight));
-    const ownHeight = button?.getBoundingClientRect?.().height || 0;
-    if (ownHeight > 0) return Math.max(24, Math.round(ownHeight));
-    return fallbackChatShortcutSize(peer || button);
-}
-
-function syncChatShortcutSize(button = document.getElementById('kf-chat-toggle-btn')) {
-    if (!button) return;
-    const host = button.parentElement || getInlineReplyHost();
-    const size = resolveChatShortcutSize(button, host);
-    button.style.setProperty('--kf-chat-shortcut-size', `${size}px`);
-}
-
-function bindChatShortcutSizeSync(button, host) {
-    if (!chatShortcutResizeBound) {
-        chatShortcutResizeBound = true;
-        window.addEventListener('resize', () => syncChatShortcutSize());
-    }
-    if (typeof ResizeObserver === 'undefined') return;
-    if (!chatShortcutResizeObserver) {
-        chatShortcutResizeObserver = new ResizeObserver(() => syncChatShortcutSize());
-    }
-    chatShortcutResizeObserver.disconnect();
-    if (host) chatShortcutResizeObserver.observe(host);
-    const peer = getChatShortcutPeer(host);
-    if (peer) chatShortcutResizeObserver.observe(peer);
-    if (button?.parentElement) chatShortcutResizeObserver.observe(button.parentElement);
-}
-
 function emperorIcon() {
     return `
-        <span class="kf-chat-toggle-icon-box" aria-hidden="true">
+        <div class="qr--button-label" aria-hidden="true">
             <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="7" y1="3" x2="17" y2="3" />
                 <line x1="12" y1="3" x2="12" y2="21" />
@@ -183,13 +130,12 @@ function emperorIcon() {
                 <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
                 <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
             </svg>
-        </span>
+        </div>
     `;
 }
 
 function ensureChatShortcut(state, rerender, setStatus) {
     if (state.shortcuts?.enabled === false) {
-        chatShortcutResizeObserver?.disconnect?.();
         document.getElementById('kf-chat-toggle-btn')?.remove();
         return;
     }
@@ -219,8 +165,6 @@ function ensureChatShortcut(state, rerender, setStatus) {
     if (shell.parentElement !== host) host.prepend(shell);
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
-    bindChatShortcutSizeSync(shell, host);
-    nextFrame(() => syncChatShortcutSize(shell));
 }
 
 function observeChatShortcutHost(state, rerender, setStatus) {
@@ -621,6 +565,17 @@ function fanIcon(expanded) {
             <line x1="18.5" y1="19" x2="18.5" y2="22"/>
             <line x1="17.5" y1="20" x2="21" y2="20.5"/>
         </svg>`;
+}
+
+function updateEntryCollapsedRow(row, collapsed) {
+    const isCollapsed = !!collapsed;
+    row.toggleClass('kf-collapsed', isCollapsed);
+    const button = row.find('.kf-collapse');
+    if (!button.length) return;
+    const label = isCollapsed ? '展开 API 条目' : '折叠 API 条目';
+    button.attr('aria-label', label);
+    button.attr('title', label);
+    button.html(fanIcon(!isCollapsed));
 }
 
 function trashIcon() {
@@ -1610,12 +1565,13 @@ function bind(state, rerender, setStatus) {
         event.stopPropagation();
         const pool = getActivePool(state);
         const row = $(this).closest('.kf-entry-block');
-        const entry = pool.entries.find(e => e.id === row.data('id'));
+        const entryId = String(row.data('id') || '');
+        const entry = pool.entries.find(e => e.id === entryId);
         if (!entry) return;
-        syncEntryFromRow(entry, row);
-        entry.collapsed = !entry.collapsed;
-        persistHot(state);
-        rerender();
+        const nextCollapsed = !entry.collapsed;
+        patchEntryCollapsedState(state, pool.id, entryId, nextCollapsed);
+        persistHotPatched(state);
+        updateEntryCollapsedRow(row, nextCollapsed);
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);

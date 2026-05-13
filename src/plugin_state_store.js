@@ -308,6 +308,17 @@ export function patchEntryEnabledState(state, poolId, entryId, enabled) {
     return hit.entry;
 }
 
+export function patchEntryCollapsedState(state, poolId, entryId, collapsed) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = !!collapsed;
+    const hit = findPoolEntry(source, poolId, entryId);
+    if (!hit.entry) return null;
+    hit.entry.collapsed = normalized;
+    cachedState = source;
+    extensionSettings()[MODULE_KEY] = cachedState;
+    return hit.entry;
+}
+
 export function getActivePool(state) {
     return state.pools.find(p => p.id === state.activePoolId) || state.pools[0];
 }
