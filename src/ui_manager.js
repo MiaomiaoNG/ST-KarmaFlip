@@ -1,4 +1,4 @@
-import { enableStatePersistence, getActivePool, loadState, patchEnabledState, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { enableStatePersistence, getActivePool, loadState, patchEnabledState, patchEntryEnabledState, saveState, saveStateDebounced, saveStatePatchedDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
@@ -6,6 +6,8 @@ const HOT_SAVE_DELAY = 1000;
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
+let chatShortcutResizeObserver = null;
+let chatShortcutResizeBound = false;
 const THEME_PRESETS = {
     default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
     'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
@@ -119,21 +121,75 @@ function getInlineReplyHost() {
         || document.querySelector('#qr--bar');
 }
 
+function cssNumber(value) {
+    const parsed = parseFloat(String(value || ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getChatShortcutPeer(host) {
+    return host?.querySelector('.qr--button:not(#kf-chat-toggle-btn), .menu_button:not(#kf-chat-toggle-btn)') || null;
+}
+
+function fallbackChatShortcutSize(node) {
+    const styles = window.getComputedStyle?.(node);
+    if (!styles) return 32;
+    const fontSize = cssNumber(styles.fontSize) || 14;
+    const lineHeight = cssNumber(styles.lineHeight) || (fontSize * 1.25);
+    const paddingY = cssNumber(styles.paddingTop) + cssNumber(styles.paddingBottom);
+    const borderY = cssNumber(styles.borderTopWidth) + cssNumber(styles.borderBottomWidth);
+    return Math.max(24, Math.round(lineHeight + paddingY + borderY));
+}
+
+function resolveChatShortcutSize(button, host) {
+    const peer = getChatShortcutPeer(host);
+    const peerHeight = peer?.getBoundingClientRect?.().height || 0;
+    if (peerHeight > 0) return Math.max(24, Math.round(peerHeight));
+    const ownHeight = button?.getBoundingClientRect?.().height || 0;
+    if (ownHeight > 0) return Math.max(24, Math.round(ownHeight));
+    return fallbackChatShortcutSize(peer || button);
+}
+
+function syncChatShortcutSize(button = document.getElementById('kf-chat-toggle-btn')) {
+    if (!button) return;
+    const host = button.parentElement || getInlineReplyHost();
+    const size = resolveChatShortcutSize(button, host);
+    button.style.setProperty('--kf-chat-shortcut-size', `${size}px`);
+}
+
+function bindChatShortcutSizeSync(button, host) {
+    if (!chatShortcutResizeBound) {
+        chatShortcutResizeBound = true;
+        window.addEventListener('resize', () => syncChatShortcutSize());
+    }
+    if (typeof ResizeObserver === 'undefined') return;
+    if (!chatShortcutResizeObserver) {
+        chatShortcutResizeObserver = new ResizeObserver(() => syncChatShortcutSize());
+    }
+    chatShortcutResizeObserver.disconnect();
+    if (host) chatShortcutResizeObserver.observe(host);
+    const peer = getChatShortcutPeer(host);
+    if (peer) chatShortcutResizeObserver.observe(peer);
+    if (button?.parentElement) chatShortcutResizeObserver.observe(button.parentElement);
+}
+
 function emperorIcon() {
     return `
-        <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="7" y1="3" x2="17" y2="3" />
-            <line x1="12" y1="3" x2="12" y2="21" />
-            <line x1="9.5" y1="7" x2="14.5" y2="7" />
-            <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
-            <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
-            <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
-        </svg>
+        <span class="kf-chat-toggle-icon-box" aria-hidden="true">
+            <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="7" y1="3" x2="17" y2="3" />
+                <line x1="12" y1="3" x2="12" y2="21" />
+                <line x1="9.5" y1="7" x2="14.5" y2="7" />
+                <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
+                <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
+                <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
+            </svg>
+        </span>
     `;
 }
 
 function ensureChatShortcut(state, rerender, setStatus) {
     if (state.shortcuts?.enabled === false) {
+        chatShortcutResizeObserver?.disconnect?.();
         document.getElementById('kf-chat-toggle-btn')?.remove();
         return;
     }
@@ -163,6 +219,8 @@ function ensureChatShortcut(state, rerender, setStatus) {
     if (shell.parentElement !== host) host.prepend(shell);
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
+    bindChatShortcutSizeSync(shell, host);
+    nextFrame(() => syncChatShortcutSize(shell));
 }
 
 function observeChatShortcutHost(state, rerender, setStatus) {
@@ -395,6 +453,14 @@ function persistHot(state, delay = HOT_SAVE_DELAY) {
         return;
     }
     saveStateDebounced(state, delay);
+}
+
+function persistHotPatched(state, delay = HOT_SAVE_DELAY) {
+    if (!uiPersistenceReady) {
+        saveState(state, { persist: false });
+        return;
+    }
+    saveStatePatchedDebounced(state, delay);
 }
 
 function persistNow(state) {
@@ -1470,7 +1536,16 @@ function bind(state, rerender, setStatus) {
         saveApiPresetIfNamed(state, entry);
         persistHot(state);
     });
-    $('#kf-entry-list').on('change.kf', '.kf-entry-enabled,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
+    $('#kf-entry-list').on('change.kf', '.kf-entry-enabled', function () {
+        const pool = getActivePool(state);
+        const row = $(this).closest('.kf-entry-block');
+        const entryId = String(row.data('id') || '');
+        const enabled = $(this).prop('checked');
+        const entry = patchEntryEnabledState(state, pool.id, entryId, enabled);
+        if (!entry) return;
+        persistHotPatched(state);
+    });
+    $('#kf-entry-list').on('change.kf', '.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
         const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;

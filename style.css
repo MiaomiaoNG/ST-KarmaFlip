@@ -29,13 +29,34 @@
 }
 
 #kf-chat-toggle-btn .kf-chat-toggle-icon {
-    width: 1.25em;
-    height: 1.25em;
     display: block;
+    width: 100%;
+    height: 100%;
     stroke: currentColor;
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+#kf-chat-toggle-btn {
+    --kf-chat-shortcut-size: 32px;
+    --kf-chat-shortcut-inner-size: calc(var(--kf-chat-shortcut-size) * 0.7);
+    inline-size: var(--kf-chat-shortcut-size);
+    block-size: var(--kf-chat-shortcut-size);
+    min-inline-size: var(--kf-chat-shortcut-size);
+    min-block-size: var(--kf-chat-shortcut-size);
+    padding: 0 !important;
+    aspect-ratio: 1 / 1;
+    flex: 0 0 var(--kf-chat-shortcut-size);
+}
+
+#kf-chat-toggle-btn .kf-chat-toggle-icon-box {
+    inline-size: var(--kf-chat-shortcut-inner-size);
+    block-size: var(--kf-chat-shortcut-inner-size);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
 }
 
 #kf-root input,
@@ -736,7 +757,6 @@
 }
 
 @media (max-width: 650px) {
-    #kf-chat-toggle-btn .kf-chat-toggle-icon { width: 18px; height: 18px; }
     #kf-root .kf-responsive-controls { grid-template-columns: repeat(2, 1fr); }
     #kf-root .kf-row { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; } /* 缩小手机上同行元素的间距 */
     

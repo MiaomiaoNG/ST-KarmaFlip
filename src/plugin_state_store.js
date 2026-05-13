@@ -7,6 +7,7 @@ let persistenceEnabled = false;
 let pendingPersist = false;
 let persistTimer = null;
 let asyncPersistTimer = null;
+let patchedPersistTimer = null;
 let cachedState = null;
 let enabledPersistDirty = false;
 let enabledPersistHooksBound = false;
@@ -105,6 +106,26 @@ function normalizePool(pool) {
     return p;
 }
 
+function findPoolEntry(source, poolId, entryId) {
+    const pools = Array.isArray(source?.pools) ? source.pools : [];
+    const activePool = pools.find(pool => pool.id === poolId) || pools[0];
+    if (!activePool?.entries?.length) return { pool: activePool, entry: null };
+    const entry = activePool.entries.find(item => item.id === entryId) || null;
+    return { pool: activePool, entry };
+}
+
+function findPresetByEntry(source, entry) {
+    if (!entry || !Array.isArray(source?.apiPresets)) return null;
+    const presetId = String(entry.presetId || '').trim();
+    if (presetId) {
+        const matched = source.apiPresets.find(item => String(item.id || '').trim() === presetId);
+        if (matched) return matched;
+    }
+    const name = String(entry.name || '').trim();
+    if (!name) return null;
+    return source.apiPresets.find(item => String(item.name || '').trim() === name) || null;
+}
+
 function normalizeState(raw) {
     const s = { ...getDefaultState(), ...(raw || {}) };
     s.version = 5;
@@ -194,6 +215,10 @@ export function saveState(state, options = {}) {
     extensionSettings()[MODULE_KEY] = cachedState;
     if (options.persist === false) return;
     clearEnabledPersistDirty();
+    if (patchedPersistTimer) {
+        clearTimeout(patchedPersistTimer);
+        patchedPersistTimer = null;
+    }
     if (!persistenceEnabled) {
         pendingPersist = true;
         return;
@@ -206,6 +231,10 @@ export function saveStateAsync(state, delay = 0) {
     cachedState = state;
     extensionSettings()[MODULE_KEY] = cachedState;
     clearEnabledPersistDirty();
+    if (patchedPersistTimer) {
+        clearTimeout(patchedPersistTimer);
+        patchedPersistTimer = null;
+    }
     if (!persistenceEnabled) {
         pendingPersist = true;
         return;
@@ -221,10 +250,31 @@ export function saveStateDebounced(state, delay = 400) {
     cachedState = normalizeState(state);
     extensionSettings()[MODULE_KEY] = cachedState;
     clearEnabledPersistDirty();
+    if (patchedPersistTimer) {
+        clearTimeout(patchedPersistTimer);
+        patchedPersistTimer = null;
+    }
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
         persistTimer = null;
         saveState(state);
+    }, delay);
+}
+
+export function saveStatePatchedDebounced(state, delay = 400) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    source.runtime = {};
+    cachedState = source;
+    extensionSettings()[MODULE_KEY] = cachedState;
+    clearEnabledPersistDirty();
+    if (!persistenceEnabled) {
+        pendingPersist = true;
+        return;
+    }
+    if (patchedPersistTimer) clearTimeout(patchedPersistTimer);
+    patchedPersistTimer = setTimeout(() => {
+        patchedPersistTimer = null;
+        persistSettings();
     }, delay);
 }
 
@@ -243,6 +293,19 @@ export function patchEnabledState(state, enabled) {
     enabledPersistDirty = true;
     if (!persistenceEnabled) pendingPersist = true;
     return source;
+}
+
+export function patchEntryEnabledState(state, poolId, entryId, enabled) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = enabled !== false;
+    const hit = findPoolEntry(source, poolId, entryId);
+    if (!hit.entry) return null;
+    hit.entry.enabled = normalized;
+    const preset = findPresetByEntry(source, hit.entry);
+    if (preset) preset.enabled = normalized;
+    cachedState = source;
+    extensionSettings()[MODULE_KEY] = cachedState;
+    return hit.entry;
 }
 
 export function getActivePool(state) {
