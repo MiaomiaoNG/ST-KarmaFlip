@@ -117,7 +117,7 @@ function updateChatShortcut(state) {
         powerButton.attr('data-enabled', enabled ? 'true' : 'false');
         powerButton.attr('title', enabled ? '点击关闭 KarmaFlip 插件' : '点击开启 KarmaFlip 插件');
         powerButton.attr('aria-label', `KarmaFlip 插件开关，当前${enabled ? '已启用' : '已关闭'}`);
-        powerButton.html(emperorIcon());
+        powerButton.html(enabled ? emperorIcon() : emperorOutlineIcon());
     }
     if (modeButton.length) {
         modeButton.attr('data-mode', pool.mode === 'random' ? 'random' : 'fixed');
@@ -143,6 +143,22 @@ function emperorIcon() {
                 <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
                 <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
                 <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
+            </svg>
+        </div>
+    `;
+}
+
+function emperorOutlineIcon() {
+    return `
+        <div class="qr--button-label" aria-hidden="true">
+            <svg class="kf-chat-shortcut-icon kf-chat-emperor-outline-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M 6.8 2.4 H 17.2 V 4.5 H 6.8 Z" />
+                <path d="M 10.9 4.5 H 13.1 V 21.5 H 10.9 Z" />
+                <path d="M 8.7 6.6 H 15.3 V 8.7 H 8.7 Z" />
+                <path d="M 6.2 17.3 V 12.6 Q 6.2 10.4 8.8 10.4 H 15.2 Q 17.8 10.4 17.8 12.6 V 17.3" />
+                <path d="M 8.5 20 V 17 Q 8.5 13.1 12 13.1" />
+                <path d="M 15.5 20 V 17 Q 15.5 13.1 12 13.1" />
+                <path d="M 9.8 20.8 H 14.2" />
             </svg>
         </div>
     `;

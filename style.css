@@ -31,8 +31,8 @@
 #kf-chat-toggle-btn .kf-chat-toggle-icon,
 .kf-chat-shortcut-btn .kf-chat-shortcut-icon {
     display: block;
-    width: 1em;
-    height: 1em;
+    width: 1.15em;
+    height: 1.15em;
     stroke: currentColor;
     fill: none;
     stroke-linecap: round;
@@ -58,10 +58,9 @@
     opacity: 1;
 }
 
-#kf-chat-power-btn[data-enabled="false"] .kf-chat-emperor-icon {
+#kf-chat-power-btn[data-enabled="false"] .kf-chat-emperor-outline-icon {
     stroke: currentColor;
-    stroke-width: 1.15;
-    opacity: 0.62;
+    opacity: 1;
 }
 
 #kf-chat-mode-btn[data-mode="random"] .kf-mode-accent-stroke {
