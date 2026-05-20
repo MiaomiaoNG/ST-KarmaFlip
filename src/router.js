@@ -45,15 +45,21 @@ function buildFixedSequence(entries, avoidConsecutive) {
 
     const buckets = entries.map(entry => ({ entry, left: Math.max(1, toInt(entry.fixedRuns || 1)) }));
     const result = [];
-    let lastId = null;
-    while (result.length < expanded.length) {
-        buckets.sort((a, b) => b.left - a.left);
-        let next = buckets.find(x => x.left > 0 && x.entry.id !== lastId);
-        if (!next) next = buckets.find(x => x.left > 0);
-        if (!next) break;
-        result.push(next.entry);
-        lastId = next.entry.id;
-        next.left -= 1;
+    let remaining = buckets.reduce((sum, bucket) => sum + bucket.left, 0);
+    while (remaining > 0) {
+        let progressed = false;
+        for (const bucket of buckets) {
+            if (bucket.left <= 0) continue;
+            const last = result[result.length - 1];
+            if (last?.id === bucket.entry.id && buckets.some(item => item.left > 0 && item.entry.id !== bucket.entry.id)) {
+                continue;
+            }
+            result.push(bucket.entry);
+            bucket.left -= 1;
+            remaining -= 1;
+            progressed = true;
+        }
+        if (!progressed) break;
     }
     return result;
 }

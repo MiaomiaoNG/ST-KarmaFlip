@@ -28,7 +28,8 @@
     outline: none !important;
 }
 
-#kf-chat-toggle-btn .kf-chat-toggle-icon {
+#kf-chat-toggle-btn .kf-chat-toggle-icon,
+.kf-chat-shortcut-btn .kf-chat-shortcut-icon {
     display: block;
     width: 1em;
     height: 1em;
@@ -42,12 +43,26 @@
     display: contents;
 }
 
-#kf-chat-toggle-btn .qr--button-label {
+#kf-chat-toggle-btn .qr--button-label,
+.kf-chat-shortcut-btn .qr--button-label {
     display: flex !important;
     align-items: center;
     justify-content: center;
     width: 100%;
     height: 100%;
+}
+
+#kf-chat-power-btn[data-enabled="true"] .kf-chat-emperor-icon {
+    stroke: #FFD600;
+}
+
+#kf-chat-mode-btn[data-mode="random"] .kf-mode-accent-stroke {
+    stroke: #d32f2f;
+}
+
+#kf-chat-mode-btn[data-mode="random"] .kf-mode-accent-fill {
+    fill: #d32f2f;
+    stroke: #d32f2f;
 }
 
 #kf-root input,
@@ -243,6 +258,8 @@
 }
 
 #kf-root .kf-responsive-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; align-items: center; margin-bottom: 15px; }
+#kf-root .kf-mode-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 8px; }
+#kf-root .kf-entry-actions-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #kf-root .kf-responsive-controls > * { width: 100%; min-width: 0; justify-content: center; }
 #kf-root .kf-responsive-controls .kf-mode-control { justify-content: center; }
 #kf-root .kf-entry-status { font-size: var(--kf-font-small); color: #b91c1c; text-align: center; margin-bottom: 8px; }
@@ -439,6 +456,29 @@
 .kf-modal-overlay .kf-log-actions .kf-action-btn {
     width: 100%;
 }
+.kf-modal-overlay .kf-sequence-summary {
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
+    font-weight: bold;
+    margin-bottom: 12px;
+    color: inherit;
+}
+.kf-modal-overlay .kf-sequence-list {
+    display: grid;
+    gap: 8px;
+    max-height: min(55vh, 360px);
+    overflow-y: auto;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
+    line-height: 1.45;
+    word-break: break-word;
+}
+.kf-modal-overlay .kf-sequence-item {
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(var(--underline-rgb, 97, 123, 155), 0.35);
+}
+.kf-modal-overlay .kf-sequence-list:empty::before {
+    content: '暂无可检测条目';
+    color: rgba(128, 128, 128, 0.78);
+}
 .kf-modal-overlay .kf-action-btn {
     background: transparent;
     color: inherit;
@@ -599,6 +639,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     margin-top: 16px;
 }
+.kf-modal-overlay .kf-modal-actions-single {
+    grid-template-columns: 1fr;
+    margin-top: 16px;
+}
 .kf-modal-overlay .kf-modal-actions .kf-action-btn {
     width: 100%;
     min-width: 0;
@@ -755,6 +799,8 @@
 
 @media (max-width: 650px) {
     #kf-root .kf-responsive-controls { grid-template-columns: repeat(2, 1fr); }
+    #kf-root .kf-mode-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    #kf-root .kf-entry-actions-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #kf-root .kf-row { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; } /* 缩小手机上同行元素的间距 */
     
     /* 手机端进一步压缩边缘空白，避免撑破屏幕 */

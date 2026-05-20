@@ -127,6 +127,17 @@ function retryLimit(state) {
     return Number.isFinite(count) ? Math.max(1, Math.round(count)) : 3;
 }
 
+function retryDelayMs(state) {
+    const seconds = Number(state.failure?.retryDelaySeconds);
+    if (!Number.isFinite(seconds)) return 3000;
+    return Math.max(0, Math.round(seconds)) * 1000;
+}
+
+function wait(ms) {
+    if (!ms) return Promise.resolve();
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function memberLabel(member) {
     return `${member?.name || '未命名'} | ${member?.model || '未填模型'}`;
 }
@@ -345,6 +356,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
     const state = pending.state;
     const pool = pending.pool;
     const maxFailures = retryLimit(state);
+    const delayMs = retryDelayMs(state);
     const alertEnabled = !!state.failure?.alertEnabled;
     const availableEntries = validRuntimeEntries(pool);
     const onlyOneAvailable = availableEntries.length === 1;
@@ -366,6 +378,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         }
 
         for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
+            if (retryAttempt > 0) await wait(delayMs);
             try {
                 const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, retryAttempt);
                 if (result.ok) return result.response;
@@ -385,6 +398,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
 
         if (!alertEnabled) {
             blockedIds.add(currentMember.id);
+            await wait(delayMs);
             continue;
         }
 
@@ -400,9 +414,11 @@ async function runRetryPlan(input, init, pending, onStatus) {
         if (decision === 'cancel') break;
         if (decision === 'switch') {
             blockedIds.add(currentMember.id);
+            await wait(delayMs);
             continue;
         }
         if (decision === 'confirm') {
+            await wait(delayMs);
             try {
                 const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, maxFailures);
                 if (result.ok) return result.response;
@@ -424,6 +440,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
             if (nextDecision === 'use-next') {
                 if (pool.mode === 'random') disableMemberByFailure(state, currentMember);
                 blockedIds.add(currentMember.id);
+                await wait(delayMs);
                 continue;
             }
             if (nextDecision === 'disable-cancel') disableMemberByFailure(state, currentMember);

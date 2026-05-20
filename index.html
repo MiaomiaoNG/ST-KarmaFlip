@@ -25,7 +25,7 @@
 
     <div class="kf-block">
         <div class="kf-title">API条目</div>
-        <div class="kf-responsive-controls">
+        <div class="kf-responsive-controls kf-mode-controls">
             <label class="kf-toggle-chip kf-mode-control">
                 <input type="radio" name="kf-api-mode" id="kf-mode-fixed" value="fixed">
                 <span class="kf-check-box"></span>
@@ -41,6 +41,9 @@
                 <span class="kf-check-box"></span>
                 <span class="kf-check-text kf-accent-fill">避免连续</span>
             </label>
+        </div>
+        <div class="kf-responsive-controls kf-entry-actions-row">
+            <button class="kf-action-btn kf-accent-fill" id="kf-btn-sequence-check">顺序检测</button>
             <button class="kf-action-btn kf-accent-fill" id="kf-btn-add-entry">添加条目</button>
         </div>
         <div class="kf-entries-container" id="kf-entry-list"></div>
@@ -96,6 +99,16 @@
             </div>
         </div>
         <div class="kf-settings-row">
+            <span class="kf-settings-label">重试间隔</span>
+            <div class="kf-stepper" title="失败后等待秒数">
+                <input type="number" min="0" id="kf-failure-retry-delay" class="kf-stepper-input" value="3">
+                <div class="kf-stepper-buttons">
+                    <button type="button" class="kf-stepper-arrow kf-stepper-up" data-stepper-target="kf-failure-retry-delay" aria-label="增加">▲</button>
+                    <button type="button" class="kf-stepper-arrow kf-stepper-down" data-stepper-target="kf-failure-retry-delay" aria-label="减少">▼</button>
+                </div>
+            </div>
+        </div>
+        <div class="kf-settings-row">
             <span class="kf-settings-label">API失败提醒</span>
             <label class="kf-square-check">
                 <input type="checkbox" id="kf-failure-alert-enabled">
@@ -110,9 +123,16 @@
             </label>
         </div>
         <div class="kf-settings-row">
-            <span class="kf-settings-label">开启快捷键</span>
-            <label class="kf-square-check" title="在快捷回复栏显示 KarmaFlip 按钮">
-                <input type="checkbox" id="kf-shortcut-enabled">
+            <span class="kf-settings-label">开启快捷方式-模式切换</span>
+            <label class="kf-square-check" title="在快捷回复栏显示模式切换按钮">
+                <input type="checkbox" id="kf-shortcut-mode-enabled">
+                <span class="kf-square-box"></span>
+            </label>
+        </div>
+        <div class="kf-settings-row">
+            <span class="kf-settings-label">开启快捷方式-插件开关</span>
+            <label class="kf-square-check" title="在快捷回复栏显示插件开关按钮">
+                <input type="checkbox" id="kf-shortcut-power-enabled">
                 <span class="kf-square-box"></span>
             </label>
         </div>
@@ -136,6 +156,17 @@
         <div class="kf-modal-header">API连通测试 <span class="kf-close-btn" id="kf-api-test-close">✖</span></div>
         <div class="kf-test-status" id="kf-api-test-status"></div>
         <pre class="kf-test-detail" id="kf-api-test-detail"></pre>
+    </div>
+</div>
+
+<div class="kf-modal-overlay" id="kf-sequence-modal">
+    <div class="kf-modal-box">
+        <div class="kf-modal-header">顺序检测</div>
+        <div class="kf-sequence-summary" id="kf-sequence-summary"></div>
+        <div class="kf-sequence-list" id="kf-sequence-list"></div>
+        <div class="kf-modal-actions kf-modal-actions-single">
+            <button class="kf-action-btn kf-accent-fill" id="kf-sequence-confirm">确定</button>
+        </div>
     </div>
 </div>
 

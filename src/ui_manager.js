@@ -1,10 +1,12 @@
-import { clearLogs, enableStatePersistence, getActivePool, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
+const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
+const CHAT_POWER_BUTTON_ID = 'kf-chat-power-btn';
+const CHAT_MODE_BUTTON_ID = 'kf-chat-mode-btn';
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
@@ -99,16 +101,30 @@ function updateThemePresetVisibility(state) {
 }
 
 function updateChatShortcut(state) {
-    const button = $('#kf-chat-toggle-btn');
-    if (state.shortcuts?.enabled === false) {
+    const modeEnabled = state.shortcuts?.modeEnabled !== false;
+    const powerEnabled = state.shortcuts?.powerEnabled !== false;
+    if (!modeEnabled && !powerEnabled) {
         document.getElementById(CHAT_SHORTCUT_WRAPPER_ID)?.remove();
         return;
     }
-    if (!button.length) return;
     const pool = getActivePool(state);
     const enabled = state.enabled !== false;
-    button.attr('title', `点击切换固定/随机，长按${enabled ? '关闭' : '启动'}插件`);
-    button.attr('aria-label', `KarmaFlip 快捷按钮，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}，插件${enabled ? '已启用' : '已关闭'}`);
+    const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
+    const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
+    powerButton.toggle(powerEnabled);
+    modeButton.toggle(modeEnabled);
+    if (powerButton.length) {
+        powerButton.attr('data-enabled', enabled ? 'true' : 'false');
+        powerButton.attr('title', enabled ? '点击关闭 KarmaFlip 插件' : '点击开启 KarmaFlip 插件');
+        powerButton.attr('aria-label', `KarmaFlip 插件开关，当前${enabled ? '已启用' : '已关闭'}`);
+        powerButton.html(emperorIcon());
+    }
+    if (modeButton.length) {
+        modeButton.attr('data-mode', pool.mode === 'random' ? 'random' : 'fixed');
+        modeButton.attr('title', `点击切换固定/随机，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}`);
+        modeButton.attr('aria-label', `KarmaFlip 模式切换，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}`);
+        modeButton.html(lotteryIcon());
+    }
 }
 
 function getInlineReplyHost() {
@@ -120,7 +136,7 @@ function getInlineReplyHost() {
 function emperorIcon() {
     return `
         <div class="qr--button-label" aria-hidden="true">
-            <svg class="kf-chat-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="kf-chat-shortcut-icon kf-chat-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="7" y1="3" x2="17" y2="3" />
                 <line x1="12" y1="3" x2="12" y2="21" />
                 <line x1="9.5" y1="7" x2="14.5" y2="7" />
@@ -132,8 +148,29 @@ function emperorIcon() {
     `;
 }
 
+function lotteryIcon() {
+    return `
+        <div class="qr--button-label" aria-hidden="true">
+            <svg class="kf-chat-shortcut-icon kf-chat-lottery-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M 8.5 9 Q 12 7.5 15.5 9" fill="none" stroke="currentColor" stroke-width="1.5" />
+                <line x1="10" y1="10" x2="7" y2="4" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
+                <line x1="11" y1="10" x2="9.5" y2="2.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
+                <line x1="14" y1="10" x2="16.5" y2="5" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
+                <line x1="13" y1="10" x2="14.5" y2="3.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
+                <line x1="12" y1="10" x2="12" y2="4" stroke="currentColor" stroke-width="1.5" stroke-linecap="butt" />
+                <line class="kf-mode-accent kf-mode-accent-stroke" x1="12" y1="4" x2="12" y2="1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                <path d="M 8.5 9 Q 12 10.5 15.5 9 L 14.5 21 Q 12 22 9.5 21 Z" fill="var(--kf-shortcut-fill, transparent)" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+                <polygon class="kf-mode-accent kf-mode-accent-fill" points="12,13.5 13.5,15.5 12,17.5 10.5,15.5" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/>
+                <circle cx="12" cy="15.5" r="0.8" fill="var(--kf-shortcut-dot, Canvas)" />
+            </svg>
+        </div>
+    `;
+}
+
 function ensureChatShortcut(state, rerender, setStatus) {
-    if (state.shortcuts?.enabled === false) {
+    const modeEnabled = state.shortcuts?.modeEnabled !== false;
+    const powerEnabled = state.shortcuts?.powerEnabled !== false;
+    if (!modeEnabled && !powerEnabled) {
         document.getElementById(CHAT_SHORTCUT_WRAPPER_ID)?.remove();
         return;
     }
@@ -153,21 +190,29 @@ function ensureChatShortcut(state, rerender, setStatus) {
     }
 
     let wrapper = document.getElementById(CHAT_SHORTCUT_WRAPPER_ID);
-    let shell = document.getElementById('kf-chat-toggle-btn');
+    let powerShell = document.getElementById(CHAT_POWER_BUTTON_ID);
+    let modeShell = document.getElementById(CHAT_MODE_BUTTON_ID);
+    document.getElementById('kf-chat-toggle-btn')?.remove();
     if (!wrapper) {
         wrapper = document.createElement('div');
         wrapper.id = CHAT_SHORTCUT_WRAPPER_ID;
         wrapper.className = 'qr--buttons qr--color';
         wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
     }
-    if (!shell) {
-        shell = document.createElement('button');
-        shell.id = 'kf-chat-toggle-btn';
-        shell.type = 'button';
-        shell.className = 'remote-ctrl-btn qr--button menu_button interactable';
-        shell.innerHTML = emperorIcon();
+    if (!powerShell) {
+        powerShell = document.createElement('button');
+        powerShell.id = CHAT_POWER_BUTTON_ID;
+        powerShell.type = 'button';
+        powerShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
     }
-    if (shell.parentElement !== wrapper) wrapper.appendChild(shell);
+    if (!modeShell) {
+        modeShell = document.createElement('button');
+        modeShell.id = CHAT_MODE_BUTTON_ID;
+        modeShell.type = 'button';
+        modeShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
+    }
+    if (powerShell.parentElement !== wrapper) wrapper.appendChild(powerShell);
+    if (modeShell.parentElement !== wrapper) wrapper.appendChild(modeShell);
     if (wrapper.parentElement !== host) host.prepend(wrapper);
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
@@ -176,7 +221,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
 function observeChatShortcutHost(state, rerender, setStatus) {
     if (chatShortcutObserver || typeof MutationObserver === 'undefined') return;
     chatShortcutObserver = new MutationObserver(() => {
-        if (state.shortcuts?.enabled === false) return;
+        if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) return;
         const wrapper = document.getElementById(CHAT_SHORTCUT_WRAPPER_ID);
         const host = getInlineReplyHost();
         if (!host || wrapper?.parentElement === host) return;
@@ -260,15 +305,18 @@ function bindPressHold(area, options = {}) {
 }
 
 function bindChatShortcut(state, rerender, setStatus) {
-    const button = $('#kf-chat-toggle-btn');
-    if (!button.length) return;
-    bindPressHold(button, {
-        isActive: () => state.enabled !== false,
-        onShort: () => {
-            const pool = getActivePool(state);
-            setPoolMode(state, pool.mode === 'random' ? 'fixed' : 'random', rerender, setStatus);
-        },
-        onLong: () => toggleGlobalEnabled(state, setStatus),
+    const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
+    const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
+    powerButton.off('.kfShortcut').on('click.kfShortcut', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleGlobalEnabled(state, setStatus);
+    });
+    modeButton.off('.kfShortcut').on('click.kfShortcut', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const pool = getActivePool(state);
+        setPoolMode(state, pool.mode === 'random' ? 'fixed' : 'random', rerender, setStatus);
     });
 }
 
@@ -287,9 +335,11 @@ function applyTheme(state) {
     $('#kf-theme-brush').val(resolvedBrush);
     $('#kf-theme-preset').val(String(theme.preset || 'default'));
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
+    $('#kf-failure-retry-delay').val(toInt(state.failure?.retryDelaySeconds ?? 3));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
     $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
-    $('#kf-shortcut-enabled').prop('checked', state.shortcuts?.enabled !== false);
+    $('#kf-shortcut-mode-enabled').prop('checked', state.shortcuts?.modeEnabled !== false);
+    $('#kf-shortcut-power-enabled').prop('checked', state.shortcuts?.powerEnabled !== false);
     updateThemePresetVisibility(state);
     updateChatShortcut(state);
 }
@@ -767,10 +817,12 @@ function applyThemePreset(state, presetKey) {
 
 function syncFailureFromControls(state) {
     state.failure.retryCount = Math.max(1, toInt($('#kf-failure-retry-count').val() || 3));
+    state.failure.retryDelaySeconds = toInt($('#kf-failure-retry-delay').val() ?? 3);
     state.failure.alertEnabled = $('#kf-failure-alert-enabled').prop('checked');
     state.failure.modelAlertEnabled = $('#kf-model-alert-enabled').prop('checked');
     state.shortcuts = state.shortcuts || {};
-    state.shortcuts.enabled = $('#kf-shortcut-enabled').prop('checked');
+    state.shortcuts.modeEnabled = $('#kf-shortcut-mode-enabled').prop('checked');
+    state.shortcuts.powerEnabled = $('#kf-shortcut-power-enabled').prop('checked');
 }
 
 function syncAllFromControls(state) {
@@ -795,9 +847,111 @@ function saveThemeFromModal(state, setStatus) {
 
 function saveFailureSettingsFromModal(state, setStatus) {
     syncFailureFromControls(state);
+    if (toInt(state.failure?.retryDelaySeconds) === 0) {
+        showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
+    }
     persistNow(state);
     closeModal('kf-settings-modal');
     setStatus('请求设置已保存');
+}
+
+function entryReady(entry, mode) {
+    return entry &&
+        entry.enabled !== false &&
+        String(entry.apiUrl || '').trim() &&
+        String(entry.key || '').trim() &&
+        String(entry.model || '').trim() &&
+        (mode !== 'random' || toInt(entry.weight) > 0);
+}
+
+function buildFixedPreview(entries, avoidConsecutive) {
+    const expanded = [];
+    for (const entry of entries) {
+        const runs = Math.max(1, toInt(entry.fixedRuns || 1));
+        for (let i = 0; i < runs; i += 1) expanded.push(entry);
+    }
+    if (!avoidConsecutive || expanded.length < 2) return expanded;
+    const buckets = entries.map(entry => ({ entry, left: Math.max(1, toInt(entry.fixedRuns || 1)) }));
+    const result = [];
+    let remaining = buckets.reduce((sum, bucket) => sum + bucket.left, 0);
+    while (remaining > 0) {
+        let progressed = false;
+        for (const bucket of buckets) {
+            if (bucket.left <= 0) continue;
+            const last = result[result.length - 1];
+            if (last?.id === bucket.entry.id && buckets.some(item => item.left > 0 && item.entry.id !== bucket.entry.id)) {
+                continue;
+            }
+            result.push(bucket.entry);
+            bucket.left -= 1;
+            remaining -= 1;
+            progressed = true;
+        }
+        if (!progressed) break;
+    }
+    return result;
+}
+
+function sequenceLabel(entry) {
+    const name = String(entry?.name || '未命名').trim();
+    const model = String(entry?.model || '未填模型').trim();
+    return `[${name}] [${model}]`;
+}
+
+function openSequenceModal(summary, rows) {
+    $('#kf-sequence-summary').text(summary || '');
+    const list = $('#kf-sequence-list').empty();
+    for (const row of rows || []) {
+        $('<div class="kf-sequence-item"></div>').text(row).appendTo(list);
+    }
+    $('#kf-sequence-modal').addClass('kf-show');
+}
+
+function showSequenceCheck(state) {
+    syncAllEntries(state);
+    const pool = getActivePool(state);
+    const runtime = getRuntimeScope(state);
+    const mode = pool.mode === 'random' ? 'random' : 'fixed';
+    const entries = (pool.entries || []).filter(entry => entryReady(entry, mode) && !runtime.disabledByFailure?.[entry.id]);
+    const summary = `${mode === 'random' ? '随机模式' : '固定模式'} ${pool.random?.noConsecutive ? '已勾选连续' : '未勾选连续'}`;
+    if (!entries.length) {
+        openSequenceModal(summary, ['当前组合没有可用于检测的 API 条目']);
+        return;
+    }
+    if (mode === 'fixed') {
+        const sequence = buildFixedPreview(entries, !!pool.random?.noConsecutive);
+        const cursor = sequence.length ? toInt(runtime.fixedCursor) % sequence.length : 0;
+        const preview = sequence.slice(cursor).concat(sequence.slice(0, cursor));
+        openSequenceModal(summary, preview.map((entry, index) => `${index + 1}. ${sequenceLabel(entry)}`));
+        return;
+    }
+    const lastId = runtime.lastPick?.memberId;
+    const active = entries;
+    if (!active.length) {
+        openSequenceModal(summary, ['当前可用条目已被失败流程临时停用']);
+        return;
+    }
+    let candidates = active.filter(entry => {
+        const onCooldown = toInt(runtime.cooldowns?.[entry.id]) > 0;
+        const streakBlocked = pool.random?.noConsecutive && lastId === entry.id && active.length > 1;
+        return !onCooldown && !streakBlocked;
+    });
+    if (!candidates.length) {
+        candidates = active.filter(entry => !(pool.random?.noConsecutive && lastId === entry.id && active.length > 1));
+        if (!candidates.length) candidates = active;
+    }
+    const candidateIds = new Set(candidates.map(entry => entry.id));
+    const usable = candidates.length ? candidates : active;
+    const total = usable.reduce((sum, entry) => sum + toInt(entry.weight), 0);
+    const rows = active.map(entry => {
+        const cooldown = toInt(runtime.cooldowns?.[entry.id]);
+        if (cooldown > 0) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合`;
+        const blockedByStreak = pool.random?.noConsecutive && lastId === entry.id && active.length > 1 && !candidateIds.has(entry.id);
+        if (blockedByStreak) return `${sequenceLabel(entry)} 详情：避免连续，本轮暂不参与`;
+        const percent = total > 0 && candidateIds.has(entry.id) ? Math.round((toInt(entry.weight) / total) * 100) : 0;
+        return `${sequenceLabel(entry)} 详情：当前概率约 ${percent}%`;
+    });
+    openSequenceModal(summary, rows);
 }
 
 function shouldEqualize(pool) {
@@ -1483,6 +1637,7 @@ function bind(state, rerender, setStatus) {
         persistNow(state);
         rerender();
     });
+    $('#kf-btn-sequence-check').off('click.kf').on('click.kf', () => showSequenceCheck(state));
 
     $('#kf-entry-list').off('.kf');
     $('#kf-entry-list').on('change.kf', '.kf-entry-name', function () {
@@ -1686,6 +1841,7 @@ function bind(state, rerender, setStatus) {
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
     $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, setStatus));
     $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('kf-api-test-modal'));
+    $('#kf-sequence-confirm').off('click.kf').on('click.kf', () => closeModal('kf-sequence-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
     $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));
     $('#kf-rename-pool-input').off('keydown.kf').on('keydown.kf', function (event) {
@@ -1729,16 +1885,22 @@ function bind(state, rerender, setStatus) {
         applyTheme(state);
         persistStructure(state);
     });
-    $('#kf-failure-retry-count,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('#kf-failure-retry-count,#kf-failure-retry-delay,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-mode-enabled,#kf-shortcut-power-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
         syncFailureFromControls(state);
-        if (state.shortcuts?.enabled === false) updateChatShortcut(state);
+        if (this.id === 'kf-failure-retry-delay' && toInt($(this).val()) === 0) {
+            showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
+        }
+        if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) updateChatShortcut(state);
         else ensureChatShortcut(state, rerender, setStatus);
         persistStructure(state);
     });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
-        const input = $('#kf-failure-retry-count');
+        const targetId = String($(this).data('stepperTarget') || 'kf-failure-retry-count');
+        const input = $(`#${targetId}`);
         const delta = $(this).hasClass('kf-stepper-up') ? 1 : -1;
-        const next = Math.max(1, toInt(input.val() || 3) + delta);
+        const min = toInt(input.attr('min') || 0);
+        const fallback = targetId === 'kf-failure-retry-delay' ? 3 : 1;
+        const next = Math.max(min, toInt(input.val() || fallback) + delta);
         input.val(next).trigger('change');
     });
     $('#kf-global-toggle').off('click.kf').on('click.kf', function () {

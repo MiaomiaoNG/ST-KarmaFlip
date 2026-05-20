@@ -50,11 +50,13 @@ export function getDefaultState() {
         },
         failure: {
             retryCount: 3,
+            retryDelaySeconds: 3,
             alertEnabled: false,
             modelAlertEnabled: false,
         },
         shortcuts: {
-            enabled: true,
+            modeEnabled: true,
+            powerEnabled: true,
         },
         runtime: {},
         logs: [],
@@ -149,14 +151,18 @@ function normalizeState(raw) {
         ...getDefaultState().failure,
         ...(s.failure || {}),
         retryCount: Math.max(1, toInt(s.failure?.retryCount || 3)),
+        retryDelaySeconds: toInt(s.failure?.retryDelaySeconds ?? 3),
         alertEnabled: !!s.failure?.alertEnabled,
         modelAlertEnabled: !!s.failure?.modelAlertEnabled,
     };
     s.shortcuts = {
         ...getDefaultState().shortcuts,
         ...(s.shortcuts || {}),
-        enabled: s.shortcuts?.enabled !== false,
+        modeEnabled: s.shortcuts?.modeEnabled ?? s.shortcuts?.enabled ?? true,
+        powerEnabled: s.shortcuts?.powerEnabled ?? s.shortcuts?.enabled ?? true,
     };
+    s.shortcuts.modeEnabled = s.shortcuts.modeEnabled !== false;
+    s.shortcuts.powerEnabled = s.shortcuts.powerEnabled !== false;
     s.logs = [];
     return s;
 }
@@ -289,15 +295,19 @@ function createPersistedState(source) {
             ...getDefaultState().failure,
             ...(base.failure || {}),
             retryCount: Math.max(1, toInt(base?.failure?.retryCount || 3)),
+            retryDelaySeconds: toInt(base?.failure?.retryDelaySeconds ?? 3),
             alertEnabled: !!base?.failure?.alertEnabled,
             modelAlertEnabled: !!base?.failure?.modelAlertEnabled,
         },
         shortcuts: {
             ...getDefaultState().shortcuts,
             ...(base.shortcuts || {}),
-            enabled: base?.shortcuts?.enabled !== false,
+            modeEnabled: base?.shortcuts?.modeEnabled ?? base?.shortcuts?.enabled ?? true,
+            powerEnabled: base?.shortcuts?.powerEnabled ?? base?.shortcuts?.enabled ?? true,
         },
     };
+    snapshot.shortcuts.modeEnabled = snapshot.shortcuts.modeEnabled !== false;
+    snapshot.shortcuts.powerEnabled = snapshot.shortcuts.powerEnabled !== false;
     return normalizeState(snapshot);
 }
 
