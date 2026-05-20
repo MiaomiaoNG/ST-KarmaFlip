@@ -111,8 +111,8 @@ function updateChatShortcut(state) {
     const enabled = state.enabled !== false;
     const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
     const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
-    powerButton.toggle(powerEnabled);
-    modeButton.toggle(modeEnabled);
+    if (!powerEnabled) powerButton.remove();
+    if (!modeEnabled) modeButton.remove();
     if (powerButton.length) {
         powerButton.attr('data-enabled', enabled ? 'true' : 'false');
         powerButton.attr('title', enabled ? '点击关闭 KarmaFlip 插件' : '点击开启 KarmaFlip 插件');
@@ -199,20 +199,22 @@ function ensureChatShortcut(state, rerender, setStatus) {
         wrapper.className = 'qr--buttons qr--color';
         wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
     }
-    if (!powerShell) {
+    if (powerEnabled && !powerShell) {
         powerShell = document.createElement('button');
         powerShell.id = CHAT_POWER_BUTTON_ID;
         powerShell.type = 'button';
         powerShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
     }
-    if (!modeShell) {
+    if (modeEnabled && !modeShell) {
         modeShell = document.createElement('button');
         modeShell.id = CHAT_MODE_BUTTON_ID;
         modeShell.type = 'button';
         modeShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
     }
-    if (powerShell.parentElement !== wrapper) wrapper.appendChild(powerShell);
-    if (modeShell.parentElement !== wrapper) wrapper.appendChild(modeShell);
+    if (!powerEnabled) powerShell?.remove();
+    else if (powerShell.parentElement !== wrapper) wrapper.appendChild(powerShell);
+    if (!modeEnabled) modeShell?.remove();
+    else if (modeShell.parentElement !== wrapper) wrapper.appendChild(modeShell);
     if (wrapper.parentElement !== host) host.prepend(wrapper);
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);

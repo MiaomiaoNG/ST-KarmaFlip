@@ -53,7 +53,15 @@
 }
 
 #kf-chat-power-btn[data-enabled="true"] .kf-chat-emperor-icon {
-    stroke: #FFD600;
+    stroke: currentColor;
+    stroke-width: 2.0;
+    opacity: 1;
+}
+
+#kf-chat-power-btn[data-enabled="false"] .kf-chat-emperor-icon {
+    stroke: currentColor;
+    stroke-width: 1.15;
+    opacity: 0.62;
 }
 
 #kf-chat-mode-btn[data-mode="random"] .kf-mode-accent-stroke {
