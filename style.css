@@ -58,9 +58,15 @@
     opacity: 1;
 }
 
-#kf-chat-power-btn[data-enabled="false"] .kf-chat-emperor-outline-icon {
+#kf-chat-power-btn[data-enabled="false"] .kf-chat-emperor-icon {
     stroke: currentColor;
+    stroke-width: 2.0;
     opacity: 1;
+}
+
+#kf-chat-mode-btn .kf-chat-lottery-icon {
+    width: 1.2em;
+    height: 1.2em;
 }
 
 #kf-chat-mode-btn[data-mode="random"] .kf-mode-accent-stroke {
