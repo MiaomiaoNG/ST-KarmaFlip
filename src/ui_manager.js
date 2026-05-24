@@ -370,7 +370,7 @@ function cloneEntry(entry) {
         id: makeId('e'),
         presetId: '',
         enabled: entry?.enabled !== false,
-        name: String(entry?.name || 'New API'),
+        name: String(entry?.name || ''),
         apiUrl: String(entry?.apiUrl || entry?.url || ''),
         key: String(entry?.key || ''),
         provider: String(entry?.provider || 'open'),
@@ -401,7 +401,7 @@ function addEntry(pool) {
     pool.entries.push({
         id: makeId('e'),
         enabled: true,
-        name: 'New API',
+        name: '',
         apiUrl: '',
         key: '',
         provider: 'open',
@@ -419,12 +419,12 @@ function savedApiEntries(state) {
     const map = new Map();
     for (const preset of state.apiPresets || []) {
         const name = String(preset.name || '').trim();
-        if (name && !map.has(name)) map.set(name, preset);
+        if (name && isMeaningfulApiEntry(preset) && !map.has(name)) map.set(name, preset);
     }
     for (const pool of state.pools || []) {
         for (const entry of pool.entries || []) {
             const name = String(entry.name || '').trim();
-            if (name && !map.has(name)) map.set(name, entry);
+            if (name && isMeaningfulApiEntry(entry) && !map.has(name)) map.set(name, entry);
         }
     }
     return [...map.values()];
@@ -446,6 +446,38 @@ function findSavedApiEntry(state, name, excludeId) {
 
 function renderPresetLists(state) {
     return state;
+}
+
+function isPlaceholderApiName(name) {
+    return String(name || '').trim().toLowerCase() === 'new api';
+}
+
+function isMeaningfulApiEntry(entry) {
+    if (!entry) return false;
+    return [
+        isPlaceholderApiName(entry.name) ? '' : entry.name,
+        entry.apiUrl || entry.url,
+        entry.key,
+        entry.model,
+    ].some(value => String(value || '').trim());
+}
+
+function sameApiIdentity(entry, target) {
+    if (!entry || !target) return false;
+    const targetId = String(target.id || '').trim();
+    const targetPresetId = String(target.presetId || '').trim();
+    const entryId = String(entry.id || '').trim();
+    const entryPresetId = String(entry.presetId || '').trim();
+    if (targetId && (entryId === targetId || entryPresetId === targetId)) return true;
+    if (targetPresetId && (entryId === targetPresetId || entryPresetId === targetPresetId)) return true;
+
+    const targetName = String(target.name || '').trim();
+    const entryName = String(entry.name || '').trim();
+    if (targetName && entryName && targetName === entryName) return true;
+
+    const fields = ['apiUrl', 'key', 'model'];
+    return fields.every(field => String(entry[field] || '').trim() === String(target[field] || '').trim())
+        && fields.some(field => String(target[field] || '').trim());
 }
 
 function persistHot(state, delay = HOT_SAVE_DELAY) {
@@ -473,22 +505,19 @@ function getApiPresetNames(state) {
 }
 
 function deleteSavedApiEntry(state, target) {
-    const targetId = String(target?.id || '');
-    const targetName = String(target?.name || '').trim();
-    if (!targetId && !targetName) return false;
+    if (!target) return false;
     const before = Array.isArray(state.apiPresets) ? state.apiPresets.length : 0;
-    state.apiPresets = (state.apiPresets || []).filter(preset => {
-        if (targetId && preset.id === targetId) return false;
-        return !(targetName && String(preset.name || '').trim() === targetName);
-    });
+    let removedEntries = 0;
+    state.apiPresets = (state.apiPresets || []).filter(preset => !sameApiIdentity(preset, target));
     for (const pool of state.pools || []) {
-        for (const entry of pool.entries || []) {
-            if ((targetId && entry.presetId === targetId) || (targetName && String(entry.name || '').trim() === targetName)) {
-                entry.presetId = '';
-            }
-        }
+        const entries = Array.isArray(pool.entries) ? pool.entries : [];
+        pool.entries = entries.filter(entry => {
+            const keep = !sameApiIdentity(entry, target);
+            if (!keep) removedEntries += 1;
+            return keep;
+        });
     }
-    return state.apiPresets.length !== before;
+    return state.apiPresets.length !== before || removedEntries > 0;
 }
 
 function getModelOptions(entry) {
@@ -526,7 +555,7 @@ function copyEntryForPreset(entry) {
 function copyPresetForImport(entry) {
     return copyEntryForPreset({
         enabled: entry?.enabled !== false,
-        name: String(entry?.name || 'Imported API'),
+        name: String(entry?.name || ''),
         apiUrl: String(entry?.apiUrl || entry?.url || ''),
         key: String(entry?.key || ''),
         provider: String(entry?.provider || 'open'),
@@ -536,9 +565,9 @@ function copyPresetForImport(entry) {
 }
 
 function saveApiPreset(state, entry) {
-    if (!entry?.name) return;
+    if (!isMeaningfulApiEntry(entry)) return;
     if (!Array.isArray(state.apiPresets)) state.apiPresets = [];
-    const name = String(entry.name || '').trim();
+    const name = isPlaceholderApiName(entry.name) ? '' : String(entry.name || '').trim();
     const previousName = String(entry._previousPresetName || '').trim();
     const preset = copyEntryForPreset({ ...entry, name });
     const presetId = String(entry.presetId || '').trim();
@@ -558,7 +587,7 @@ function saveApiPreset(state, entry) {
 }
 
 function saveApiPresetIfNamed(state, entry) {
-    if (String(entry?.name || '').trim()) saveApiPreset(state, entry);
+    if (isMeaningfulApiEntry(entry)) saveApiPreset(state, entry);
 }
 
 function renderPool(state) {
@@ -664,7 +693,7 @@ function renderEntries(state) {
                         <span class="kf-check-box"></span>
                         <span class="kf-check-text kf-accent-fill">启用</span>
                     </label>
-                    <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}">${nameArrow}</div>
+                    <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}" placeholder="API 名称">${nameArrow}</div>
                     <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
                     <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
                 </div>
@@ -1233,7 +1262,12 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
         const row = $(this).closest('.kf-mobile-option-row');
         const value = String(row.data('value') || '');
         const item = (box.data('kfOptions') || []).find(option => option.value === value)?.item || { name: value };
-        config.onDelete?.(item, value);
+        const result = config.onDelete?.(item, value);
+        if (result === false) return;
+        const nextOptions = (box.data('kfOptions') || []).filter(option => option.value !== value);
+        box.data('kfOptions', nextOptions);
+        row.remove();
+        if (!nextOptions.length) closeDropdown();
     });
     $('#kf-dropdown-modal').addClass('kf-show');
 }
@@ -1293,10 +1327,14 @@ function openEntryNamePicker(state, row, input, rerender) {
         deletable: true,
         onDelete: (item) => {
             const deleted = deleteSavedApiEntry(state, item);
-            if (!deleted) return showToast('该条目未保存为 API 预设，无法从预设列表删除', 'warning');
-            persistNow(state);
+            if (!deleted) {
+                showToast('该条目未保存为 API 预设，无法从预设列表删除', 'warning');
+                return false;
+            }
+            persistStructure(state);
+            rerender();
             showToast('API 条目已删除', 'info');
-            openEntryNamePicker(state, row, input, rerender);
+            return true;
         },
     });
 }
@@ -1746,8 +1784,11 @@ function bind(state, rerender, setStatus) {
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);
         const id = $(this).closest('.kf-entry-block').data('id');
-        pool.entries = pool.entries.filter(e => e.id !== id);
-        persistNow(state);
+        const entry = pool.entries.find(e => e.id === id);
+        if (!entry || !deleteSavedApiEntry(state, entry)) {
+            pool.entries = pool.entries.filter(e => e.id !== id);
+        }
+        persistStructure(state);
         rerender();
     });
     bindEntryDragSort(state, rerender, setStatus);

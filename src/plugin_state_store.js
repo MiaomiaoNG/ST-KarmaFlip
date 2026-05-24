@@ -78,13 +78,27 @@ function copyModelOptions(list) {
     return Array.isArray(list) ? list.map(x => String(x)).filter(Boolean) : [];
 }
 
+function isPlaceholderApiName(name) {
+    return String(name || '').trim().toLowerCase() === 'new api';
+}
+
+function isMeaningfulApiEntry(entry) {
+    if (!entry) return false;
+    return [
+        isPlaceholderApiName(entry.name) ? '' : entry.name,
+        entry.apiUrl || entry.url,
+        entry.key,
+        entry.model,
+    ].some(value => String(value || '').trim());
+}
+
 function normalizeEntry(entry) {
     const e = entry || {};
     return {
         id: String(e.id || makeId('e')),
         presetId: e.presetId ? String(e.presetId) : '',
         enabled: e.enabled !== false,
-        name: String(e.name || 'New API'),
+        name: isPlaceholderApiName(e.name) ? '' : String(e.name || ''),
         apiUrl: String(e.apiUrl || e.url || ''),
         key: String(e.key || ''),
         provider: String(e.provider || 'open'),
@@ -253,13 +267,14 @@ function findPresetIndex(presets, entry) {
 
 function syncApiPresetsInPlace(state) {
     if (!Array.isArray(state?.apiPresets)) state.apiPresets = [];
+    state.apiPresets = state.apiPresets.filter(isMeaningfulApiEntry);
     for (const pool of state?.pools || []) {
         for (const entry of pool?.entries || []) {
-            const name = String(entry?.name || '').trim();
-            if (!name) continue;
+            if (!isMeaningfulApiEntry(entry)) continue;
+            const name = isPlaceholderApiName(entry?.name) ? '' : String(entry?.name || '').trim();
             const index = findPresetIndex(state.apiPresets, entry);
             const existing = index >= 0 ? state.apiPresets[index] : null;
-            const preset = buildLivePresetFromEntry(entry, existing?.id || entry?.presetId || undefined);
+            const preset = buildLivePresetFromEntry({ ...entry, name }, existing?.id || entry?.presetId || undefined);
             if (index >= 0) state.apiPresets[index] = preset;
             else state.apiPresets.push(preset);
             entry.presetId = preset.id;
