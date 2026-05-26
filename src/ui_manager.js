@@ -1,15 +1,21 @@
 import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
+const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
+const CHAT_POWER_WRAPPER_ID = 'kf-chat-power-wrapper';
+const CHAT_MODE_WRAPPER_ID = 'kf-chat-mode-wrapper';
 const CHAT_POWER_BUTTON_ID = 'kf-chat-power-btn';
 const CHAT_MODE_BUTTON_ID = 'kf-chat-mode-btn';
+const QR_ASSISTANT_MANAGED_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID];
+const MAGIC_WAND_CONTAINER_ID = 'kf-magic-wand-container';
+const MAGIC_WAND_ENTRY_ID = 'kf-magic-wand-entry';
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
+let magicWandObserver = null;
 const THEME_PRESETS = {
     default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
     'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
@@ -100,11 +106,94 @@ function updateThemePresetVisibility(state) {
     $('#kf-theme-preset-row').toggle(brush === 'simple');
 }
 
+function getQrAssistantSettings() {
+    try {
+        return window.SillyTavern?.getContext?.()?.extensionSettings?.['qr-assistant'] || null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function isQrAssistantAvailable() {
+    return !!(
+        window.quickReplyMenu ||
+        Array.isArray(window.qrAssistantExtensionApi) ||
+        document.body?.classList?.contains('qra-enabled')
+    );
+}
+
+function applyQrAssistantRefresh() {
+    try {
+        window.quickReplyMenu?.applyWhitelistDOMChanges?.();
+    } catch (error) {
+        // QR Assistant is optional; failure should not affect native shortcuts.
+    }
+}
+
+function enabledQrAssistantButtons(state) {
+    const modeEnabled = state.shortcuts?.modeEnabled !== false;
+    const powerEnabled = state.shortcuts?.powerEnabled !== false;
+    const buttons = [];
+    if (powerEnabled) {
+        buttons.push({
+            dom_id: CHAT_POWER_WRAPPER_ID,
+            group_name: 'API随机临幸：插件开关',
+            button_name: svgDataImage(emperorSvg({ imageSafe: true }), 'API随机临幸插件开关'),
+        });
+    }
+    if (modeEnabled) {
+        buttons.push({
+            dom_id: CHAT_MODE_WRAPPER_ID,
+            group_name: 'API随机临幸：模式切换',
+            button_name: svgDataImage(lotterySvg({ imageSafe: true }), 'API随机临幸模式切换'),
+        });
+    }
+    return buttons;
+}
+
+function registerQrAssistantShortcuts(state) {
+    if (!isQrAssistantAvailable()) return false;
+    if (!Array.isArray(window.qrAssistantExtensionApi)) {
+        window.qrAssistantExtensionApi = [];
+    }
+    window.qrAssistantExtensionApi = window.qrAssistantExtensionApi.filter(item => !QR_ASSISTANT_MANAGED_DOM_IDS.includes(item?.dom_id));
+    for (const entry of enabledQrAssistantButtons(state)) {
+        const existing = window.qrAssistantExtensionApi.find(item => item?.dom_id === entry.dom_id);
+        if (existing) {
+            existing.group_name = entry.group_name;
+            existing.button_name = entry.button_name;
+        } else {
+            window.qrAssistantExtensionApi.push({ ...entry });
+        }
+    }
+    applyQrAssistantRefresh();
+    return true;
+}
+
+function isQrAssistantWhitelisted(domId) {
+    const qrSettings = getQrAssistantSettings();
+    return Array.isArray(qrSettings?.whitelist) && qrSettings.whitelist.includes(domId);
+}
+
+function syncQrAssistantManagedVisibility(wrapper, button, hasQrAssistant) {
+    if (!wrapper) return;
+    const shouldHide = !!hasQrAssistant && !isQrAssistantWhitelisted(wrapper.id);
+    wrapper.classList.toggle('kf-qr-managed-hidden', shouldHide);
+    button?.classList?.toggle('kf-qr-managed-hidden', shouldHide);
+    if (!hasQrAssistant) {
+        wrapper.classList.remove('kf-qr-managed-hidden');
+        button?.classList?.remove('kf-qr-managed-hidden');
+    }
+    if (hasQrAssistant) applyQrAssistantRefresh();
+}
+
 function updateChatShortcut(state) {
     const modeEnabled = state.shortcuts?.modeEnabled !== false;
     const powerEnabled = state.shortcuts?.powerEnabled !== false;
     if (!modeEnabled && !powerEnabled) {
-        document.getElementById(CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+        document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+        document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
+        document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
         return;
     }
     const pool = getActivePool(state);
@@ -127,6 +216,33 @@ function updateChatShortcut(state) {
     }
 }
 
+function createChatShortcutWrapper(id) {
+    const wrapper = document.createElement('div');
+    wrapper.id = id;
+    wrapper.className = 'qr--buttons qr--color kf-chat-shortcut-wrapper';
+    wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
+    return wrapper;
+}
+
+function bindQrWrapperProxy(wrapper, buttonId) {
+    if (!wrapper || wrapper.dataset.kfQrProxyBound === 'true') return;
+    wrapper.dataset.kfQrProxyBound = 'true';
+    wrapper.addEventListener('click', event => {
+        if (event.target?.closest?.(`#${buttonId}`)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        document.getElementById(buttonId)?.click();
+    });
+}
+
+function svgDataImage(svg, alt) {
+    const compact = String(svg || '').replace(/\s+/g, ' ').trim();
+    const encoded = encodeURIComponent(compact)
+        .replace(/'/g, '%27')
+        .replace(/"/g, '%22');
+    return `<img class="kf-chat-shortcut-img" src="data:image/svg+xml,${encoded}" alt="${esc(alt)}" />`;
+}
+
 function getInlineReplyHost() {
     return document.querySelector('#qr--bar > .qr--buttons')
         || document.querySelector('.qr--buttons')
@@ -136,34 +252,50 @@ function getInlineReplyHost() {
 function emperorIcon() {
     return `
         <div class="qr--button-label" aria-hidden="true">
-            <svg class="kf-chat-shortcut-icon kf-chat-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <line x1="7" y1="3" x2="17" y2="3" />
-                <line x1="12" y1="3" x2="12" y2="21" />
-                <line x1="9.5" y1="7" x2="14.5" y2="7" />
-                <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
-                <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
-                <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
-            </svg>
+            ${emperorSvg()}
         </div>
+    `;
+}
+
+function emperorSvg(options = {}) {
+    const stroke = options.imageSafe ? '#111111' : 'currentColor';
+    return `
+        <svg class="kf-chat-shortcut-icon kf-chat-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="${stroke}" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="7" y1="3" x2="17" y2="3" />
+            <line x1="12" y1="3" x2="12" y2="21" />
+            <line x1="9.5" y1="7" x2="14.5" y2="7" />
+            <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
+            <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
+            <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
+        </svg>
     `;
 }
 
 function lotteryIcon() {
     return `
         <div class="qr--button-label" aria-hidden="true">
-            <svg class="kf-chat-shortcut-icon kf-chat-lottery-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M 8.5 9 Q 12 7.5 15.5 9" fill="none" stroke="currentColor" stroke-width="1.5" />
-                <line x1="10" y1="10" x2="7" y2="4" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
-                <line x1="11" y1="10" x2="9.5" y2="2.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
-                <line x1="14" y1="10" x2="16.5" y2="5" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
-                <line x1="13" y1="10" x2="14.5" y2="3.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
-                <line x1="12" y1="10" x2="12" y2="4" stroke="currentColor" stroke-width="1.5" stroke-linecap="butt" />
-                <line class="kf-mode-accent kf-mode-accent-stroke" x1="12" y1="4" x2="12" y2="1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                <path d="M 8.5 9 Q 12 10.5 15.5 9 L 14.5 21 Q 12 22 9.5 21 Z" fill="var(--kf-shortcut-fill, transparent)" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-                <polygon class="kf-mode-accent kf-mode-accent-fill" points="12,13.5 13.5,15.5 12,17.5 10.5,15.5" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/>
-                <circle cx="12" cy="15.5" r="0.8" fill="var(--kf-shortcut-dot, Canvas)" />
-            </svg>
+            ${lotterySvg()}
         </div>
+    `;
+}
+
+function lotterySvg(options = {}) {
+    const stroke = options.imageSafe ? '#111111' : 'currentColor';
+    const fill = options.imageSafe ? 'none' : 'var(--kf-shortcut-fill, transparent)';
+    const dotFill = options.imageSafe ? '#ffffff' : 'var(--kf-shortcut-dot, Canvas)';
+    return `
+        <svg class="kf-chat-shortcut-icon kf-chat-lottery-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M 8.5 9 Q 12 7.5 15.5 9" fill="none" stroke="${stroke}" stroke-width="1.5" />
+            <line x1="10" y1="10" x2="7" y2="4" stroke="${stroke}" stroke-width="1" stroke-linecap="round" />
+            <line x1="11" y1="10" x2="9.5" y2="2.5" stroke="${stroke}" stroke-width="1" stroke-linecap="round" />
+            <line x1="14" y1="10" x2="16.5" y2="5" stroke="${stroke}" stroke-width="1" stroke-linecap="round" />
+            <line x1="13" y1="10" x2="14.5" y2="3.5" stroke="${stroke}" stroke-width="1" stroke-linecap="round" />
+            <line x1="12" y1="10" x2="12" y2="4" stroke="${stroke}" stroke-width="1.5" stroke-linecap="butt" />
+            <line class="kf-mode-accent kf-mode-accent-stroke" x1="12" y1="4" x2="12" y2="1.5" stroke="${stroke}" stroke-width="1.5" stroke-linecap="round" />
+            <path d="M 8.5 9 Q 12 10.5 15.5 9 L 14.5 21 Q 12 22 9.5 21 Z" fill="${fill}" stroke="${stroke}" stroke-width="1.5" stroke-linejoin="round" />
+            <polygon class="kf-mode-accent kf-mode-accent-fill" points="12,13.5 13.5,15.5 12,17.5 10.5,15.5" fill="${stroke}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>
+            <circle cx="12" cy="15.5" r="0.8" fill="${dotFill}" />
+        </svg>
     `;
 }
 
@@ -171,9 +303,13 @@ function ensureChatShortcut(state, rerender, setStatus) {
     const modeEnabled = state.shortcuts?.modeEnabled !== false;
     const powerEnabled = state.shortcuts?.powerEnabled !== false;
     if (!modeEnabled && !powerEnabled) {
-        document.getElementById(CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+        document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+        document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
+        document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
+        applyQrAssistantRefresh();
         return;
     }
+    const hasQrAssistant = registerQrAssistantShortcuts(state);
     const host = getInlineReplyHost();
     if (!host) {
         if (!chatShortcutRetryTimer) {
@@ -189,16 +325,12 @@ function ensureChatShortcut(state, rerender, setStatus) {
         chatShortcutRetryTimer = null;
     }
 
-    let wrapper = document.getElementById(CHAT_SHORTCUT_WRAPPER_ID);
+    document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+    document.getElementById('kf-chat-toggle-btn')?.remove();
+    let powerWrapper = document.getElementById(CHAT_POWER_WRAPPER_ID);
+    let modeWrapper = document.getElementById(CHAT_MODE_WRAPPER_ID);
     let powerShell = document.getElementById(CHAT_POWER_BUTTON_ID);
     let modeShell = document.getElementById(CHAT_MODE_BUTTON_ID);
-    document.getElementById('kf-chat-toggle-btn')?.remove();
-    if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.id = CHAT_SHORTCUT_WRAPPER_ID;
-        wrapper.className = 'qr--buttons qr--color';
-        wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
-    }
     if (powerEnabled && !powerShell) {
         powerShell = document.createElement('button');
         powerShell.id = CHAT_POWER_BUTTON_ID;
@@ -211,11 +343,29 @@ function ensureChatShortcut(state, rerender, setStatus) {
         modeShell.type = 'button';
         modeShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
     }
-    if (!powerEnabled) powerShell?.remove();
-    else if (powerShell.parentElement !== wrapper) wrapper.appendChild(powerShell);
-    if (!modeEnabled) modeShell?.remove();
-    else if (modeShell.parentElement !== wrapper) wrapper.appendChild(modeShell);
-    if (wrapper.parentElement !== host) host.prepend(wrapper);
+    if (!powerEnabled) {
+        powerShell?.remove();
+        powerWrapper?.remove();
+        powerWrapper = null;
+    } else {
+        if (!powerWrapper) powerWrapper = createChatShortcutWrapper(CHAT_POWER_WRAPPER_ID);
+        if (powerShell.parentElement !== powerWrapper) powerWrapper.appendChild(powerShell);
+        bindQrWrapperProxy(powerWrapper, CHAT_POWER_BUTTON_ID);
+    }
+    if (!modeEnabled) {
+        modeShell?.remove();
+        modeWrapper?.remove();
+        modeWrapper = null;
+    } else {
+        if (!modeWrapper) modeWrapper = createChatShortcutWrapper(CHAT_MODE_WRAPPER_ID);
+        if (modeShell.parentElement !== modeWrapper) modeWrapper.appendChild(modeShell);
+        bindQrWrapperProxy(modeWrapper, CHAT_MODE_BUTTON_ID);
+    }
+    if (modeWrapper?.parentElement !== host) host.prepend(modeWrapper);
+    if (powerWrapper?.parentElement !== host) host.prepend(powerWrapper);
+    syncQrAssistantManagedVisibility(powerWrapper, powerShell, hasQrAssistant);
+    syncQrAssistantManagedVisibility(modeWrapper, modeShell, hasQrAssistant);
+    if (hasQrAssistant) applyQrAssistantRefresh();
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
 }
@@ -224,12 +374,84 @@ function observeChatShortcutHost(state, rerender, setStatus) {
     if (chatShortcutObserver || typeof MutationObserver === 'undefined') return;
     chatShortcutObserver = new MutationObserver(() => {
         if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) return;
-        const wrapper = document.getElementById(CHAT_SHORTCUT_WRAPPER_ID);
+        const powerWrapper = document.getElementById(CHAT_POWER_WRAPPER_ID);
+        const modeWrapper = document.getElementById(CHAT_MODE_WRAPPER_ID);
         const host = getInlineReplyHost();
-        if (!host || wrapper?.parentElement === host) return;
+        if (!host) return;
+        const powerOk = state.shortcuts?.powerEnabled === false || powerWrapper?.parentElement === host;
+        const modeOk = state.shortcuts?.modeEnabled === false || modeWrapper?.parentElement === host;
+        if (powerOk && modeOk) return;
         ensureChatShortcut(state, rerender, setStatus);
     });
     chatShortcutObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function openMainPanel() {
+    $('#kf-main-modal').addClass('kf-show');
+}
+
+function closeExtensionsMenu() {
+    const menu = $('#extensionsMenu');
+    if (!menu.length) return;
+    menu.fadeOut?.(100);
+    menu.hide();
+}
+
+function closeMainPanel() {
+    $('#kf-main-modal').removeClass('kf-show');
+}
+
+function ensureMagicWandEntry() {
+    document.querySelectorAll(`#${MAGIC_WAND_ENTRY_ID}.menu_button`).forEach(node => node.remove());
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu) return false;
+
+    let container = document.getElementById(MAGIC_WAND_CONTAINER_ID);
+    if (!container) {
+        container = document.createElement('div');
+        container.id = MAGIC_WAND_CONTAINER_ID;
+        container.className = 'extension_container';
+    }
+
+    let entry = document.getElementById(MAGIC_WAND_ENTRY_ID);
+    if (!entry) {
+        entry = document.createElement('div');
+        entry.id = MAGIC_WAND_ENTRY_ID;
+        entry.className = 'list-group-item flex-container flexGap5 interactable kf-magic-wand-entry';
+        entry.title = 'API随机临幸';
+        entry.setAttribute('aria-label', '打开 API随机临幸');
+        entry.innerHTML = '<div class="fa-fw fa-solid fa-dice extensionsMenuExtensionButton"></div><span>API随机临幸</span>';
+        entry.addEventListener('click', event => {
+            event.preventDefault();
+            closeExtensionsMenu();
+            openMainPanel();
+        });
+    }
+    if (entry.parentElement !== container) {
+        container.appendChild(entry);
+    }
+    if (container.parentElement !== menu) {
+        menu.appendChild(container);
+    }
+    return true;
+}
+
+function observeMagicWandEntry() {
+    if (magicWandObserver || typeof MutationObserver === 'undefined') return;
+    ensureMagicWandEntry();
+    magicWandObserver = new MutationObserver(mutations => {
+        const relevant = mutations.some(mutation => {
+            const target = mutation.target;
+            if (target?.id === 'extensionsMenu' || target?.id === 'extensionsMenuButton') return true;
+            for (const node of mutation.addedNodes || []) {
+                if (node.nodeType !== 1) continue;
+                if (node.id === 'extensionsMenu' || node.querySelector?.('#extensionsMenu')) return true;
+            }
+            return false;
+        });
+        if (relevant) ensureMagicWandEntry();
+    });
+    magicWandObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function toggleGlobalEnabled(state, setStatus) {
@@ -322,28 +544,64 @@ function bindChatShortcut(state, rerender, setStatus) {
     });
 }
 
-function applyTheme(state) {
+function applyThemeVisual(theme = {}) {
     const root = document.getElementById('kf-root');
     if (!root) return;
-    const theme = state.theme || {};
     const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer')].filter(Boolean);
     for (const target of targets) setThemeVars(target, theme);
     applyBrush(root, theme.brush || 'simple');
+}
 
+function applyTheme(state) {
+    const theme = state.theme || {};
+    applyThemeVisual(theme);
+    populateThemeControls(state);
+    populateSettingsControls(state);
+    updateThemePresetVisibility(state);
+    updateChatShortcut(state);
+}
+
+function populateThemeControls(state) {
+    const theme = state.theme || {};
     $('#kf-theme-bg-main').val(theme.bgMain || '#ffffff');
     $('#kf-theme-bg-sub').val(theme.bgSub || '#f7f9fc');
     $('#kf-theme-underline').val(theme.underline || '#617b9b');
     const resolvedBrush = ['simple', 'native'].includes(theme.brush) ? theme.brush : 'simple';
     $('#kf-theme-brush').val(resolvedBrush);
     $('#kf-theme-preset').val(String(theme.preset || 'default'));
+    updateThemePresetVisibility(state);
+}
+
+function readThemeDraftFromControls() {
+    const brush = String($('#kf-theme-brush').val() || 'simple');
+    return {
+        bgMain: $('#kf-theme-bg-main').val() || '#ffffff',
+        bgSub: $('#kf-theme-bg-sub').val() || '#f7f9fc',
+        underline: $('#kf-theme-underline').val() || '#617b9b',
+        brush: ['simple', 'native'].includes(brush) ? brush : 'simple',
+        preset: String($('#kf-theme-preset').val() || 'default'),
+    };
+}
+
+function previewThemeFromControls() {
+    const draft = readThemeDraftFromControls();
+    $('#kf-theme-preset-row').toggle(draft.brush === 'simple');
+    applyThemeVisual(draft);
+}
+
+function closeThemeModal(state) {
+    closeModal('kf-theme-modal');
+    populateThemeControls(state);
+    applyTheme(state);
+}
+
+function populateSettingsControls(state) {
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-retry-delay').val(toInt(state.failure?.retryDelaySeconds ?? 3));
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
     $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
     $('#kf-shortcut-mode-enabled').prop('checked', state.shortcuts?.modeEnabled !== false);
     $('#kf-shortcut-power-enabled').prop('checked', state.shortcuts?.powerEnabled !== false);
-    updateThemePresetVisibility(state);
-    updateChatShortcut(state);
 }
 
 function mkPool(name = null) {
@@ -830,12 +1088,12 @@ function syncPoolFromControls(state) {
 }
 
 function syncThemeFromControls(state) {
-    state.theme.bgMain = $('#kf-theme-bg-main').val();
-    state.theme.bgSub = $('#kf-theme-bg-sub').val();
-    state.theme.underline = $('#kf-theme-underline').val();
-    const brush = String($('#kf-theme-brush').val() || 'simple');
-    state.theme.brush = ['simple', 'native'].includes(brush) ? brush : 'simple';
-    state.theme.preset = String($('#kf-theme-preset').val() || 'default');
+    const draft = readThemeDraftFromControls();
+    state.theme.bgMain = draft.bgMain;
+    state.theme.bgSub = draft.bgSub;
+    state.theme.underline = draft.underline;
+    state.theme.brush = draft.brush;
+    state.theme.preset = draft.preset;
 }
 
 function applyThemePreset(state, presetKey) {
@@ -859,8 +1117,6 @@ function syncFailureFromControls(state) {
 function syncAllFromControls(state) {
     syncPoolFromControls(state);
     syncAllEntries(state);
-    syncThemeFromControls(state);
-    syncFailureFromControls(state);
 }
 
 function syncActivePoolPresets(state) {
@@ -876,11 +1132,13 @@ function saveThemeFromModal(state, setStatus) {
     setStatus('美化设置已保存');
 }
 
-function saveFailureSettingsFromModal(state, setStatus) {
+function saveFailureSettingsFromModal(state, rerender, setStatus) {
     syncFailureFromControls(state);
     if (toInt(state.failure?.retryDelaySeconds) === 0) {
         showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
     }
+    if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) updateChatShortcut(state);
+    else ensureChatShortcut(state, rerender, setStatus);
     persistNow(state);
     closeModal('kf-settings-modal');
     setStatus('请求设置已保存');
@@ -1836,7 +2094,11 @@ function bind(state, rerender, setStatus) {
         }
     });
 
-    $('#kf-btn-settings').off('click.kf').on('click.kf', () => $('#kf-settings-modal').addClass('kf-show'));
+    $('#kf-btn-settings').off('click.kf').on('click.kf', () => {
+        populateSettingsControls(state);
+        $('#kf-settings-modal').addClass('kf-show');
+    });
+    $('#kf-main-close').off('click.kf').on('click.kf', closeMainPanel);
     $('#kf-btn-import-export').off('click.kf').on('click.kf', () => $('#kf-import-export-modal').addClass('kf-show'));
     $('#kf-import-export-close').off('click.kf').on('click.kf', () => closeModal('kf-import-export-modal'));
     $('#kf-export-current-pool').off('click.kf').on('click.kf', () => {
@@ -1878,11 +2140,15 @@ function bind(state, rerender, setStatus) {
         $(this).addClass('kf-active');
         renderLogs(state, String($(this).data('filter') || 'all'));
     });
-    $('#kf-btn-theme').off('click.kf').on('click.kf', () => $('#kf-theme-modal').addClass('kf-show'));
-    $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeModal('kf-theme-modal'));
+    $('#kf-btn-theme').off('click.kf').on('click.kf', () => {
+        populateThemeControls(state);
+        applyTheme(state);
+        $('#kf-theme-modal').addClass('kf-show');
+    });
+    $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeThemeModal(state));
     $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('kf-settings-modal'));
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
-    $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, setStatus));
+    $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, rerender, setStatus));
     $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('kf-api-test-modal'));
     $('#kf-sequence-confirm').off('click.kf').on('click.kf', () => closeModal('kf-sequence-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
@@ -1898,7 +2164,9 @@ function bind(state, rerender, setStatus) {
         })
         .on('click.kf', function (event) {
             event.stopPropagation();
-            if (event.target === this) $(this).removeClass('kf-show');
+            if (event.target !== this) return;
+            if (this.id === 'kf-theme-modal') closeThemeModal(state);
+            else $(this).removeClass('kf-show');
         });
     $('.kf-modal-overlay .kf-modal-box').not('#kf-failure-modal .kf-modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf click.kf', function (event) {
@@ -1910,32 +2178,24 @@ function bind(state, rerender, setStatus) {
     });
 
     $('#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
-        syncThemeFromControls(state);
-        updateThemePresetVisibility(state);
-        applyTheme(state);
-        persistStructure(state);
+        previewThemeFromControls();
     });
     $('#kf-theme-preset').off('change.kf').on('change.kf', function () {
         const presetKey = String($(this).val() || 'default');
-        applyThemePreset(state, presetKey);
-        applyTheme(state);
-        persistStructure(state);
+        const preset = THEME_PRESETS[presetKey] || THEME_PRESETS.default;
+        $('#kf-theme-bg-main').val(preset.bgMain);
+        $('#kf-theme-bg-sub').val(preset.bgSub);
+        $('#kf-theme-underline').val(preset.underline);
+        previewThemeFromControls();
     });
     $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline').off('input.kf change.kf').on('input.kf change.kf', function () {
-        syncThemeFromControls(state);
-        state.theme.preset = 'default';
         $('#kf-theme-preset').val('default');
-        applyTheme(state);
-        persistStructure(state);
+        previewThemeFromControls();
     });
     $('#kf-failure-retry-count,#kf-failure-retry-delay,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-mode-enabled,#kf-shortcut-power-enabled').off('input.kf change.kf').on('input.kf change.kf', function () {
-        syncFailureFromControls(state);
         if (this.id === 'kf-failure-retry-delay' && toInt($(this).val()) === 0) {
             showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
         }
-        if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) updateChatShortcut(state);
-        else ensureChatShortcut(state, rerender, setStatus);
-        persistStructure(state);
     });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
         const targetId = String($(this).data('stepperTarget') || 'kf-failure-retry-count');
@@ -1974,6 +2234,7 @@ export async function initUI(setStatus) {
     rerender();
     ensureChatShortcut(state, rerender, setStatus);
     observeChatShortcutHost(state, rerender, setStatus);
+    observeMagicWandEntry();
     $(window).off('STKarmaFlip:logs-updated.kf').on('STKarmaFlip:logs-updated.kf', () => {
         if ($('#kf-log-modal').hasClass('kf-show')) renderLogs(state);
     });

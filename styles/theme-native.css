@@ -1,15 +1,18 @@
-#kf-root[data-brush="native"] {
-    --native-border: var(--SmartThemeBorderColor, var(--grey30, rgba(127, 127, 127, 0.35)));
-    --native-panel-bg: var(--SmartThemeBlurTintColor, transparent);
-    --native-hover-bg: var(--black30a, rgba(127, 127, 127, 0.12));
+#kf-root[data-brush="native"],
+.kf-modal-overlay[data-brush="native"],
+.kf-toast-layer[data-brush="native"] {
+    --native-border: var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.3));
     --native-text: var(--SmartThemeBodyColor, inherit);
-    font-family: inherit;
+    --native-accent: var(--SmartThemeQuoteColor, #5aa9ff);
+    --native-element-bg: var(--black30a, rgba(127, 127, 127, 0.15));
+    --native-hover-bg: var(--black50a, rgba(127, 127, 127, 0.25));
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
     color: var(--native-text);
 }
 
 #kf-root[data-brush="native"],
 #kf-root[data-brush="native"] * {
-    font-family: inherit;
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
 }
 
 #kf-root[data-brush="native"] .kf-accent-fill::before,
@@ -18,108 +21,137 @@
 .kf-modal-overlay[data-brush="native"] .kf-accent-fill::after,
 .kf-toast-layer[data-brush="native"] .kf-toast.kf-accent-fill::before,
 .kf-toast-layer[data-brush="native"] .kf-toast.kf-accent-fill::after {
-    display: none;
+    display: none !important;
 }
 
-#kf-root[data-brush="native"] .kf-block {
-    background: transparent;
-    color: inherit;
-    box-shadow: none;
-    border-radius: 0;
-    padding-left: 0;
-    padding-right: 0;
-}
-
-#kf-root[data-brush="native"] .kf-entry-block {
-    background: var(--native-panel-bg) !important;
-    color: inherit;
+#kf-root[data-brush="native"] .kf-block,
+.kf-modal-overlay[data-brush="native"] .kf-modal-box {
+    background-color: var(--SmartThemeBlurTintColor, rgba(32, 32, 32, 0.8)) !important;
+    backdrop-filter: var(--SmartThemeBlur, blur(10px));
+    -webkit-backdrop-filter: var(--SmartThemeBlur, blur(10px));
     border: 1px solid var(--native-border) !important;
-    border-radius: 5px;
-    box-shadow: none;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.25) !important;
+    border-radius: 10px;
+    color: var(--native-text);
 }
 
-#kf-root[data-brush="native"] .kf-title {
+#kf-main-modal[data-brush="native"],
+.kf-modal-overlay[data-brush="native"] {
+    background: rgba(0, 0, 0, 0.5) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+#kf-root[data-brush="native"] .kf-entry-block,
+#kf-root[data-brush="native"] .kf-input-wrapper,
+#kf-root[data-brush="native"] .kf-select-wrapper,
+.kf-modal-overlay[data-brush="native"] .kf-input-wrapper,
+.kf-modal-overlay[data-brush="native"] .kf-stepper-input,
+.kf-modal-overlay[data-brush="native"] select,
+.kf-modal-overlay[data-brush="native"] .kf-test-detail,
+.kf-modal-overlay[data-brush="native"] .kf-mobile-option {
+    background: var(--native-element-bg) !important;
+    border: 1px solid var(--native-border) !important;
+    border-radius: 6px;
+    box-shadow: none !important;
+    color: var(--native-text);
+}
+
+#kf-root[data-brush="native"] .kf-input-wrapper,
+#kf-root[data-brush="native"] .kf-select-wrapper {
+    min-height: 32px;
+    padding: 4px 8px;
+}
+
+#kf-root[data-brush="native"] .kf-input-wrapper:focus-within,
+#kf-root[data-brush="native"] .kf-select-wrapper:focus-within,
+.kf-modal-overlay[data-brush="native"] .kf-input-wrapper:focus-within,
+.kf-modal-overlay[data-brush="native"] .kf-stepper-input:focus,
+.kf-modal-overlay[data-brush="native"] select:focus {
+    border-color: var(--native-accent) !important;
+    box-shadow: 0 0 5px color-mix(in srgb, var(--native-accent) 50%, transparent) !important;
+}
+
+#kf-root[data-brush="native"] .kf-title,
+#kf-root[data-brush="native"] .kf-input-wrapper .kf-label,
+#kf-root[data-brush="native"] .kf-collapse,
+#kf-root[data-brush="native"] .kf-del,
+#kf-root[data-brush="native"] .kf-dropdown-arrow,
+.kf-modal-overlay[data-brush="native"] .kf-input-wrapper .kf-label,
+.kf-modal-overlay[data-brush="native"] .kf-stepper-arrow,
+.kf-modal-overlay[data-brush="native"] .kf-close-btn {
     color: inherit;
 }
 
 #kf-root[data-brush="native"] .kf-title::before,
 #kf-root[data-brush="native"] .kf-title::after {
-    border-top-color: var(--native-border);
-}
-
-#kf-root[data-brush="native"] .kf-input-wrapper,
-#kf-root[data-brush="native"] .kf-select-wrapper {
-    background: var(--native-panel-bg) !important;
-    border: 1px solid var(--native-border) !important;
-    border-radius: 5px;
-    color: inherit;
-    min-height: 32px;
-    padding: 4px 8px;
-}
-
-#kf-root[data-brush="native"] .kf-input-wrapper .kf-label,
-#kf-root[data-brush="native"] .kf-collapse,
-#kf-root[data-brush="native"] .kf-del,
-#kf-root[data-brush="native"] .kf-dropdown-arrow {
-    color: inherit;
-}
-
-#kf-root[data-brush="native"] input,
-#kf-root[data-brush="native"] select,
-#kf-root[data-brush="native"] textarea,
-#kf-root[data-brush="native"] button {
-    font-family: inherit;
-    color: inherit;
-}
-
-#kf-root[data-brush="native"] .kf-inner-input,
-#kf-root[data-brush="native"] .kf-inner-select {
-    appearance: auto !important;
-    -webkit-appearance: auto !important;
-    -moz-appearance: auto !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    color: inherit;
-    font-family: inherit;
-    font-weight: normal;
-    text-align: left;
-}
-
-#kf-root[data-brush="native"] .kf-select-wrapper .kf-inner-select {
-    padding: 0 28px 0 0;
-}
-
-#kf-root[data-brush="native"] .kf-dropdown-arrow,
-#kf-root[data-brush="native"] .kf-eye-btn,
-#kf-root[data-brush="native"] .kf-icon-btn {
-    border-radius: 4px;
-}
-
-#kf-root[data-brush="native"] .kf-input-wrapper:focus-within,
-#kf-root[data-brush="native"] .kf-select-wrapper:focus-within {
-    border-color: var(--SmartThemeQuoteColor, var(--native-border)) !important;
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--SmartThemeQuoteColor, #5aa9ff) 45%, transparent);
+    border-top: 1px solid var(--native-border);
 }
 
 #kf-root[data-brush="native"] .kf-action-btn,
 #kf-root[data-brush="native"] .kf-icon-btn,
-#kf-root[data-brush="native"] .kf-eye-btn {
-    background: var(--native-panel-bg) !important;
+#kf-root[data-brush="native"] .kf-eye-btn,
+.kf-modal-overlay[data-brush="native"] .kf-action-btn,
+.kf-modal-overlay[data-brush="native"] .kf-icon-btn,
+.kf-modal-overlay[data-brush="native"] .kf-eye-btn,
+.kf-modal-overlay[data-brush="native"] .kf-stepper-arrow {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    background: var(--native-element-bg) !important;
     border: 1px solid var(--native-border) !important;
+    border-radius: 6px;
     box-shadow: none !important;
-    border-radius: 5px;
-    color: inherit;
-    min-height: 32px;
-    font-family: inherit;
+    color: var(--native-text) !important;
+    cursor: pointer;
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
     font-weight: normal;
+    min-height: 32px;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 #kf-root[data-brush="native"] .kf-action-btn:hover,
 #kf-root[data-brush="native"] .kf-icon-btn:hover,
 #kf-root[data-brush="native"] .kf-eye-btn:hover,
-#kf-root[data-brush="native"] .kf-mobile-option:hover {
+#kf-root[data-brush="native"] .kf-mobile-option:hover,
+.kf-modal-overlay[data-brush="native"] .kf-action-btn:hover,
+.kf-modal-overlay[data-brush="native"] .kf-icon-btn:hover,
+.kf-modal-overlay[data-brush="native"] .kf-eye-btn:hover,
+.kf-modal-overlay[data-brush="native"] .kf-stepper-arrow:hover,
+.kf-modal-overlay[data-brush="native"] .kf-mobile-option:hover {
     background: var(--native-hover-bg) !important;
+    border-color: var(--native-accent) !important;
+}
+
+#kf-root[data-brush="native"] input,
+#kf-root[data-brush="native"] select,
+#kf-root[data-brush="native"] textarea,
+#kf-root[data-brush="native"] button,
+.kf-modal-overlay[data-brush="native"] input,
+.kf-modal-overlay[data-brush="native"] select,
+.kf-modal-overlay[data-brush="native"] textarea,
+.kf-modal-overlay[data-brush="native"] button {
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
+    color: inherit;
+}
+
+#kf-root[data-brush="native"] .kf-inner-input,
+#kf-root[data-brush="native"] .kf-inner-select,
+.kf-modal-overlay[data-brush="native"] .kf-inner-input,
+.kf-modal-overlay[data-brush="native"] .kf-stepper-input,
+.kf-modal-overlay[data-brush="native"] select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: inherit;
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
+    font-weight: normal;
+}
+
+#kf-root[data-brush="native"] .kf-select-wrapper .kf-inner-select {
+    padding: 0 28px 0 0;
 }
 
 #kf-root[data-brush="native"] .kf-check-box {
@@ -131,98 +163,50 @@
     gap: 6px;
 }
 
-#kf-root[data-brush="native"] .kf-responsive-controls .kf-mode-control,
-#kf-root[data-brush="native"] .kf-entry-enabled-wrap {
-    justify-content: center;
+#kf-root[data-brush="native"] .kf-toggle-chip .kf-check-text {
+    color: var(--native-text);
+    opacity: 0.6;
+    transition: color 0.2s ease, opacity 0.2s ease;
 }
 
-#kf-root[data-brush="native"] .kf-toggle-chip input[type="radio"],
-#kf-root[data-brush="native"] .kf-toggle-chip input[type="checkbox"] {
-    display: inline-block;
-    appearance: auto !important;
-    -webkit-appearance: auto !important;
-    -moz-appearance: auto !important;
-    width: auto;
-    height: auto;
-    margin: 0;
-    accent-color: var(--SmartThemeQuoteColor, currentColor);
+#kf-root[data-brush="native"] .kf-toggle-chip input:checked ~ .kf-check-text {
+    color: var(--native-accent);
+    font-weight: bold;
+    opacity: 1;
 }
 
 #kf-root[data-brush="native"] .kf-toggle-chip input:checked ~ .kf-check-text.kf-accent-fill::after {
     display: none !important;
 }
 
+#kf-root[data-brush="native"] .kf-responsive-controls .kf-mode-control,
+#kf-root[data-brush="native"] .kf-entry-enabled-wrap {
+    justify-content: center;
+}
+
+#kf-root[data-brush="native"] .kf-square-box,
+.kf-modal-overlay[data-brush="native"] .kf-square-box {
+    border-color: var(--native-border) !important;
+    border-radius: 4px;
+}
+
+#kf-root[data-brush="native"] .kf-square-check input:checked + .kf-square-box,
+.kf-modal-overlay[data-brush="native"] .kf-square-check input:checked + .kf-square-box {
+    background: var(--native-accent);
+    border-color: var(--native-accent) !important;
+}
+
 #kf-root[data-brush="native"] .kf-entries-container::-webkit-scrollbar-thumb {
     background: var(--native-border);
 }
 
-.kf-modal-overlay[data-brush="native"] .kf-modal-box,
 .kf-toast-layer[data-brush="native"] .kf-toast {
-    background: var(--SmartThemeBlurTintColor, var(--bg-main, rgba(255, 255, 255, 0.96)));
-    color: var(--SmartThemeBodyColor, var(--text-main, inherit));
-    border: 1px solid var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.35)) !important;
-    box-shadow: var(--SmartThemeShadowColor, 0 10px 25px rgba(0, 0, 0, 0.18));
-    font-family: inherit;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-action-btn,
-.kf-modal-overlay[data-brush="native"] .kf-input-wrapper,
-.kf-modal-overlay[data-brush="native"] .kf-stepper-input,
-.kf-modal-overlay[data-brush="native"] select,
-.kf-modal-overlay[data-brush="native"] .kf-square-box,
-.kf-modal-overlay[data-brush="native"] .kf-test-detail,
-.kf-modal-overlay[data-brush="native"] .kf-mobile-option {
-    border-color: var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.35)) !important;
-    border-radius: 5px;
-    color: inherit;
-    font-family: inherit;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-action-btn {
-    background: var(--SmartThemeBlurTintColor, var(--bg-main, rgba(255, 255, 255, 0.96))) !important;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-input-wrapper {
-    background: var(--SmartThemeBlurTintColor, var(--bg-main, rgba(255, 255, 255, 0.96))) !important;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-input-wrapper .kf-label,
-.kf-modal-overlay[data-brush="native"] .kf-stepper-arrow,
-.kf-modal-overlay[data-brush="native"] .kf-close-btn {
-    color: inherit;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-square-check input:checked + .kf-square-box {
-    background: transparent;
-    transform: none;
-}
-
-.kf-modal-overlay[data-brush="native"] select,
-.kf-modal-overlay[data-brush="native"] input,
-.kf-modal-overlay[data-brush="native"] button {
-    appearance: auto !important;
-    -webkit-appearance: auto !important;
-    -moz-appearance: auto !important;
-    font-family: inherit;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-square-check {
-    width: auto;
-    height: auto;
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-square-check input {
-    display: inline-block;
-    appearance: auto !important;
-    -webkit-appearance: auto !important;
-    -moz-appearance: auto !important;
-    accent-color: var(--SmartThemeQuoteColor, currentColor);
-}
-
-.kf-modal-overlay[data-brush="native"] .kf-square-box {
-    display: none;
-}
-
-.kf-toast-layer[data-brush="native"] .kf-toast {
-    border-radius: 5px;
+    background-color: var(--SmartThemeBlurTintColor, rgba(32, 32, 32, 0.9)) !important;
+    backdrop-filter: var(--SmartThemeBlur, blur(10px));
+    -webkit-backdrop-filter: var(--SmartThemeBlur, blur(10px));
+    border: 1px solid var(--native-border) !important;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    color: var(--native-text);
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
 }

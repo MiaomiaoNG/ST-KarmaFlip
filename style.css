@@ -1,7 +1,7 @@
 #kf-root {
     --accent-fill-rgb: 208, 222, 239;
     --underline-color: #617b9b;
-    --bg-main: #ffffff;
+    --bg-main: ##f8f9fa;
     --bg-sub: #f7f9fc;
     --text-main: #000000;
     --text-sub: #000000;
@@ -14,18 +14,90 @@
     --kf-font-title: clamp(15px, 1.8vw, 17px);
     --kf-font-control: clamp(13px, 1.45vw, 14px);
     --kf-font-modal-title: clamp(15px, 1.7vw, 16px);
+    --kf-font-family: "Microsoft YaHei", sans-serif;
     max-width: 800px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    font-family: "Microsoft YaHei", sans-serif;
+    font-family: var(--kf-font-family);
+}
+
+#kf-extension-root {
+    display: contents;
+}
+
+#kf-main-modal .kf-main-box {
+    width: min(92vw, 860px);
+    max-width: 860px;
+    max-height: min(88vh, 900px);
+    overflow-y: auto;
+}
+
+#kf-main-modal #kf-root {
+    max-width: none;
+    width: 100%;
+}
+
+#kf-main-modal .kf-main-header {
+    position: relative;
+    justify-content: center;
+    align-items: center;
+    margin: -20px -20px 15px -20px;
+    padding: 12px 44px;
+    background-color: var(--bg-sub, #f7f9fc);
+    color: var(--text-sub, #000000);
+    border-radius: 8px 8px 0 0;
+}
+
+#kf-main-modal .kf-main-title {
+    text-align: center;
+}
+
+#kf-main-modal #kf-main-close {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
 }
 
 #kf-root, #kf-root * {
     box-sizing: border-box;
     border: none !important;
     outline: none !important;
+}
+
+#kf-root,
+#kf-root button,
+#kf-root input,
+#kf-root select,
+#kf-root textarea,
+.kf-modal-overlay,
+.kf-modal-overlay button,
+.kf-modal-overlay input,
+.kf-modal-overlay select,
+.kf-modal-overlay textarea,
+.kf-toast-layer,
+.kf-toast-layer .kf-toast {
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif) !important;
+}
+
+#kf-root i,
+#kf-root .fa,
+#kf-root .fa-solid,
+#kf-root .fa-regular,
+#kf-root .fa-fw,
+.kf-modal-overlay i,
+.kf-modal-overlay .fa,
+.kf-modal-overlay .fa-solid,
+.kf-modal-overlay .fa-regular,
+.kf-modal-overlay .fa-fw,
+.kf-toast-layer i,
+.kf-toast-layer .fa,
+.kf-toast-layer .fa-solid,
+.kf-toast-layer .fa-regular,
+.kf-toast-layer .fa-fw {
+    font-family: "Font Awesome 6 Free", "Font Awesome 5 Free", FontAwesome !important;
 }
 
 #kf-chat-toggle-btn .kf-chat-toggle-icon,
@@ -39,8 +111,27 @@
     stroke-linejoin: round;
 }
 
-#kf-chat-toggle-wrapper {
-    display: contents;
+.kf-chat-emperor-icon,
+.kf-chat-lottery-icon {
+    display: block;
+    width: 1.15em;
+    height: 1.15em;
+    stroke: currentColor;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.kf-chat-shortcut-img {
+    display: block;
+    width: 1.15em;
+    height: 1.15em;
+    object-fit: contain;
+}
+
+.kf-chat-shortcut-wrapper.kf-qr-managed-hidden,
+.kf-chat-shortcut-btn.kf-qr-managed-hidden {
+    display: none !important;
 }
 
 #kf-chat-toggle-btn .qr--button-label,
@@ -96,7 +187,7 @@
     color: var(--text-main);
     padding: 12px 15px;
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.18);
     isolation: isolate;
     transition: background-color 0.3s, color 0.3s;
 }
@@ -449,7 +540,7 @@
     color: inherit;
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: "Microsoft YaHei", sans-serif;
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
     font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     line-height: 1.45;
 }
@@ -580,7 +671,7 @@
     padding: 0;
     line-height: 14px;
     font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
-    font-family: Arial, sans-serif;
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
     text-align: center;
     cursor: pointer;
     color: var(--underline-color, #617b9b);
@@ -688,7 +779,7 @@
     color: inherit;
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: Consolas, "Microsoft YaHei", monospace;
+    font-family: var(--kf-font-family, "Microsoft YaHei", sans-serif);
     font-size: var(--kf-font-small, clamp(11px, 1.25vw, 13px));
     line-height: 1.45;
 }

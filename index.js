@@ -29,7 +29,9 @@ const KarmaFlip = (() => {
         ensureStylesheet('st-karmaflip-theme-native', `${extensionFolderPath}styles/theme-native.css`);
 
         const html = await $.get(`${extensionFolderPath}index.html`);
-        $('#extensions_settings').append(html);
+        $('.kf-inline-drawer').remove();
+        $('#kf-extension-root').remove();
+        document.body.insertAdjacentHTML('beforeend', html);
 
         await initUI(setStatus);
         runAfterStartup(() => installRuntimeHook(setStatus));
