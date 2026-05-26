@@ -10,14 +10,15 @@ const CHAT_POWER_WRAPPER_ID = 'kf-chat-power-wrapper';
 const CHAT_MODE_WRAPPER_ID = 'kf-chat-mode-wrapper';
 const CHAT_POWER_BUTTON_ID = 'kf-chat-power-btn';
 const CHAT_MODE_BUTTON_ID = 'kf-chat-mode-btn';
-const QR_ASSISTANT_MANAGED_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID, CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID];
+const QR_ASSISTANT_LEGACY_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID];
+const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID];
+const QR_ASSISTANT_MANAGED_DOM_IDS = [...QR_ASSISTANT_LEGACY_DOM_IDS, ...QR_ASSISTANT_CURRENT_DOM_IDS];
 const MAGIC_WAND_CONTAINER_ID = 'kf-magic-wand-container';
 const MAGIC_WAND_ENTRY_ID = 'kf-magic-wand-entry';
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
 let chatShortcutObserverTarget = null;
-let qrAssistantWhitelistMigrationSaved = false;
 let magicWandObserver = null;
 const THEME_PRESETS = {
     default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
@@ -117,18 +118,6 @@ function getQrAssistantSettings() {
     }
 }
 
-function saveQrAssistantSettingsSoon() {
-    if (qrAssistantWhitelistMigrationSaved) return;
-    qrAssistantWhitelistMigrationSaved = true;
-    try {
-        const ctx = window.SillyTavern?.getContext?.();
-        if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-        else if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
-    } catch (error) {
-        // QR Assistant whitelist migration is best-effort; runtime buttons should stay visible either way.
-    }
-}
-
 function isQrAssistantAvailable() {
     return !!(
         window.quickReplyMenu ||
@@ -171,8 +160,15 @@ function registerQrAssistantShortcuts(state) {
     if (!Array.isArray(window.qrAssistantExtensionApi)) {
         window.qrAssistantExtensionApi = [];
     }
-    window.qrAssistantExtensionApi = window.qrAssistantExtensionApi.filter(item => !QR_ASSISTANT_MANAGED_DOM_IDS.includes(item?.dom_id));
-    for (const entry of enabledQrAssistantButtons(state)) {
+    const enabledButtons = enabledQrAssistantButtons(state);
+    const enabledIds = new Set(enabledButtons.map(entry => entry.dom_id));
+    window.qrAssistantExtensionApi = window.qrAssistantExtensionApi.filter(item => {
+        const domId = item?.dom_id;
+        if (QR_ASSISTANT_LEGACY_DOM_IDS.includes(domId)) return false;
+        if (QR_ASSISTANT_CURRENT_DOM_IDS.includes(domId) && !enabledIds.has(domId)) return false;
+        return true;
+    });
+    for (const entry of enabledButtons) {
         const existing = window.qrAssistantExtensionApi.find(item => item?.dom_id === entry.dom_id);
         if (existing) {
             existing.group_name = entry.group_name;
@@ -185,19 +181,28 @@ function registerQrAssistantShortcuts(state) {
     return true;
 }
 
-function migrateQrAssistantWhitelist(state) {
+function unregisterQrAssistantShortcuts() {
+    if (!Array.isArray(window.qrAssistantExtensionApi)) return;
+    window.qrAssistantExtensionApi = window.qrAssistantExtensionApi.filter(item => !QR_ASSISTANT_MANAGED_DOM_IDS.includes(item?.dom_id));
+    applyQrAssistantRefresh();
+}
+
+function syncQrAssistantWhitelistSession(state) {
     const qrSettings = getQrAssistantSettings();
     if (!Array.isArray(qrSettings?.whitelist)) return false;
     const whitelist = qrSettings.whitelist;
-    const hadLegacy = whitelist.includes(LEGACY_CHAT_SHORTCUT_WRAPPER_ID) || whitelist.includes(LEGACY_CHAT_SHORTCUT_BUTTON_ID);
-    if (!hadLegacy) return false;
+    const hadLegacy = QR_ASSISTANT_LEGACY_DOM_IDS.some(domId => whitelist.includes(domId));
+    const hasCurrent = QR_ASSISTANT_CURRENT_DOM_IDS.some(domId => whitelist.includes(domId));
+    if (!hadLegacy && hasCurrent) return false;
+
     const replacements = enabledQrAssistantButtons(state).map(entry => entry.dom_id);
-    const nextWhitelist = whitelist.filter(domId => domId !== LEGACY_CHAT_SHORTCUT_WRAPPER_ID && domId !== LEGACY_CHAT_SHORTCUT_BUTTON_ID);
+    if (!hadLegacy && !hasCurrent && !replacements.length) return false;
+    const nextWhitelist = whitelist.filter(domId => !QR_ASSISTANT_LEGACY_DOM_IDS.includes(domId));
     for (const domId of replacements) {
         if (!nextWhitelist.includes(domId)) nextWhitelist.push(domId);
     }
+    if (nextWhitelist.length === whitelist.length && nextWhitelist.every((domId, index) => domId === whitelist[index])) return false;
     qrSettings.whitelist = nextWhitelist;
-    saveQrAssistantSettingsSoon();
     applyQrAssistantRefresh();
     return true;
 }
@@ -205,6 +210,9 @@ function migrateQrAssistantWhitelist(state) {
 function isQrAssistantWhitelisted(domId) {
     const qrSettings = getQrAssistantSettings();
     if (!qrSettings || !Array.isArray(qrSettings.whitelist)) return true;
+    const whitelist = qrSettings.whitelist;
+    const hasAnyManaged = QR_ASSISTANT_MANAGED_DOM_IDS.some(id => whitelist.includes(id));
+    if (!hasAnyManaged) return true;
     return qrSettings.whitelist.includes(domId);
 }
 
@@ -217,7 +225,6 @@ function syncQrAssistantManagedVisibility(wrapper, button, hasQrAssistant) {
         wrapper.classList.remove('kf-qr-managed-hidden');
         button?.classList?.remove('kf-qr-managed-hidden');
     }
-    if (hasQrAssistant) applyQrAssistantRefresh();
 }
 
 function updateChatShortcut(state) {
@@ -227,6 +234,7 @@ function updateChatShortcut(state) {
         document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
+        unregisterQrAssistantShortcuts();
         return;
     }
     const pool = getActivePool(state);
@@ -236,12 +244,16 @@ function updateChatShortcut(state) {
     if (!powerEnabled) powerButton.remove();
     if (!modeEnabled) modeButton.remove();
     if (powerButton.length) {
+        powerButton.attr('role', 'button');
+        powerButton.attr('tabindex', '0');
         powerButton.attr('data-enabled', enabled ? 'true' : 'false');
         powerButton.attr('title', enabled ? '点击关闭 KarmaFlip 插件' : '点击开启 KarmaFlip 插件');
         powerButton.attr('aria-label', `KarmaFlip 插件开关，当前${enabled ? '已启用' : '已关闭'}`);
         powerButton.html(emperorIcon());
     }
     if (modeButton.length) {
+        modeButton.attr('role', 'button');
+        modeButton.attr('tabindex', '0');
         modeButton.attr('data-mode', pool.mode === 'random' ? 'random' : 'fixed');
         modeButton.attr('title', `点击切换固定/随机，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}`);
         modeButton.attr('aria-label', `KarmaFlip 模式切换，当前${pool.mode === 'random' ? '随机模式' : '固定模式'}`);
@@ -266,6 +278,21 @@ function bindQrWrapperProxy(wrapper, buttonId) {
         event.stopPropagation();
         document.getElementById(buttonId)?.click();
     });
+}
+
+function bindShortcutActivation(target, action) {
+    target.off('.kfShortcut')
+        .on('click.kfShortcut', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            action(event);
+        })
+        .on('keydown.kfShortcut', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.stopPropagation();
+            action(event);
+        });
 }
 
 function removeNodeIfPresent(node) {
@@ -357,8 +384,7 @@ function svgDataImage(svg, alt) {
 }
 
 function getInlineReplyHost() {
-    return document.querySelector('#qr--bar > .qr--buttons')
-        || document.querySelector('.qr--buttons')
+    return document.querySelector('#qr--bar .qr--buttons')
         || document.querySelector('#qr--bar');
 }
 
@@ -469,11 +495,12 @@ function ensureChatShortcut(state, rerender, setStatus) {
         cleanupLegacyChatShortcutArtifacts();
         document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
+        unregisterQrAssistantShortcuts();
         applyQrAssistantRefresh();
         return;
     }
     const hasQrAssistant = registerQrAssistantShortcuts(state);
-    const whitelistMigrated = hasQrAssistant && migrateQrAssistantWhitelist(state);
+    if (hasQrAssistant) syncQrAssistantWhitelistSession(state);
     const host = getInlineReplyHost();
     if (!host) {
         observeChatShortcutHost(state, rerender, setStatus);
@@ -492,16 +519,18 @@ function ensureChatShortcut(state, rerender, setStatus) {
     let powerShell = document.getElementById(CHAT_POWER_BUTTON_ID);
     let modeShell = document.getElementById(CHAT_MODE_BUTTON_ID);
     if (powerEnabled && !powerShell) {
-        powerShell = document.createElement('button');
+        powerShell = document.createElement('div');
         powerShell.id = CHAT_POWER_BUTTON_ID;
-        powerShell.type = 'button';
         powerShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
+        powerShell.setAttribute('role', 'button');
+        powerShell.tabIndex = 0;
     }
     if (modeEnabled && !modeShell) {
-        modeShell = document.createElement('button');
+        modeShell = document.createElement('div');
         modeShell.id = CHAT_MODE_BUTTON_ID;
-        modeShell.type = 'button';
         modeShell.className = 'remote-ctrl-btn qr--button menu_button interactable kf-chat-shortcut-btn';
+        modeShell.setAttribute('role', 'button');
+        modeShell.tabIndex = 0;
     }
     if (!powerEnabled) {
         powerShell?.remove();
@@ -523,8 +552,8 @@ function ensureChatShortcut(state, rerender, setStatus) {
     }
     if (modeWrapper?.parentElement !== host) host.prepend(modeWrapper);
     if (powerWrapper?.parentElement !== host) host.prepend(powerWrapper);
-    syncQrAssistantManagedVisibility(powerWrapper, powerShell, hasQrAssistant && !whitelistMigrated);
-    syncQrAssistantManagedVisibility(modeWrapper, modeShell, hasQrAssistant && !whitelistMigrated);
+    syncQrAssistantManagedVisibility(powerWrapper, powerShell, hasQrAssistant);
+    syncQrAssistantManagedVisibility(modeWrapper, modeShell, hasQrAssistant);
     cleanupLegacyChatShortcutArtifacts();
     if (hasQrAssistant) applyQrAssistantRefresh();
     bindChatShortcut(state, rerender, setStatus);
@@ -713,14 +742,10 @@ function bindPressHold(area, options = {}) {
 function bindChatShortcut(state, rerender, setStatus) {
     const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
     const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
-    powerButton.off('.kfShortcut').on('click.kfShortcut', function (event) {
-        event.preventDefault();
-        event.stopPropagation();
+    bindShortcutActivation(powerButton, () => {
         toggleGlobalEnabled(state, setStatus);
     });
-    modeButton.off('.kfShortcut').on('click.kfShortcut', function (event) {
-        event.preventDefault();
-        event.stopPropagation();
+    bindShortcutActivation(modeButton, () => {
         const pool = getActivePool(state);
         setPoolMode(state, pool.mode === 'random' ? 'fixed' : 'random', rerender, setStatus);
     });
