@@ -235,6 +235,65 @@ function bindQrWrapperProxy(wrapper, buttonId) {
     });
 }
 
+function removeNodeIfPresent(node) {
+    if (node?.parentNode) node.parentNode.removeChild(node);
+}
+
+function isNullArtifactNode(node) {
+    if (!node) return false;
+    if (node.nodeType === Node.TEXT_NODE) return String(node.textContent || '').trim() === 'null';
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    const text = String(node.textContent || '').trim().toLowerCase();
+    if (text !== 'null') return false;
+    return node.classList?.contains('qr--button')
+        || node.classList?.contains('qr--buttons')
+        || node.classList?.contains('remote-ctrl-btn')
+        || node.classList?.contains('menu_button')
+        || node.classList?.contains('interactable');
+}
+
+function cleanupSiblingNullArtifacts(anchor) {
+    if (!anchor?.parentNode) return;
+    const nearestSibling = (node, direction) => {
+        let cursor = node?.[direction] || null;
+        while (cursor && cursor.nodeType === Node.TEXT_NODE && !String(cursor.textContent || '').trim()) {
+            cursor = cursor[direction];
+        }
+        return cursor;
+    };
+    for (const sibling of [nearestSibling(anchor, 'previousSibling'), nearestSibling(anchor, 'nextSibling')]) {
+        if (isNullArtifactNode(sibling)) removeNodeIfPresent(sibling);
+    }
+}
+
+function cleanupLegacyChatShortcutArtifacts() {
+    document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+    document.getElementById('kf-chat-toggle-btn')?.remove();
+    document.querySelectorAll('#qr--bar [id="kf-chat-toggle-wrapper"], #qr--bar [id="kf-chat-toggle-btn"]').forEach(node => node.remove());
+
+    if (Array.isArray(window.qrAssistantExtensionApi)) {
+        window.qrAssistantExtensionApi = window.qrAssistantExtensionApi.filter(item => item?.dom_id !== LEGACY_CHAT_SHORTCUT_WRAPPER_ID);
+    }
+
+    const qrBar = document.getElementById('qr--bar');
+    if (!qrBar) return;
+    const anchors = [
+        document.getElementById(CHAT_POWER_WRAPPER_ID),
+        document.getElementById(CHAT_MODE_WRAPPER_ID),
+        document.getElementById(CHAT_POWER_BUTTON_ID),
+        document.getElementById(CHAT_MODE_BUTTON_ID),
+    ].filter(Boolean);
+    for (const anchor of anchors) {
+        cleanupSiblingNullArtifacts(anchor);
+        cleanupSiblingNullArtifacts(anchor.parentElement);
+    }
+    qrBar.querySelectorAll('.kf-chat-shortcut-wrapper, .kf-chat-shortcut-btn').forEach(node => {
+        for (const child of Array.from(node.childNodes)) {
+            if (isNullArtifactNode(child)) removeNodeIfPresent(child);
+        }
+    });
+}
+
 function svgDataImage(svg, alt) {
     const compact = String(svg || '').replace(/\s+/g, ' ').trim();
     const encoded = encodeURIComponent(compact)
@@ -303,7 +362,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
     const modeEnabled = state.shortcuts?.modeEnabled !== false;
     const powerEnabled = state.shortcuts?.powerEnabled !== false;
     if (!modeEnabled && !powerEnabled) {
-        document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
+        cleanupLegacyChatShortcutArtifacts();
         document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
         applyQrAssistantRefresh();
@@ -325,8 +384,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
         chatShortcutRetryTimer = null;
     }
 
-    document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
-    document.getElementById('kf-chat-toggle-btn')?.remove();
+    cleanupLegacyChatShortcutArtifacts();
     let powerWrapper = document.getElementById(CHAT_POWER_WRAPPER_ID);
     let modeWrapper = document.getElementById(CHAT_MODE_WRAPPER_ID);
     let powerShell = document.getElementById(CHAT_POWER_BUTTON_ID);
@@ -365,6 +423,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
     if (powerWrapper?.parentElement !== host) host.prepend(powerWrapper);
     syncQrAssistantManagedVisibility(powerWrapper, powerShell, hasQrAssistant);
     syncQrAssistantManagedVisibility(modeWrapper, modeShell, hasQrAssistant);
+    cleanupLegacyChatShortcutArtifacts();
     if (hasQrAssistant) applyQrAssistantRefresh();
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
@@ -374,6 +433,7 @@ function observeChatShortcutHost(state, rerender, setStatus) {
     if (chatShortcutObserver || typeof MutationObserver === 'undefined') return;
     chatShortcutObserver = new MutationObserver(() => {
         if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) return;
+        cleanupLegacyChatShortcutArtifacts();
         const powerWrapper = document.getElementById(CHAT_POWER_WRAPPER_ID);
         const modeWrapper = document.getElementById(CHAT_MODE_WRAPPER_ID);
         const host = getInlineReplyHost();
