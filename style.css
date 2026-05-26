@@ -61,8 +61,15 @@
     transform: translateY(-50%);
 }
 
-#kf-root, #kf-root * {
+#kf-root,
+#kf-root *,
+.kf-modal-overlay,
+.kf-modal-overlay * {
     box-sizing: border-box;
+}
+
+#kf-root,
+#kf-root * {
     border: none !important;
     outline: none !important;
 }
@@ -477,6 +484,11 @@
     backdrop-filter: blur(2px);
 }
 .kf-modal-overlay.kf-show { display: flex; }
+#kf-main-modal {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
 .kf-modal-overlay .kf-modal-box {
     background-color: var(--bg-main, #ffffff);
     color: var(--text-main, #000000);
@@ -902,6 +914,17 @@
 }
 
 @media (max-width: 650px) {
+    #kf-main-modal {
+        justify-content: center !important;
+        align-items: center !important;
+        padding: 8px;
+    }
+    #kf-main-modal .kf-main-box {
+        width: min(94vw, 420px);
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - 16px);
+        margin: 0 auto;
+    }
     #kf-root .kf-responsive-controls { grid-template-columns: repeat(2, 1fr); }
     #kf-root .kf-mode-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     #kf-root .kf-entry-actions-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
