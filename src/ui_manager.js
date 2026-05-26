@@ -118,12 +118,18 @@ function getQrAssistantSettings() {
     }
 }
 
-function isQrAssistantAvailable() {
+function isQrAssistantRuntimePresent() {
     return !!(
         window.quickReplyMenu ||
         Array.isArray(window.qrAssistantExtensionApi) ||
         document.body?.classList?.contains('qra-enabled')
     );
+}
+
+function isQrAssistantEnabled() {
+    const settings = getQrAssistantSettings();
+    if (!settings || typeof settings !== 'object') return false;
+    return settings.enabled !== false;
 }
 
 function applyQrAssistantRefresh() {
@@ -156,7 +162,7 @@ function enabledQrAssistantButtons(state) {
 }
 
 function registerQrAssistantShortcuts(state) {
-    if (!isQrAssistantAvailable()) return false;
+    if (!isQrAssistantRuntimePresent()) return false;
     if (!Array.isArray(window.qrAssistantExtensionApi)) {
         window.qrAssistantExtensionApi = [];
     }
@@ -499,8 +505,9 @@ function ensureChatShortcut(state, rerender, setStatus) {
         applyQrAssistantRefresh();
         return;
     }
-    const hasQrAssistant = registerQrAssistantShortcuts(state);
-    if (hasQrAssistant) syncQrAssistantWhitelistSession(state);
+    const qrAssistantRegistered = registerQrAssistantShortcuts(state);
+    const qrAssistantEnabled = isQrAssistantEnabled();
+    if (qrAssistantEnabled) syncQrAssistantWhitelistSession(state);
     const host = getInlineReplyHost();
     if (!host) {
         observeChatShortcutHost(state, rerender, setStatus);
@@ -552,10 +559,10 @@ function ensureChatShortcut(state, rerender, setStatus) {
     }
     if (modeWrapper?.parentElement !== host) host.prepend(modeWrapper);
     if (powerWrapper?.parentElement !== host) host.prepend(powerWrapper);
-    syncQrAssistantManagedVisibility(powerWrapper, powerShell, hasQrAssistant);
-    syncQrAssistantManagedVisibility(modeWrapper, modeShell, hasQrAssistant);
+    syncQrAssistantManagedVisibility(powerWrapper, powerShell, qrAssistantEnabled);
+    syncQrAssistantManagedVisibility(modeWrapper, modeShell, qrAssistantEnabled);
     cleanupLegacyChatShortcutArtifacts();
-    if (hasQrAssistant) applyQrAssistantRefresh();
+    if (qrAssistantRegistered) applyQrAssistantRefresh();
     bindChatShortcut(state, rerender, setStatus);
     updateChatShortcut(state);
 }
