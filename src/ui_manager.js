@@ -5,7 +5,7 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.1';
+const UPDATE_NOTICE_VERSION = '1.1.0';
 const UPDATE_NOTICE_TEXT = `本次更新内容如下：
 
 1. 修复重试不生效的问题；
@@ -15,7 +15,7 @@ const UPDATE_NOTICE_TEXT = `本次更新内容如下：
 5. 修改了“酒馆原生风格”美化下勾选框不显示的问题；
 6. 加了个更新公告
 
-日期：2026年5月31日`;
+2026年5月31日`;
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
 const CHAT_POWER_WRAPPER_ID = 'kf-chat-power-wrapper';
