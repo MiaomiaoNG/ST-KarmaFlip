@@ -2329,11 +2329,14 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-entry-list').on('click.kf', '.kf-del', function () {
         const pool = getActivePool(state);
-        const id = $(this).closest('.kf-entry-block').data('id');
+        const row = $(this).closest('.kf-entry-block');
+        const id = row.data('id');
         const entry = pool.entries.find(e => e.id === id);
-        if (!entry || !deleteSavedApiEntry(state, entry)) {
-            pool.entries = pool.entries.filter(e => e.id !== id);
+        if (entry) {
+            syncEntryFromRow(entry, row);
+            saveApiPresetIfNamed(state, entry);
         }
+        pool.entries = pool.entries.filter(e => e.id !== id);
         persistStructure(state);
         rerender();
     });
