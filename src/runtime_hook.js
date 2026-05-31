@@ -43,6 +43,10 @@ function warnSlowPath(label, startedAt, threshold) {
     console.warn(`[KarmaFlip] slow path: ${label} ${elapsed.toFixed(1)}ms`);
 }
 
+function retryDebug(stage, detail = {}) {
+    console.debug('[KarmaFlip] retry-debug:', stage, detail);
+}
+
 function context() {
     return window.SillyTavern?.getContext?.() || {};
 }
@@ -241,18 +245,20 @@ function businessErrorMessage(payload) {
 async function responseBusinessFailure(response) {
     const startedAt = nowMs();
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
-    if (contentType.includes('text/event-stream')) return { failed: false, detail: '' };
+    if (contentType.includes('text/event-stream')) return { failed: false, detail: '', reason: 'sse-pass' };
 
     if (!response.ok) {
-        const result = { failed: true, detail: await responseText(response) };
+        const result = { failed: true, detail: await responseText(response), reason: 'http' };
         warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
         return result;
     }
-    if (!contentType.includes('application/json')) return { failed: false, detail: '' };
+    if (!contentType.includes('application/json')) return { failed: false, detail: '', reason: 'non-json' };
     const text = await responseText(response);
     const payload = parseJson(text);
     const message = businessErrorMessage(payload);
-    const result = message ? { failed: true, detail: message || text } : { failed: false, detail: '' };
+    const result = message
+        ? { failed: true, detail: message || text, reason: 'business-json' }
+        : { failed: false, detail: '', reason: 'json-ok' };
     warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
     return result;
 }
@@ -339,8 +345,23 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
     const requestInit = retryIndex === 0 && sameMember(member, pending.member)
         ? init
         : makeRetryInit(init, member);
+    retryDebug('attempt', {
+        traceId: pending.id,
+        retryIndex,
+        mode: picked.detail.mode,
+        apiName: member?.name || '',
+        model: member?.model || '',
+    });
     const response = await originalFetch(input, requestInit);
     const businessFailure = await responseBusinessFailure(response);
+    retryDebug('response-check', {
+        traceId: pending.id,
+        retryIndex,
+        status: response.status,
+        ok: response.ok,
+        reason: businessFailure.reason,
+        failed: businessFailure.failed,
+    });
     if (!businessFailure.failed) {
         markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`);
         queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
@@ -366,12 +387,29 @@ async function runRetryPlan(input, init, pending, onStatus) {
     let lastError = null;
     let currentPicked = pending.picked;
     let currentMember = pending.member;
+    retryDebug('plan-start', {
+        traceId: pending.id,
+        mode: pool.mode,
+        maxFailures,
+        delayMs,
+        alertEnabled,
+        availableCount: availableEntries.length,
+        initialApiName: currentMember?.name || '',
+        initialModel: currentMember?.model || '',
+    });
 
     for (let switchAttempt = 0; switchAttempt < maxSwitches; switchAttempt += 1) {
         if (switchAttempt > 0) {
             currentPicked = chooseRequest(state, pool, blockedIds);
             currentMember = currentPicked?.member;
             if (!currentMember) break;
+            retryDebug('switch-member', {
+                traceId: pending.id,
+                switchAttempt,
+                blockedIds: [...blockedIds],
+                apiName: currentMember?.name || '',
+                model: currentMember?.model || '',
+            });
             queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: true });
             showModelAlert(state, currentMember);
             if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(currentMember)} | ${pending.type}`);
@@ -387,17 +425,27 @@ async function runRetryPlan(input, init, pending, onStatus) {
                 if (isUserAbortError(error, init)) throw error;
                 const count = markRequestFailure(state, currentMember);
                 lastError = error;
+                retryDebug('network-error', {
+                    traceId: pending.id,
+                    retryAttempt,
+                    apiName: currentMember?.name || '',
+                    model: currentMember?.model || '',
+                    count,
+                    error: String(error?.message || error),
+                });
                 queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
             }
         }
 
         if (onlyOneAvailable) {
+            retryDebug('only-one-stop', { traceId: pending.id, apiName: currentMember?.name || '', model: currentMember?.model || '' });
             showRuntimeToast(onlyActiveFailureMessage(), 'error', 4200);
             break;
         }
 
         if (!alertEnabled) {
             blockedIds.add(currentMember.id);
+            retryDebug('auto-switch-after-failures', { traceId: pending.id, blockedIds: [...blockedIds] });
             await wait(delayMs);
             continue;
         }
@@ -414,6 +462,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         if (decision === 'cancel') break;
         if (decision === 'switch') {
             blockedIds.add(currentMember.id);
+            retryDebug('user-switch-after-failures', { traceId: pending.id, blockedIds: [...blockedIds] });
             await wait(delayMs);
             continue;
         }
@@ -440,6 +489,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
             if (nextDecision === 'use-next') {
                 if (pool.mode === 'random') disableMemberByFailure(state, currentMember);
                 blockedIds.add(currentMember.id);
+                retryDebug('user-use-next-after-extra-fail', { traceId: pending.id, blockedIds: [...blockedIds] });
                 await wait(delayMs);
                 continue;
             }
@@ -461,10 +511,17 @@ function bindRetryFetch(onStatus) {
             return originalFetch(input, init);
         }
         const traced = readTraceRequest(init);
-        if (!traced) return originalFetch(input, init);
+        if (!traced) {
+            retryDebug('skip-no-trace', { url: typeof input === 'string' ? input : input?.url });
+            return originalFetch(input, init);
+        }
         cleanupPendingRequests();
         const pending = consumePendingRequest(traced.traceId);
-        if (!pending) return originalFetch(input, traced.init);
+        if (!pending) {
+            retryDebug('skip-missing-pending', { traceId: traced.traceId });
+            return originalFetch(input, traced.init);
+        }
+        retryDebug('trace-matched', { traceId: traced.traceId, type: pending.type });
         return runRetryPlan(input, traced.init, pending, onStatus);
     };
     fetchRetryBound = true;

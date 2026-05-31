@@ -567,6 +567,31 @@ export function patchPoolMode(state, mode) {
     return pool;
 }
 
+export function patchPoolNoConsecutive(state, enabled) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = !!enabled;
+    const pool = getActivePool(source);
+    if (!pool) return null;
+    pool.random = { ...(pool.random || {}), noConsecutive: normalized };
+    cachedState = source;
+    const settings = extensionSettings();
+    const targetState = settings[MODULE_KEY];
+    const syncPool = targetPool => {
+        if (!targetPool) return;
+        targetPool.random = { ...(targetPool.random || {}), noConsecutive: normalized };
+    };
+    if (targetState === source) {
+        const targetPool = Array.isArray(targetState?.pools)
+            ? targetState.pools.find(item => item.id === pool.id)
+            : null;
+        syncPool(targetPool);
+    } else if (targetState && Array.isArray(targetState.pools)) {
+        syncPool(targetState.pools.find(item => item.id === pool.id));
+    }
+    markLightPersistDirty();
+    return pool;
+}
+
 export function patchActivePoolId(state, poolId) {
     const source = state && typeof state === 'object' ? state : loadState();
     const normalized = String(poolId || '');

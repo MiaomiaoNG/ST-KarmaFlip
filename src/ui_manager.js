@@ -1,4 +1,5 @@
-import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { buildFixedSequence, memberIdentity } from './router.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-main-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
@@ -167,22 +168,25 @@ function registerQrAssistantShortcuts(state) {
         window.qrAssistantExtensionApi = [];
     }
     const enabledButtons = enabledQrAssistantButtons(state);
-    const enabledIds = new Set(enabledButtons.map(entry => entry.dom_id));
-    window.qrAssistantExtensionApi = window.qrAssistantExtensionApi.filter(item => {
-        const domId = item?.dom_id;
-        if (QR_ASSISTANT_LEGACY_DOM_IDS.includes(domId)) return false;
-        if (QR_ASSISTANT_CURRENT_DOM_IDS.includes(domId) && !enabledIds.has(domId)) return false;
-        return true;
-    });
-    for (const entry of enabledButtons) {
-        const existing = window.qrAssistantExtensionApi.find(item => item?.dom_id === entry.dom_id);
-        if (existing) {
-            existing.group_name = entry.group_name;
-            existing.button_name = entry.button_name;
-        } else {
-            window.qrAssistantExtensionApi.push({ ...entry });
+    const enabledById = new Map(enabledButtons.map(entry => [entry.dom_id, entry]));
+    const seenCurrentIds = new Set();
+    const registry = [];
+    for (const item of window.qrAssistantExtensionApi) {
+        const domId = String(item?.dom_id || '');
+        if (QR_ASSISTANT_LEGACY_DOM_IDS.includes(domId)) continue;
+        if (QR_ASSISTANT_CURRENT_DOM_IDS.includes(domId)) {
+            const replacement = enabledById.get(domId);
+            if (!replacement || seenCurrentIds.has(domId)) continue;
+            registry.push({ ...replacement });
+            seenCurrentIds.add(domId);
+            continue;
         }
+        registry.push(item);
     }
+    for (const entry of enabledButtons) {
+        if (!seenCurrentIds.has(entry.dom_id)) registry.push({ ...entry });
+    }
+    window.qrAssistantExtensionApi = registry;
     applyQrAssistantRefresh();
     return true;
 }
@@ -343,6 +347,18 @@ function cleanupQrBarNullArtifacts() {
     }
 }
 
+function cleanupQrAssistantNullArtifacts() {
+    const menu = document.getElementById('qr-assistant');
+    if (!menu) return;
+    menu.querySelectorAll('.action-item[data-source="RawDomElement"]').forEach(node => {
+        const domId = String(node.dataset?.domId || '');
+        if (!QR_ASSISTANT_MANAGED_DOM_IDS.includes(domId)) return;
+        const label = String(node.dataset?.label || '').trim().toLowerCase();
+        const text = String(node.textContent || '').trim().toLowerCase();
+        if (label === 'null' || text === 'null') removeNodeIfPresent(node);
+    });
+}
+
 function cleanupLegacyChatShortcutArtifacts() {
     [
         document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID),
@@ -379,6 +395,13 @@ function cleanupLegacyChatShortcutArtifacts() {
             if (isNullArtifactNode(child)) removeNodeIfPresent(child);
         }
     });
+    cleanupQrAssistantNullArtifacts();
+}
+
+function scheduleShortcutArtifactCleanup() {
+    cleanupLegacyChatShortcutArtifacts();
+    window.setTimeout(cleanupLegacyChatShortcutArtifacts, 0);
+    window.setTimeout(cleanupLegacyChatShortcutArtifacts, 300);
 }
 
 function svgDataImage(svg, alt) {
@@ -1049,9 +1072,12 @@ function saveApiPreset(state, entry) {
     if (index < 0) index = state.apiPresets.findIndex(item => String(item.name || '').trim() === name);
     if (index >= 0) {
         preset.id = state.apiPresets[index].id || preset.id;
-        preset.modelOptions = Array.isArray(state.apiPresets[index].modelOptions) ? [...state.apiPresets[index].modelOptions] : [];
+        preset.modelOptions = Array.isArray(entry.modelOptions)
+            ? entry.modelOptions.map(x => String(x)).filter(Boolean)
+            : (Array.isArray(state.apiPresets[index].modelOptions) ? [...state.apiPresets[index].modelOptions] : []);
         state.apiPresets[index] = preset;
     } else {
+        if (Array.isArray(entry.modelOptions)) preset.modelOptions = entry.modelOptions.map(x => String(x)).filter(Boolean);
         state.apiPresets.push(preset);
     }
     entry.presetId = preset.id;
@@ -1328,6 +1354,38 @@ function syncFailureFromControls(state) {
     state.shortcuts.powerEnabled = $('#kf-shortcut-power-enabled').prop('checked');
 }
 
+function readFailureSettingsDraft() {
+    return {
+        retryCount: Math.max(1, toInt($('#kf-failure-retry-count').val() || 3)),
+        retryDelaySeconds: toInt($('#kf-failure-retry-delay').val() ?? 3),
+        alertEnabled: $('#kf-failure-alert-enabled').prop('checked'),
+        modelAlertEnabled: $('#kf-model-alert-enabled').prop('checked'),
+        shortcuts: {
+            modeEnabled: $('#kf-shortcut-mode-enabled').prop('checked'),
+            powerEnabled: $('#kf-shortcut-power-enabled').prop('checked'),
+        },
+    };
+}
+
+function sameFailureSettings(state, draft) {
+    return Math.max(1, toInt(state.failure?.retryCount || 3)) === draft.retryCount
+        && toInt(state.failure?.retryDelaySeconds ?? 3) === draft.retryDelaySeconds
+        && !!state.failure?.alertEnabled === draft.alertEnabled
+        && !!state.failure?.modelAlertEnabled === draft.modelAlertEnabled
+        && (state.shortcuts?.modeEnabled !== false) === draft.shortcuts.modeEnabled
+        && (state.shortcuts?.powerEnabled !== false) === draft.shortcuts.powerEnabled;
+}
+
+function applyFailureSettingsDraft(state, draft) {
+    state.failure.retryCount = draft.retryCount;
+    state.failure.retryDelaySeconds = draft.retryDelaySeconds;
+    state.failure.alertEnabled = draft.alertEnabled;
+    state.failure.modelAlertEnabled = draft.modelAlertEnabled;
+    state.shortcuts = state.shortcuts || {};
+    state.shortcuts.modeEnabled = draft.shortcuts.modeEnabled;
+    state.shortcuts.powerEnabled = draft.shortcuts.powerEnabled;
+}
+
 function syncAllFromControls(state) {
     syncPoolFromControls(state);
     syncAllEntries(state);
@@ -1347,15 +1405,21 @@ function saveThemeFromModal(state, setStatus) {
 }
 
 function saveFailureSettingsFromModal(state, rerender, setStatus) {
-    syncFailureFromControls(state);
+    const draft = readFailureSettingsDraft();
+    const unchanged = sameFailureSettings(state, draft);
+    applyFailureSettingsDraft(state, draft);
     if (toInt(state.failure?.retryDelaySeconds) === 0) {
         showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
     }
-    if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) updateChatShortcut(state);
-    else ensureChatShortcut(state, rerender, setStatus);
-    persistNow(state);
+    if (!unchanged) {
+        if (state.shortcuts?.modeEnabled === false && state.shortcuts?.powerEnabled === false) updateChatShortcut(state);
+        else ensureChatShortcut(state, rerender, setStatus);
+        persistNow(state);
+    } else {
+        scheduleShortcutArtifactCleanup();
+    }
     closeModal('kf-settings-modal');
-    setStatus('请求设置已保存');
+    setStatus(unchanged ? '请求设置未变更' : '请求设置已保存');
 }
 
 function entryReady(entry, mode) {
@@ -1365,34 +1429,6 @@ function entryReady(entry, mode) {
         String(entry.key || '').trim() &&
         String(entry.model || '').trim() &&
         (mode !== 'random' || toInt(entry.weight) > 0);
-}
-
-function buildFixedPreview(entries, avoidConsecutive) {
-    const expanded = [];
-    for (const entry of entries) {
-        const runs = Math.max(1, toInt(entry.fixedRuns || 1));
-        for (let i = 0; i < runs; i += 1) expanded.push(entry);
-    }
-    if (!avoidConsecutive || expanded.length < 2) return expanded;
-    const buckets = entries.map(entry => ({ entry, left: Math.max(1, toInt(entry.fixedRuns || 1)) }));
-    const result = [];
-    let remaining = buckets.reduce((sum, bucket) => sum + bucket.left, 0);
-    while (remaining > 0) {
-        let progressed = false;
-        for (const bucket of buckets) {
-            if (bucket.left <= 0) continue;
-            const last = result[result.length - 1];
-            if (last?.id === bucket.entry.id && buckets.some(item => item.left > 0 && item.entry.id !== bucket.entry.id)) {
-                continue;
-            }
-            result.push(bucket.entry);
-            bucket.left -= 1;
-            remaining -= 1;
-            progressed = true;
-        }
-        if (!progressed) break;
-    }
-    return result;
 }
 
 function sequenceLabel(entry) {
@@ -1413,6 +1449,7 @@ function openSequenceModal(summary, rows) {
 function showSequenceCheck(state) {
     syncAllEntries(state);
     const pool = getActivePool(state);
+    pool.random = { ...(pool.random || {}), noConsecutive: $('#kf-no-streak').prop('checked') };
     const runtime = getRuntimeScope(state);
     const mode = pool.mode === 'random' ? 'random' : 'fixed';
     const entries = (pool.entries || []).filter(entry => entryReady(entry, mode) && !runtime.disabledByFailure?.[entry.id]);
@@ -1422,36 +1459,36 @@ function showSequenceCheck(state) {
         return;
     }
     if (mode === 'fixed') {
-        const sequence = buildFixedPreview(entries, !!pool.random?.noConsecutive);
+        const sequence = buildFixedSequence(entries, !!pool.random?.noConsecutive);
         const cursor = sequence.length ? toInt(runtime.fixedCursor) % sequence.length : 0;
         const preview = sequence.slice(cursor).concat(sequence.slice(0, cursor));
         openSequenceModal(summary, preview.map((entry, index) => `${index + 1}. ${sequenceLabel(entry)}`));
         return;
     }
-    const lastId = runtime.lastPick?.memberId;
+    const lastIdentity = runtime.lastPick?.identity || (runtime.lastPick?.memberId ? `entry:${runtime.lastPick.memberId}` : '');
     const active = entries;
     if (!active.length) {
         openSequenceModal(summary, ['当前可用条目已被失败流程临时停用']);
         return;
     }
+    const noConsecutiveBlocked = new Set();
     let candidates = active.filter(entry => {
-        const onCooldown = toInt(runtime.cooldowns?.[entry.id]) > 0;
-        const streakBlocked = pool.random?.noConsecutive && lastId === entry.id && active.length > 1;
-        return !onCooldown && !streakBlocked;
+        const blocked = pool.random?.noConsecutive && lastIdentity === memberIdentity(entry) && active.length > 1;
+        if (blocked) noConsecutiveBlocked.add(entry.id);
+        return !blocked;
     });
-    if (!candidates.length) {
-        candidates = active.filter(entry => !(pool.random?.noConsecutive && lastId === entry.id && active.length > 1));
-        if (!candidates.length) candidates = active;
-    }
+    if (!candidates.length) candidates = active;
+    let cooldownCandidates = candidates.filter(entry => toInt(runtime.cooldowns?.[entry.id]) <= 0);
+    if (!cooldownCandidates.length) cooldownCandidates = candidates;
     const candidateIds = new Set(candidates.map(entry => entry.id));
-    const usable = candidates.length ? candidates : active;
+    const usableIds = new Set(cooldownCandidates.map(entry => entry.id));
+    const usable = cooldownCandidates.length ? cooldownCandidates : active;
     const total = usable.reduce((sum, entry) => sum + toInt(entry.weight), 0);
     const rows = active.map(entry => {
+        if (noConsecutiveBlocked.has(entry.id)) return `${sequenceLabel(entry)} 详情：因避免连续设置，本轮不参与`;
         const cooldown = toInt(runtime.cooldowns?.[entry.id]);
-        if (cooldown > 0) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合`;
-        const blockedByStreak = pool.random?.noConsecutive && lastId === entry.id && active.length > 1 && !candidateIds.has(entry.id);
-        if (blockedByStreak) return `${sequenceLabel(entry)} 详情：避免连续，本轮暂不参与`;
-        const percent = total > 0 && candidateIds.has(entry.id) ? Math.round((toInt(entry.weight) / total) * 100) : 0;
+        if (cooldown > 0 && candidateIds.has(entry.id) && !usableIds.has(entry.id)) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合`;
+        const percent = total > 0 && usableIds.has(entry.id) ? Math.round((toInt(entry.weight) / total) * 100) : 0;
         return `${sequenceLabel(entry)} 详情：当前概率约 ${percent}%`;
     });
     openSequenceModal(summary, rows);
@@ -1856,7 +1893,7 @@ async function fetchOpenAICompatibleModels(entry) {
         : [];
     if (!models.length) throw new Error('获取模型失败：返回结果没有 data[].id');
     entry.modelOptions = models;
-    if (!entry.model) entry.model = models[0];
+    entry.model = '';
     return models;
 }
 
@@ -2115,8 +2152,7 @@ function bind(state, rerender, setStatus) {
         setPoolMode(state, String($(this).val()), rerender, setStatus);
     });
     $('#kf-no-streak').off('change.kf').on('change.kf', function () {
-        getActivePool(state).random.noConsecutive = $(this).prop('checked');
-        persistStructure(state);
+        patchPoolNoConsecutive(state, $(this).prop('checked'));
         updateChatShortcut(state);
         setStatus('避免连续命中已更新');
     });
@@ -2273,10 +2309,18 @@ function bind(state, rerender, setStatus) {
         if (entry.provider !== 'open' && entry.provider !== 'openai' && entry.provider !== 'deepseek') {
             return setStatus('当前仅支持 OpenAI-compatible 获取模型');
         }
+        entry.model = '';
+        entry.modelOptions = [];
+        row.find('.kf-entry-model').val('');
+        saveApiPreset(state, entry);
+        persistStructure(state);
+        setStatus('正在获取模型，请稍候');
         try {
             const models = await fetchOpenAICompatibleModels(entry);
+            saveApiPreset(state, entry);
+            persistStructure(state);
             rerender();
-            setStatus(`已获取 ${models.length} 个模型`);
+            setStatus(`已获取 ${models.length} 个模型，请重新选择模型`);
         } catch (error) {
             const message = error?.message || '获取模型失败';
             setStatus(message);
