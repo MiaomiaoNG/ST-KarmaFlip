@@ -595,6 +595,16 @@
     content: '暂无可检测条目';
     color: rgba(128, 128, 128, 0.78);
 }
+.kf-modal-overlay .kf-update-notice-box {
+    max-width: 460px;
+}
+.kf-modal-overlay .kf-update-notice-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.65;
+    font-size: var(--kf-font-control, clamp(13px, 1.45vw, 14px));
+    padding: 4px 0 2px;
+}
 .kf-modal-overlay .kf-action-btn {
     background: transparent;
     color: inherit;

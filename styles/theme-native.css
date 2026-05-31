@@ -160,7 +160,31 @@
 }
 
 #kf-root[data-brush="native"] .kf-check-box {
-    display: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--native-border) !important;
+    border-radius: 4px;
+    background: var(--native-element-bg) !important;
+    box-shadow: none !important;
+    color: var(--native-text);
+}
+
+#kf-root[data-brush="native"] .kf-toggle-chip input:checked + .kf-check-box {
+    background: var(--native-accent) !important;
+    border-color: var(--native-accent) !important;
+    color: var(--SmartThemeBlurTintColor, #ffffff);
+}
+
+#kf-root[data-brush="native"] .kf-toggle-chip input:checked + .kf-check-box::after {
+    content: '✓';
+    font-size: var(--kf-font-small);
+    font-weight: bold;
+    line-height: 1;
+    transform: translateY(-1px);
 }
 
 #kf-root[data-brush="native"] .kf-toggle-chip {

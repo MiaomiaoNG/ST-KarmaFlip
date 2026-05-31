@@ -58,6 +58,9 @@ export function getDefaultState() {
             modeEnabled: true,
             powerEnabled: true,
         },
+        ui: {
+            updateNoticeSeenVersion: '',
+        },
         runtime: {},
         logs: [],
     };
@@ -177,6 +180,11 @@ function normalizeState(raw) {
     };
     s.shortcuts.modeEnabled = s.shortcuts.modeEnabled !== false;
     s.shortcuts.powerEnabled = s.shortcuts.powerEnabled !== false;
+    s.ui = {
+        ...getDefaultState().ui,
+        ...(s.ui || {}),
+        updateNoticeSeenVersion: String(s.ui?.updateNoticeSeenVersion || ''),
+    };
     s.logs = [];
     return s;
 }
@@ -319,6 +327,11 @@ function createPersistedState(source) {
             ...(base.shortcuts || {}),
             modeEnabled: base?.shortcuts?.modeEnabled ?? base?.shortcuts?.enabled ?? true,
             powerEnabled: base?.shortcuts?.powerEnabled ?? base?.shortcuts?.enabled ?? true,
+        },
+        ui: {
+            ...getDefaultState().ui,
+            ...(base.ui || {}),
+            updateNoticeSeenVersion: String(base?.ui?.updateNoticeSeenVersion || ''),
         },
     };
     snapshot.shortcuts.modeEnabled = snapshot.shortcuts.modeEnabled !== false;
@@ -607,6 +620,28 @@ export function patchActivePoolId(state, poolId) {
     }
     markLightPersistDirty();
     return pool;
+}
+
+export function patchUpdateNoticeSeenVersion(state, version) {
+    const source = state && typeof state === 'object' ? state : loadState();
+    const normalized = String(version || '');
+    source.ui = { ...(source.ui || {}), updateNoticeSeenVersion: normalized };
+    cachedState = source;
+    const settings = extensionSettings();
+    const targetState = settings[MODULE_KEY];
+    const syncUi = target => {
+        if (!target) return;
+        target.ui = { ...(target.ui || {}), updateNoticeSeenVersion: normalized };
+    };
+    if (targetState === source) {
+        syncUi(targetState);
+    } else if (targetState && typeof targetState === 'object') {
+        syncUi(targetState);
+    } else {
+        settings[MODULE_KEY] = { ...(settings[MODULE_KEY] || {}), ui: { updateNoticeSeenVersion: normalized } };
+    }
+    markLightPersistDirty();
+    return source.ui;
 }
 
 export function patchEntryEnabledState(state, poolId, entryId, enabled) {

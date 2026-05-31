@@ -1,10 +1,21 @@
-import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
+import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity } from './router.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-main-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
+const UPDATE_NOTICE_VERSION = '1.1';
+const UPDATE_NOTICE_TEXT = `本次更新内容如下：
+
+1. 修复重试不生效的问题；
+2. 修复“避免连续”失效的问题；
+3. 修复了快捷方式有“null”字样的问题；
+4. 修复了模型失效后重新拉取还会显示失效模型的问题；
+5. 修改了“酒馆原生风格”美化下勾选框不显示的问题；
+6. 加了个更新公告
+
+日期：2026年5月31日`;
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
 const CHAT_POWER_WRAPPER_ID = 'kf-chat-power-wrapper';
@@ -342,6 +353,13 @@ function cleanupQrBarNullArtifacts() {
     qrBar.querySelectorAll('.qr--button, .qr--buttons, .remote-ctrl-btn, .menu_button, .interactable').forEach(node => {
         if (isNullArtifactNode(node)) removeNodeIfPresent(node);
     });
+    qrBar.querySelectorAll('.qr--buttons').forEach(container => {
+        for (const child of Array.from(container.childNodes)) {
+            if (child.nodeType === Node.TEXT_NODE && String(child.textContent || '').trim().toLowerCase() === 'null') {
+                removeNodeIfPresent(child);
+            }
+        }
+    });
     for (const child of Array.from(qrBar.childNodes)) {
         if (isNullArtifactNode(child)) removeNodeIfPresent(child);
     }
@@ -580,8 +598,8 @@ function ensureChatShortcut(state, rerender, setStatus) {
         if (modeShell.parentElement !== modeWrapper) modeWrapper.appendChild(modeShell);
         bindQrWrapperProxy(modeWrapper, CHAT_MODE_BUTTON_ID);
     }
-    if (modeWrapper?.parentElement !== host) host.prepend(modeWrapper);
-    if (powerWrapper?.parentElement !== host) host.prepend(powerWrapper);
+    if (modeWrapper && modeWrapper.parentElement !== host) host.prepend(modeWrapper);
+    if (powerWrapper && powerWrapper.parentElement !== host) host.prepend(powerWrapper);
     syncQrAssistantManagedVisibility(powerWrapper, powerShell, qrAssistantEnabled);
     syncQrAssistantManagedVisibility(modeWrapper, modeShell, qrAssistantEnabled);
     cleanupLegacyChatShortcutArtifacts();
@@ -627,8 +645,28 @@ function observeChatShortcutHost(state, rerender, setStatus) {
     chatShortcutObserver.observe(target, { childList: true, subtree: true });
 }
 
-function openMainPanel() {
+function shouldShowUpdateNotice(state) {
+    return String(state?.ui?.updateNoticeSeenVersion || '') !== UPDATE_NOTICE_VERSION;
+}
+
+function populateUpdateNotice() {
+    $('#kf-update-notice-body').text(UPDATE_NOTICE_TEXT);
+}
+
+function openUpdateNotice(state) {
+    if (!shouldShowUpdateNotice(state)) return;
+    populateUpdateNotice();
+    $('#kf-update-notice-modal').addClass('kf-show');
+}
+
+function confirmUpdateNotice(state) {
+    patchUpdateNoticeSeenVersion(state, UPDATE_NOTICE_VERSION);
+    closeModal('kf-update-notice-modal');
+}
+
+function openMainPanel(state) {
     $('#kf-main-modal').addClass('kf-show');
+    openUpdateNotice(state);
 }
 
 function closeExtensionsMenu() {
@@ -665,7 +703,7 @@ function ensureMagicWandEntry() {
         entry.addEventListener('click', event => {
             event.preventDefault();
             closeExtensionsMenu();
-            openMainPanel();
+            openMainPanel(loadState());
         });
     }
     if (entry.parentElement !== container) {
@@ -2407,6 +2445,7 @@ function bind(state, rerender, setStatus) {
     $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('kf-settings-modal'));
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
     $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, rerender, setStatus));
+    $('#kf-update-notice-close,#kf-update-notice-confirm').off('click.kf').on('click.kf', () => confirmUpdateNotice(state));
     $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('kf-api-test-modal'));
     $('#kf-sequence-confirm').off('click.kf').on('click.kf', () => closeModal('kf-sequence-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
@@ -2424,6 +2463,7 @@ function bind(state, rerender, setStatus) {
             event.stopPropagation();
             if (event.target !== this) return;
             if (this.id === 'kf-theme-modal') closeThemeModal(state);
+            else if (this.id === 'kf-update-notice-modal') confirmUpdateNotice(state);
             else $(this).removeClass('kf-show');
         });
     $('.kf-modal-overlay .kf-modal-box').not('#kf-failure-modal .kf-modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
