@@ -28,15 +28,40 @@
 }
 
 #kf-main-modal .kf-main-box {
-    width: min(92vw, 860px);
-    max-width: 860px;
-    max-height: min(88vh, 900px);
-    overflow-y: auto;
+    width: clamp(420px, 48vw, 560px);
+    max-width: calc(100vw - 32px);
+    height: 80vh;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 #kf-main-modal #kf-root {
     max-width: none;
     width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#kf-main-modal #kf-root > .kf-block {
+    flex: 0 0 auto;
+}
+
+#kf-main-modal #kf-root > .kf-block:nth-of-type(2) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#kf-main-modal #kf-root > .kf-block:nth-of-type(2) .kf-entries-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
 }
 
 #kf-main-modal .kf-main-header {
@@ -440,6 +465,11 @@
 }
 #kf-root .kf-entry-key-wrap .kf-inner-input {
     padding-right: 4px;
+}
+
+#kf-root .kf-entry-key.kf-key-masked {
+    -webkit-text-security: disc;
+    text-security: disc;
 }
 
 #kf-root .kf-entries-container { max-height: 480px; overflow-y: auto; padding-right: 5px; }
@@ -930,9 +960,10 @@
         padding: 8px;
     }
     #kf-main-modal .kf-main-box {
-        width: min(94vw, 420px);
-        max-height: calc(100vh - 16px);
-        max-height: calc(100dvh - 16px);
+        width: 92vw;
+        max-width: 92vw;
+        height: 80dvh;
+        max-height: 80dvh;
         margin: 0 auto;
     }
     #kf-root .kf-responsive-controls { grid-template-columns: repeat(2, 1fr); }

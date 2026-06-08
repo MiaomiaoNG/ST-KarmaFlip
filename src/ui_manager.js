@@ -1240,7 +1240,7 @@ function renderEntries(state) {
                 <div class="kf-row kf-entry-details">
                     <div class="kf-input-wrapper kf-flex-1 kf-entry-key-wrap">
                         <span class="kf-label">KEY</span>
-                        <input type="password" class="kf-inner-input kf-entry-key" value="${esc(entry.key)}">
+                        <input type="text" class="kf-inner-input kf-entry-key kf-key-masked" value="${esc(entry.key)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
                         <button class="kf-eye-btn kf-key-eye" type="button" aria-label="显示 KEY" title="显示 KEY">
                             <i class="fa-regular fa-eye"></i>
                         </button>
@@ -2309,8 +2309,8 @@ function bind(state, rerender, setStatus) {
         event.stopPropagation();
         const button = $(this);
         const input = button.closest('.kf-input-wrapper').find('.kf-entry-key');
-        const reveal = input.attr('type') === 'password';
-        input.attr('type', reveal ? 'text' : 'password');
+        const reveal = input.hasClass('kf-key-masked');
+        input.toggleClass('kf-key-masked', !reveal);
         button.attr('aria-label', reveal ? '隐藏 KEY' : '显示 KEY');
         button.attr('title', reveal ? '隐藏 KEY' : '显示 KEY');
         button.html(`<i class="fa-regular ${reveal ? 'fa-eye-slash' : 'fa-eye'}"></i>`);
