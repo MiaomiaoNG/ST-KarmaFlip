@@ -32,6 +32,8 @@ let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
 let chatShortcutObserverTarget = null;
 let magicWandObserver = null;
+let mainPanelBaseHeight = 0;
+let keyboardEditReleaseTimer = null;
 const THEME_PRESETS = {
     default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
     'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
@@ -665,7 +667,9 @@ function confirmUpdateNotice(state) {
 }
 
 function openMainPanel(state) {
+    resetMainPanelKeyboardLock();
     $('#kf-main-modal').addClass('kf-show');
+    rememberMainPanelBaseHeight();
     openUpdateNotice(state);
 }
 
@@ -677,6 +681,7 @@ function closeExtensionsMenu() {
 }
 
 function closeMainPanel() {
+    resetMainPanelKeyboardLock();
     $('#kf-main-modal').removeClass('kf-show');
 }
 
@@ -1240,7 +1245,7 @@ function renderEntries(state) {
                 <div class="kf-row kf-entry-details">
                     <div class="kf-input-wrapper kf-flex-1 kf-entry-key-wrap">
                         <span class="kf-label">KEY</span>
-                        <input type="text" class="kf-inner-input kf-entry-key kf-key-masked" value="${esc(entry.key)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <input type="text" class="kf-inner-input kf-entry-key kf-key-masked" value="${esc(entry.key)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="latin" enterkeyhint="done" lang="en">
                         <button class="kf-eye-btn kf-key-eye" type="button" aria-label="显示 KEY" title="显示 KEY">
                             <i class="fa-regular fa-eye"></i>
                         </button>
@@ -1345,6 +1350,84 @@ function syncEntryFromRow(entry, row) {
     entry.pityTurns = toInt(row.find('.kf-entry-pity').val());
     entry.cooldownTurns = toInt(row.find('.kf-entry-cooldown').val());
     entry.collapsed = row.hasClass('kf-collapsed');
+}
+
+function setKeyMaskState(input, masked) {
+    const keyInput = $(input);
+    keyInput.toggleClass('kf-key-masked', !!masked);
+    const button = keyInput.closest('.kf-input-wrapper').find('.kf-key-eye');
+    button.attr('aria-label', masked ? '显示 KEY' : '隐藏 KEY');
+    button.attr('title', masked ? '显示 KEY' : '隐藏 KEY');
+    button.html(`<i class="fa-regular ${masked ? 'fa-eye' : 'fa-eye-slash'}"></i>`);
+}
+
+function rememberMainPanelBaseHeight() {
+    window.setTimeout(() => {
+        const box = document.querySelector('#kf-main-modal .kf-main-box');
+        if (!box) return;
+        const height = Math.round(box.getBoundingClientRect().height);
+        if (height > 0) mainPanelBaseHeight = height;
+    }, 0);
+}
+
+function resetMainPanelKeyboardLock() {
+    if (keyboardEditReleaseTimer) {
+        window.clearTimeout(keyboardEditReleaseTimer);
+        keyboardEditReleaseTimer = null;
+    }
+    mainPanelBaseHeight = 0;
+    const box = document.querySelector('#kf-main-modal .kf-main-box');
+    if (!box) return;
+    box.style.removeProperty('--kf-keyboard-lock-height');
+    box.classList.remove('kf-keyboard-editing');
+}
+
+function lockMainPanelForKeyboard() {
+    if (keyboardEditReleaseTimer) {
+        window.clearTimeout(keyboardEditReleaseTimer);
+        keyboardEditReleaseTimer = null;
+    }
+    const box = document.querySelector('#kf-main-modal .kf-main-box');
+    if (!box) return;
+    const currentHeight = Math.round(box.getBoundingClientRect().height);
+    if (!mainPanelBaseHeight && currentHeight > 0) mainPanelBaseHeight = currentHeight;
+    const lockedHeight = Math.max(mainPanelBaseHeight || currentHeight || 0, currentHeight || 0);
+    if (lockedHeight > 0) {
+        box.style.setProperty('--kf-keyboard-lock-height', `${lockedHeight}px`);
+        box.classList.add('kf-keyboard-editing');
+    }
+}
+
+function releaseMainPanelKeyboardLockSoon() {
+    if (keyboardEditReleaseTimer) window.clearTimeout(keyboardEditReleaseTimer);
+    keyboardEditReleaseTimer = window.setTimeout(() => {
+        const active = document.activeElement;
+        if (active?.closest?.('#kf-main-modal input, #kf-main-modal textarea, #kf-main-modal select')) return;
+        const box = document.querySelector('#kf-main-modal .kf-main-box');
+        if (box) {
+            box.style.removeProperty('--kf-keyboard-lock-height');
+            box.classList.remove('kf-keyboard-editing');
+        }
+        keyboardEditReleaseTimer = null;
+        rememberMainPanelBaseHeight();
+    }, 260);
+}
+
+function scrollEntryIntoKeyboardView(input) {
+    const entry = input?.closest?.('.kf-entry-block') || input;
+    const scroller = document.getElementById('kf-entry-list');
+    if (!entry || !scroller) return;
+    window.setTimeout(() => {
+        const entryRect = entry.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        if (!entryRect.height || !scrollerRect.height) return;
+        const entryCenter = entryRect.top + entryRect.height / 2;
+        const targetCenter = scrollerRect.top + scrollerRect.height * 0.5;
+        scroller.scrollTo({
+            top: scroller.scrollTop + entryCenter - targetCenter,
+            behavior: 'smooth',
+        });
+    }, 320);
 }
 
 function syncAllEntries(state) {
@@ -1669,6 +1752,7 @@ async function importFromFile(state, file, rerender, setStatus) {
 }
 
 function closeModal(id) {
+    if (id === 'kf-main-modal') resetMainPanelKeyboardLock();
     $(`#${id}`).removeClass('kf-show');
 }
 
@@ -2249,6 +2333,19 @@ function bind(state, rerender, setStatus) {
         syncEntryFromRow(entry, row);
         persistStructure(state);
     });
+    $('#kf-entry-list').on('focusin.kf', '.kf-entry-key', function () {
+        setKeyMaskState(this, false);
+    });
+    $('#kf-entry-list').on('focusout.kf', '.kf-entry-key', function () {
+        setKeyMaskState(this, true);
+    });
+    $('#kf-entry-list').on('focusin.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
+        lockMainPanelForKeyboard();
+        scrollEntryIntoKeyboardView(this);
+    });
+    $('#kf-entry-list').on('focusout.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
+        releaseMainPanelKeyboardLockSoon();
+    });
     $('#kf-entry-list').on('change.kf', '.kf-entry-enabled', function () {
         const pool = getActivePool(state);
         const row = $(this).closest('.kf-entry-block');
@@ -2310,10 +2407,7 @@ function bind(state, rerender, setStatus) {
         const button = $(this);
         const input = button.closest('.kf-input-wrapper').find('.kf-entry-key');
         const reveal = input.hasClass('kf-key-masked');
-        input.toggleClass('kf-key-masked', !reveal);
-        button.attr('aria-label', reveal ? '隐藏 KEY' : '显示 KEY');
-        button.attr('title', reveal ? '隐藏 KEY' : '显示 KEY');
-        button.html(`<i class="fa-regular ${reveal ? 'fa-eye-slash' : 'fa-eye'}"></i>`);
+        setKeyMaskState(input, !reveal);
     });
     $('#kf-entry-list').on('click.kf', '.kf-collapse', function (event) {
         event.preventDefault();

@@ -30,11 +30,16 @@
 #kf-main-modal .kf-main-box {
     width: clamp(420px, 48vw, 560px);
     max-width: calc(100vw - 32px);
-    height: 80vh;
-    max-height: 80vh;
+    height: 85vh;
+    max-height: 85vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+#kf-main-modal .kf-main-box.kf-keyboard-editing {
+    height: var(--kf-keyboard-lock-height, 85vh);
+    max-height: var(--kf-keyboard-lock-height, 85vh);
 }
 
 #kf-main-modal #kf-root {
@@ -962,8 +967,8 @@
     #kf-main-modal .kf-main-box {
         width: 92vw;
         max-width: 92vw;
-        height: 80dvh;
-        max-height: 80dvh;
+        height: 85dvh;
+        max-height: 85dvh;
         margin: 0 auto;
     }
     #kf-root .kf-responsive-controls { grid-template-columns: repeat(2, 1fr); }
