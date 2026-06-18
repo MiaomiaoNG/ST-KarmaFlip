@@ -95,6 +95,13 @@ function isMeaningfulApiEntry(entry) {
     ].some(value => String(value || '').trim());
 }
 
+function normalizeProvider(provider) {
+    const value = String(provider || 'open').trim().toLowerCase();
+    if (value === 'openai' || value === 'deepseek') return 'open';
+    if (value === 'gemini' || value === 'claude') return value;
+    return 'open';
+}
+
 function normalizeEntry(entry) {
     const e = entry || {};
     return {
@@ -104,7 +111,7 @@ function normalizeEntry(entry) {
         name: isPlaceholderApiName(e.name) ? '' : String(e.name || ''),
         apiUrl: String(e.apiUrl || e.url || ''),
         key: String(e.key || ''),
-        provider: String(e.provider || 'open'),
+        provider: normalizeProvider(e.provider),
         model: String(e.model || ''),
         fixedRuns: Math.max(1, toInt(e.fixedRuns || 1)),
         weight: toInt(e.weight || 0),
@@ -204,12 +211,14 @@ function hasLegacyStateData(raw) {
     if (hasOwn(raw, 'logs')) return true;
     if (hasOwn(raw, 'runtime')) return true;
     if (hasOwn(raw?.theme, 'blur')) return true;
+    const hasLegacyProvider = entry => ['openai', 'deepseek'].includes(String(entry?.provider || '').trim().toLowerCase());
     const pools = Array.isArray(raw.pools) ? raw.pools : [];
     if (pools.some(pool =>
         hasOwn(pool, 'enabled') ||
-        (Array.isArray(pool?.entries) && pool.entries.some(entry => hasOwn(entry, 'modelOptions')))
+        (Array.isArray(pool?.entries) && pool.entries.some(entry => hasOwn(entry, 'modelOptions') || hasLegacyProvider(entry)))
     )) return true;
     const presets = Array.isArray(raw.apiPresets) ? raw.apiPresets : [];
+    if (presets.some(hasLegacyProvider)) return true;
     if (presets.some(preset => hasOwn(preset, 'modelOptions'))) return true;
     return false;
 }

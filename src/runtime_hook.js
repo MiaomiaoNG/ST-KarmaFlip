@@ -32,6 +32,21 @@ function normalizeBaseUrl(apiUrl) {
     return String(apiUrl || '').trim().replace(/\/+$/, '');
 }
 
+function providerBaseUrl(apiUrl, provider) {
+    const baseUrl = normalizeBaseUrl(apiUrl);
+    if (String(provider || '').trim().toLowerCase() === 'gemini') {
+        return baseUrl.replace(/\/v1(?:beta)?$/i, '');
+    }
+    return baseUrl;
+}
+
+function providerSource(provider) {
+    const value = String(provider || 'open').trim().toLowerCase();
+    if (value === 'gemini') return 'makersuite';
+    if (value === 'claude') return 'claude';
+    return 'openai';
+}
+
 function nowMs() {
     if (typeof performance?.now === 'function') return performance.now();
     return Date.now();
@@ -109,10 +124,13 @@ function isGenerateFetch(input) {
 }
 
 function patchGenerateData(generateData, member) {
-    generateData.chat_completion_source = 'openai';
-    generateData.reverse_proxy = normalizeBaseUrl(member.apiUrl);
+    const source = providerSource(member.provider);
+    generateData.chat_completion_source = source;
+    generateData.reverse_proxy = providerBaseUrl(member.apiUrl, member.provider);
     generateData.proxy_password = member.key;
     generateData.model = member.model;
+    if (source === 'makersuite') generateData.google_model = member.model;
+    if (source === 'claude') generateData.claude_model = member.model;
 }
 
 function patchBodyForMember(body, member) {

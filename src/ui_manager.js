@@ -5,9 +5,16 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.1.0';
-const UPDATE_NOTICE_TEXT = `本次更新内容如下：
+const UPDATE_NOTICE_VERSION = '1.1.1';
+const UPDATE_NOTICE_TEXT = `更新内容如下：
 
+1. OpenAI 官方、DeepSeek 官方 统一迁移为 OpenAI 兼容；
+2. 连通Gemini、Claude官方接口；
+3. 输入Key时不再调用密码键盘，减少键盘弹出时主面板整体折叠，输入项失焦后延迟释放高度锁定；
+
+2026年6月18日
+
+==============
 1. 修复重试不生效的问题；
 2. 修复“避免连续”失效的问题；
 3. 修复了快捷方式有“null”字样的问题；
@@ -41,6 +48,13 @@ const THEME_PRESETS = {
     'night-fir': { bgMain: '#1b211d', bgSub: '#242c26', underline: '#688e73' },
     'soft-dark': { bgMain: '#141414', bgSub: '#1f1f1f', underline: '#666666' },
 };
+
+function normalizeProvider(provider) {
+    const value = String(provider || 'open').trim().toLowerCase();
+    if (value === 'openai' || value === 'deepseek') return 'open';
+    if (value === 'gemini' || value === 'claude') return value;
+    return 'open';
+}
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -911,7 +925,7 @@ function cloneEntry(entry) {
         name: String(entry?.name || ''),
         apiUrl: String(entry?.apiUrl || entry?.url || ''),
         key: String(entry?.key || ''),
-        provider: String(entry?.provider || 'open'),
+        provider: normalizeProvider(entry?.provider),
         model: String(entry?.model || ''),
         fixedRuns: Math.max(1, toInt(entry?.fixedRuns || 1)),
         weight: toInt(entry?.weight || 0),
@@ -1072,7 +1086,7 @@ function applyEntryPreset(target, preset) {
     target.name = preset.name || target.name;
     target.apiUrl = preset.apiUrl || '';
     target.key = preset.key || '';
-    target.provider = preset.provider || 'open';
+    target.provider = normalizeProvider(preset.provider);
     target.model = preset.model || '';
     target.modelOptions = Array.isArray(preset.modelOptions) ? [...preset.modelOptions] : [];
 }
@@ -1085,7 +1099,7 @@ function copyEntryForPreset(entry) {
         name: String(entry.name || ''),
         apiUrl: String(entry.apiUrl || ''),
         key: String(entry.key || ''),
-        provider: String(entry.provider || 'open'),
+        provider: normalizeProvider(entry.provider),
         model: String(entry.model || ''),
     };
 }
@@ -1096,7 +1110,7 @@ function copyPresetForImport(entry) {
         name: String(entry?.name || ''),
         apiUrl: String(entry?.apiUrl || entry?.url || ''),
         key: String(entry?.key || ''),
-        provider: String(entry?.provider || 'open'),
+        provider: normalizeProvider(entry?.provider),
         model: String(entry?.model || ''),
         modelOptions: Array.isArray(entry?.modelOptions) ? entry.modelOptions.map(x => String(x)).filter(Boolean) : [],
     });
@@ -1143,14 +1157,14 @@ function renderPool(state) {
 function providerSelect(entry) {
     const options = [
         ['open', 'OpenAI 兼容'],
-        ['openai', 'Open AI 官方'],
         ['gemini', 'Gemini 官方'],
-        ['deepseek', 'Deepseek官方'],
+        ['claude', 'Claude 官方'],
     ];
-    const selected = options.find(([value]) => value === entry.provider)?.[1] || options[0][1];
+    const provider = normalizeProvider(entry.provider);
+    const selected = options.find(([value]) => value === provider)?.[1] || options[0][1];
     return `
         <div class="kf-select-wrapper kf-provider-wrapper kf-two-strokes kf-accent-fill kf-flex-3">
-            <input type="text" class="kf-inner-select kf-dropdown-input kf-entry-provider-display" value="${esc(selected)}" data-provider="${esc(entry.provider || 'open')}" readonly>
+            <input type="text" class="kf-inner-select kf-dropdown-input kf-entry-provider-display" value="${esc(selected)}" data-provider="${esc(provider)}" readonly>
             <button class="kf-dropdown-arrow kf-entry-provider-arrow" type="button">▼</button>
         </div>
     `;
@@ -1159,9 +1173,8 @@ function providerSelect(entry) {
 function providerOptions() {
     return [
         { value: 'open', label: 'OpenAI 兼容' },
-        { value: 'openai', label: 'Open AI 官方' },
         { value: 'gemini', label: 'Gemini 官方' },
-        { value: 'deepseek', label: 'Deepseek官方' },
+        { value: 'claude', label: 'Claude 官方' },
     ];
 }
 
@@ -1226,6 +1239,7 @@ function renderEntries(state) {
         const modelHasOptions = getModelOptions(entry).some(model => model !== entry.model);
         const nameArrow = nameHasOptions ? '<button class="kf-dropdown-arrow kf-entry-name-arrow" type="button">▼</button>' : '';
         const modelArrow = modelHasOptions ? '<button class="kf-dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
+        const urlPlaceholder = providerUrlPlaceholder(entry.provider);
         root.append(`
             <div class="kf-entry-block${collapsedClass}" data-id="${esc(entry.id)}">
                 <div class="kf-row kf-entry-row-top">
@@ -1239,7 +1253,7 @@ function renderEntries(state) {
                     <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
                 </div>
                 <div class="kf-row kf-entry-details">
-                    <div class="kf-input-wrapper kf-flex-7"><span class="kf-label">URL</span><input type="text" class="kf-inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="https://api.openai.com/v1"></div>
+                    <div class="kf-input-wrapper kf-flex-7"><span class="kf-label">URL</span><input type="text" class="kf-inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="${esc(urlPlaceholder)}"></div>
                     ${providerSelect(entry)}
                 </div>
                 <div class="kf-row kf-entry-details">
@@ -1341,7 +1355,7 @@ function syncEntryFromRow(entry, row) {
     entry.enabled = row.find('.kf-entry-enabled').prop('checked');
     entry.name = String(row.find('.kf-entry-name').val() || '');
     if (!entry.presetId && previousName && previousName !== String(entry.name || '').trim()) entry._previousPresetName = previousName;
-    entry.provider = String(row.find('.kf-entry-provider-display').data('provider') || 'open');
+    entry.provider = normalizeProvider(row.find('.kf-entry-provider-display').data('provider'));
     entry.apiUrl = String(row.find('.kf-entry-url').val() || '');
     entry.key = String(row.find('.kf-entry-key').val() || '');
     entry.model = String(row.find('.kf-entry-model').val() || '');
@@ -1986,34 +2000,105 @@ function normalizeBaseUrl(apiUrl) {
     return String(apiUrl || '').trim().replace(/\/+$/, '');
 }
 
-async function fetchOpenAICompatibleModels(entry) {
-    if (!entry.apiUrl) throw new Error('请先填写 URL');
-    if (!entry.key) throw new Error('请先填写 KEY');
+function providerBaseUrl(apiUrl, provider) {
+    const baseUrl = normalizeBaseUrl(apiUrl);
+    if (normalizeProvider(provider) === 'gemini') {
+        return baseUrl.replace(/\/v1(?:beta)?$/i, '');
+    }
+    return baseUrl;
+}
+
+function chatCompletionSource(provider) {
+    const normalized = normalizeProvider(provider);
+    if (normalized === 'gemini') return 'makersuite';
+    if (normalized === 'claude') return 'claude';
+    return 'openai';
+}
+
+function providerLabel(provider) {
+    const normalized = normalizeProvider(provider);
+    if (normalized === 'gemini') return 'Gemini 官方';
+    if (normalized === 'claude') return 'Claude 官方';
+    return 'OpenAI 兼容';
+}
+
+function providerUrlPlaceholder(provider) {
+    const normalized = normalizeProvider(provider);
+    if (normalized === 'gemini') return 'https://generativelanguage.googleapis.com';
+    if (normalized === 'claude') return 'https://api.anthropic.com/v1';
+    return 'https://api.openai.com/v1';
+}
+
+function buildStatusPayload(entry) {
+    const source = chatCompletionSource(entry.provider);
+    const payload = {
+        chat_completion_source: source,
+        reverse_proxy: providerBaseUrl(entry.apiUrl, entry.provider),
+        proxy_password: entry.key,
+        model: entry.model || '',
+    };
+    if (source === 'makersuite') payload.google_model = entry.model || '';
+    if (source === 'claude') payload.claude_model = entry.model || '';
+    return payload;
+}
+
+function buildTestGeneratePayload(entry) {
+    const source = chatCompletionSource(entry.provider);
+    const payload = {
+        chat_completion_source: source,
+        reverse_proxy: providerBaseUrl(entry.apiUrl, entry.provider),
+        proxy_password: entry.key,
+        model: entry.model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false,
+        quiet: true,
+    };
+    if (source === 'makersuite') payload.google_model = entry.model;
+    if (source === 'claude') payload.claude_model = entry.model;
+    return payload;
+}
+
+function requestHeaders() {
     const context = window.SillyTavern?.getContext?.() || {};
-    const requestHeaders = typeof context.getRequestHeaders === 'function'
+    return typeof context.getRequestHeaders === 'function'
         ? context.getRequestHeaders()
         : { 'Content-Type': 'application/json' };
-    const response = await fetch('/api/backends/chat-completions/status', {
+}
+
+async function postChatBackend(path, payload) {
+    return fetch(path, {
         method: 'POST',
         headers: {
-            ...requestHeaders,
+            ...requestHeaders(),
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            chat_completion_source: 'openai',
-            reverse_proxy: normalizeBaseUrl(entry.apiUrl),
-            proxy_password: entry.key,
-        }),
+        body: JSON.stringify(payload),
     });
+}
+
+function modelsFromStatusPayload(payload) {
+    if (Array.isArray(payload?.data)) {
+        return payload.data.map(item => String(item?.id || item?.name || '')).filter(Boolean);
+    }
+    if (Array.isArray(payload)) {
+        return payload.map(item => String(item?.id || item?.name || item || '')).filter(Boolean);
+    }
+    return [];
+}
+
+async function fetchProviderModels(entry) {
+    if (!entry.apiUrl) throw new Error('请先填写 URL');
+    if (!entry.key) throw new Error('请先填写 KEY');
+    if (normalizeProvider(entry.provider) === 'claude') throw new Error('Claude 官方暂不支持拉取模型，请手动填写模型');
+    const response = await postChatBackend('/api/backends/chat-completions/status', buildStatusPayload(entry));
     if (!response.ok) {
         throw new Error(`获取模型失败：HTTP ${response.status}`);
     }
     const payload = await response.json();
     if (payload?.error) throw new Error('获取模型失败：接口返回错误');
-    const models = Array.isArray(payload?.data)
-        ? payload.data.map(item => String(item?.id || '')).filter(Boolean)
-        : [];
-    if (!models.length) throw new Error('获取模型失败：返回结果没有 data[].id');
+    const models = modelsFromStatusPayload(payload);
+    if (!models.length) throw new Error('获取模型失败：返回结果没有模型列表');
     entry.modelOptions = models;
     entry.model = '';
     return models;
@@ -2055,28 +2140,10 @@ function statusFailureMessage(payload, rawBody) {
     return '';
 }
 
-async function testOpenAICompatibleEntry(entry) {
+async function testStatusEntry(entry) {
     if (!entry.apiUrl) throw new Error('请先填写 URL');
     if (!entry.key) throw new Error('请先填写 KEY');
-    if (!['open', 'openai', 'deepseek'].includes(entry.provider || 'open')) {
-        throw new Error(`暂不支持接口类型：${entry.provider || 'unknown'}`);
-    }
-    const context = window.SillyTavern?.getContext?.() || {};
-    const requestHeaders = typeof context.getRequestHeaders === 'function'
-        ? context.getRequestHeaders()
-        : { 'Content-Type': 'application/json' };
-    const response = await fetch('/api/backends/chat-completions/status', {
-        method: 'POST',
-        headers: {
-            ...requestHeaders,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            chat_completion_source: 'openai',
-            reverse_proxy: normalizeBaseUrl(entry.apiUrl),
-            proxy_password: entry.key,
-        }),
-    });
+    const response = await postChatBackend('/api/backends/chat-completions/status', buildStatusPayload(entry));
     const body = await readResponseText(response);
     const payload = parseMaybeJson(body);
     if (!response.ok) {
@@ -2084,9 +2151,7 @@ async function testOpenAICompatibleEntry(entry) {
     }
     const failure = statusFailureMessage(payload, body);
     if (failure) throw new Error(failure);
-    const models = Array.isArray(payload?.data)
-        ? payload.data.map(item => String(item?.id || '')).filter(Boolean)
-        : [];
+    const models = modelsFromStatusPayload(payload);
     const ok = payload === true || payload?.ok === true || payload?.success === true || payload?.result === true || payload?.online === true || payload?.connected === true || models.length > 0;
     if (!ok) {
         return {
@@ -2101,6 +2166,28 @@ async function testOpenAICompatibleEntry(entry) {
         models,
         body: body || responsePreview(payload),
     };
+}
+
+async function testGenerateEntry(entry) {
+    if (!entry.apiUrl) throw new Error('请先填写 URL');
+    if (!entry.key) throw new Error('请先填写 KEY');
+    if (!entry.model) throw new Error('请先填写模型');
+    const response = await postChatBackend('/api/backends/chat-completions/generate', buildTestGeneratePayload(entry));
+    const body = await readResponseText(response);
+    const payload = parseMaybeJson(body);
+    if (!response.ok) throw new Error(`HTTP ${response.status}${body ? `\n${body}` : ''}`);
+    const failure = statusFailureMessage(payload, body);
+    if (failure) throw new Error(failure);
+    return {
+        status: response.status,
+        models: [],
+        body: body || responsePreview(payload) || '生成接口返回空内容',
+    };
+}
+
+async function testProviderEntry(entry) {
+    if (normalizeProvider(entry.provider) === 'claude') return testGenerateEntry(entry);
+    return testStatusEntry(entry);
 }
 
 function showApiTestResult(ok, message, detail = '') {
@@ -2384,11 +2471,16 @@ function bind(state, rerender, setStatus) {
         const options = providerOptions();
         openOptionPicker($(this), options.map(option => option.label), '选择接口', (label) => {
             const option = options.find(item => item.label === label);
-        if (!option) return;
-        entry.provider = option.value;
-        persistStructure(state);
-        rerender();
-    });
+            if (!option) return;
+            const nextProvider = normalizeProvider(option.value);
+            if (entry.provider !== nextProvider) {
+                entry.provider = nextProvider;
+                entry.model = '';
+                entry.modelOptions = [];
+            }
+            persistStructure(state);
+            rerender();
+        });
     });
     $('#kf-entry-list').on('dblclick.kf', '.kf-entry-model', function () {
         const row = $(this).closest('.kf-entry-block');
@@ -2441,17 +2533,20 @@ function bind(state, rerender, setStatus) {
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
-        if (entry.provider !== 'open' && entry.provider !== 'openai' && entry.provider !== 'deepseek') {
-            return setStatus('当前仅支持 OpenAI-compatible 获取模型');
+        if (normalizeProvider(entry.provider) === 'claude') {
+            const message = 'Claude 官方暂不支持拉取模型，请手动填写模型';
+            setStatus(message);
+            showToast(message, 'warning');
+            return;
         }
         entry.model = '';
         entry.modelOptions = [];
         row.find('.kf-entry-model').val('');
         saveApiPreset(state, entry);
         persistStructure(state);
-        setStatus('正在获取模型，请稍候');
+        setStatus(`正在获取${providerLabel(entry.provider)}模型，请稍候`);
         try {
-            const models = await fetchOpenAICompatibleModels(entry);
+            const models = await fetchProviderModels(entry);
             saveApiPreset(state, entry);
             persistStructure(state);
             rerender();
@@ -2471,7 +2566,7 @@ function bind(state, rerender, setStatus) {
         const button = $(this);
         button.prop('disabled', true).text('测试中');
         try {
-            const result = await testOpenAICompatibleEntry(entry);
+            const result = await testProviderEntry(entry);
             showApiTestResult(
                 !result.uncertain,
                 `${result.uncertain ? '状态未确认' : '连接成功'}：HTTP ${result.status}`,
