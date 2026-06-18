@@ -11,18 +11,10 @@ const UPDATE_NOTICE_TEXT = `更新内容如下：
 1. OpenAI 官方、DeepSeek 官方 统一迁移为 OpenAI 兼容；
 2. 连通Gemini、Claude官方接口；
 3. 输入Key时不再调用密码键盘，减少键盘弹出时主面板整体折叠，输入项失焦后延迟释放高度锁定；
+4. 拉取模型失败不会清空已填入模型
 
-2026年6月18日
+2026年6月18日`;
 
-==============
-1. 修复重试不生效的问题；
-2. 修复“避免连续”失效的问题；
-3. 修复了快捷方式有“null”字样的问题；
-4. 修复了模型失效后重新拉取还会显示失效模型的问题；
-5. 修改了“酒馆原生风格”美化下勾选框不显示的问题；
-6. 加了个更新公告
-
-2026年5月31日`;
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
 const CHAT_POWER_WRAPPER_ID = 'kf-chat-power-wrapper';
@@ -2029,6 +2021,11 @@ function providerUrlPlaceholder(provider) {
     return 'https://api.openai.com/v1';
 }
 
+function anthropicModelsUrl(apiUrl) {
+    const baseUrl = normalizeBaseUrl(apiUrl).replace(/\/v1$/i, '');
+    return `${baseUrl}/v1/models`;
+}
+
 function buildStatusPayload(entry) {
     const source = chatCompletionSource(entry.provider);
     const payload = {
@@ -2087,10 +2084,31 @@ function modelsFromStatusPayload(payload) {
     return [];
 }
 
+async function fetchClaudeModels(entry) {
+    const response = await fetch(anthropicModelsUrl(entry.apiUrl), {
+        method: 'GET',
+        headers: {
+            'x-api-key': entry.key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+        },
+    });
+    const body = await readResponseText(response);
+    const payload = parseMaybeJson(body);
+    if (!response.ok) {
+        const detail = statusFailureMessage(payload, body);
+        throw new Error(`获取模型失败：HTTP ${response.status}${detail ? `\n${detail}` : ''}`);
+    }
+    if (payload?.error) throw new Error(`获取模型失败：${responsePreview(payload.error)}`);
+    const models = modelsFromStatusPayload(payload);
+    if (!models.length) throw new Error('获取模型失败：返回结果没有模型列表');
+    return models;
+}
+
 async function fetchProviderModels(entry) {
     if (!entry.apiUrl) throw new Error('请先填写 URL');
     if (!entry.key) throw new Error('请先填写 KEY');
-    if (normalizeProvider(entry.provider) === 'claude') throw new Error('Claude 官方暂不支持拉取模型，请手动填写模型');
+    if (normalizeProvider(entry.provider) === 'claude') return fetchClaudeModels(entry);
     const response = await postChatBackend('/api/backends/chat-completions/status', buildStatusPayload(entry));
     if (!response.ok) {
         throw new Error(`获取模型失败：HTTP ${response.status}`);
@@ -2099,8 +2117,6 @@ async function fetchProviderModels(entry) {
     if (payload?.error) throw new Error('获取模型失败：接口返回错误');
     const models = modelsFromStatusPayload(payload);
     if (!models.length) throw new Error('获取模型失败：返回结果没有模型列表');
-    entry.modelOptions = models;
-    entry.model = '';
     return models;
 }
 
@@ -2533,20 +2549,11 @@ function bind(state, rerender, setStatus) {
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row);
-        if (normalizeProvider(entry.provider) === 'claude') {
-            const message = 'Claude 官方暂不支持拉取模型，请手动填写模型';
-            setStatus(message);
-            showToast(message, 'warning');
-            return;
-        }
-        entry.model = '';
-        entry.modelOptions = [];
-        row.find('.kf-entry-model').val('');
-        saveApiPreset(state, entry);
-        persistStructure(state);
         setStatus(`正在获取${providerLabel(entry.provider)}模型，请稍候`);
         try {
             const models = await fetchProviderModels(entry);
+            entry.model = '';
+            entry.modelOptions = models;
             saveApiPreset(state, entry);
             persistStructure(state);
             rerender();
