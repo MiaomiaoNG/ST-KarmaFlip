@@ -83,7 +83,6 @@ function canUseEntry(entry, mode) {
     return entry &&
         entry.enabled !== false &&
         entry.apiUrl &&
-        entry.key &&
         entry.model &&
         (mode !== 'random' || toInt(entry.weight) > 0);
 }

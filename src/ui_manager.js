@@ -1553,7 +1553,6 @@ function entryReady(entry, mode) {
     return entry &&
         entry.enabled !== false &&
         String(entry.apiUrl || '').trim() &&
-        String(entry.key || '').trim() &&
         String(entry.model || '').trim() &&
         (mode !== 'random' || toInt(entry.weight) > 0);
 }
@@ -2107,7 +2106,6 @@ async function fetchClaudeModels(entry) {
 
 async function fetchProviderModels(entry) {
     if (!entry.apiUrl) throw new Error('请先填写 URL');
-    if (!entry.key) throw new Error('请先填写 KEY');
     if (normalizeProvider(entry.provider) === 'claude') return fetchClaudeModels(entry);
     const response = await postChatBackend('/api/backends/chat-completions/status', buildStatusPayload(entry));
     if (!response.ok) {
@@ -2158,7 +2156,6 @@ function statusFailureMessage(payload, rawBody) {
 
 async function testStatusEntry(entry) {
     if (!entry.apiUrl) throw new Error('请先填写 URL');
-    if (!entry.key) throw new Error('请先填写 KEY');
     const response = await postChatBackend('/api/backends/chat-completions/status', buildStatusPayload(entry));
     const body = await readResponseText(response);
     const payload = parseMaybeJson(body);
@@ -2186,7 +2183,6 @@ async function testStatusEntry(entry) {
 
 async function testGenerateEntry(entry) {
     if (!entry.apiUrl) throw new Error('请先填写 URL');
-    if (!entry.key) throw new Error('请先填写 KEY');
     if (!entry.model) throw new Error('请先填写模型');
     const response = await postChatBackend('/api/backends/chat-completions/generate', buildTestGeneratePayload(entry));
     const body = await readResponseText(response);

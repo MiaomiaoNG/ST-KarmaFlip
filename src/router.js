@@ -6,7 +6,6 @@ function validEntries(pool, runtime) {
         e.enabled !== false &&
         !runtime?.disabledByFailure?.[e.id] &&
         e.apiUrl &&
-        e.key &&
         e.model
     );
 }
