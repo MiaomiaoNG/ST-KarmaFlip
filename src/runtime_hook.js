@@ -23,9 +23,7 @@ const MVU_PROMPT_PATTERNS = [
     /<past_observe\b/i,
     /<must>\s*指令/i,
     /遵循\s*<must>\s*指令/i,
-    /\[Start a new Chat\]/i,
     /<macro\b/i,
-    /\bMacro\b/i,
 ];
 
 function normalizeBaseUrl(apiUrl) {

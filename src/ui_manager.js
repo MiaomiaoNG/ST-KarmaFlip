@@ -1327,7 +1327,7 @@ function renderLogs(state, filter = currentLogFilter()) {
         const logs = [...(source.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
         const filtered = logs.filter(log => {
             if (filter === 'error') return log.success === false || String(log.event || '').includes('error');
-            if (filter === 'pick') return ['pick', 'request'].includes(log.event);
+            if (filter === 'pick') return log.event === 'pick' || (log.event === 'request' && log.success !== false);
             return String(log.event || '') !== 'stats';
         });
         lines = filtered.slice(-50).map(formatLog);
@@ -1573,6 +1573,10 @@ function openSequenceModal(summary, rows) {
 }
 
 function showSequenceCheck(state) {
+    if (state.enabled === false) {
+        openSequenceModal('插件暂未开启', []);
+        return;
+    }
     syncAllEntries(state);
     const pool = getActivePool(state);
     pool.random = { ...(pool.random || {}), noConsecutive: $('#kf-no-streak').prop('checked') };
