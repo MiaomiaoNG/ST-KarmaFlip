@@ -18,11 +18,10 @@ const PERF_WARN_MS = {
     traceRead: 4,
     responseCheck: 20,
 };
-const MVU_PROMPT_PATTERNS = [
+const MVU_STRONG_PROMPT_PATTERNS = [
     /<additional_information\b/i,
     /<past_observe\b/i,
     /<must>\s*指令/i,
-    /遵循\s*<must>\s*指令/i,
     /<macro\b/i,
 ];
 
@@ -109,8 +108,22 @@ function isMvuAnalysisRequest(generateData) {
     const sampled = messages.length <= 4
         ? messages
         : [messages[0], messages[1], messages[messages.length - 2], messages[messages.length - 1]];
-    const text = sampled.map(message => contentToText(message?.content)).join('\n');
-    const matched = MVU_PROMPT_PATTERNS.some(pattern => pattern.test(text));
+    const matchedFeatures = new Array(MVU_STRONG_PROMPT_PATTERNS.length).fill(false);
+    let matchedCount = 0;
+    let matched = false;
+    for (const message of sampled) {
+        const text = contentToText(message?.content);
+        for (let index = 0; index < MVU_STRONG_PROMPT_PATTERNS.length; index += 1) {
+            if (matchedFeatures[index] || !MVU_STRONG_PROMPT_PATTERNS[index].test(text)) continue;
+            matchedFeatures[index] = true;
+            matchedCount += 1;
+            if (matchedCount >= 2) {
+                matched = true;
+                break;
+            }
+        }
+        if (matched) break;
+    }
     warnSlowPath('mvu-scan', startedAt, PERF_WARN_MS.mvuScan);
     return matched;
 }
