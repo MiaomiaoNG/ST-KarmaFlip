@@ -5,15 +5,13 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.1.1';
+const UPDATE_NOTICE_VERSION = '1.1.2';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-1. OpenAI 官方、DeepSeek 官方 统一迁移为 OpenAI 兼容；
-2. 连通Gemini、Claude官方接口；
-3. 输入Key时不再调用密码键盘，减少键盘弹出时主面板整体折叠，输入项失焦后延迟释放高度锁定；
-4. 拉取模型失败不会清空已填入模型
+1. 修复了切换预设时，插件失效的BUG；
+2. 让日志中的[抽选记录]只显示抽选记录和发送结果；
 
-2026年6月18日`;
+2026年7月27日`;
 
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
