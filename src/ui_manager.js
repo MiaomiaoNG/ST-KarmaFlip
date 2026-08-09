@@ -1307,8 +1307,10 @@ function providerSelect(entry) {
     const selected = options.find(([value]) => value === provider)?.[1] || options[0][1];
     return `
         <div class="kf-select-wrapper kf-provider-wrapper kf-two-strokes kf-accent-fill kf-flex-3">
-            <input type="text" class="kf-inner-select kf-dropdown-input kf-entry-provider-display" value="${esc(selected)}" data-provider="${esc(provider)}" readonly>
-            <button class="kf-dropdown-arrow kf-entry-provider-arrow" type="button">▼</button>
+            <button type="button" class="kf-inner-select kf-entry-provider-display" data-provider="${esc(provider)}" aria-label="接口：${esc(selected)}">
+                <span class="kf-provider-label">${esc(selected)}</span>
+                <span class="kf-provider-caret" aria-hidden="true">▼</span>
+            </button>
         </div>
     `;
 }
@@ -1420,7 +1422,7 @@ function renderEntries(state) {
                     <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
                     <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
                 </div>
-                <div class="kf-row kf-entry-details">
+                <div class="kf-row kf-entry-details kf-entry-provider-row">
                     <div class="kf-input-wrapper kf-flex-7"><span class="kf-label">URL</span><input type="text" class="kf-inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="${esc(urlPlaceholder)}"></div>
                     ${providerSelect(entry)}
                 </div>
@@ -2745,7 +2747,7 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.kf-entry-block');
         openEntryNamePicker(state, row, row.find('.kf-entry-name'), rerender);
     });
-    $('#kf-entry-list').on('click.kf', '.kf-entry-provider-display,.kf-entry-provider-arrow', function (event) {
+    $('#kf-entry-list').on('click.kf', '.kf-entry-provider-display', function (event) {
         event.preventDefault();
         event.stopPropagation();
         const pool = getActivePool(state);
