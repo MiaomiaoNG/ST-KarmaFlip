@@ -5,7 +5,7 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.1.2';
+const UPDATE_NOTICE_VERSION = '1.2.0';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 1. 在日志中增加了请求API所对应的楼层；
