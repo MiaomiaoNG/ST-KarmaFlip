@@ -176,16 +176,17 @@ export function pickMember(state, pool) {
     return { member, detail };
 }
 
-export function markRequestSuccess(state, pool, member, requestKey) {
+export function markRequestSuccess(state, pool, member, requestKey, options = {}) {
     const runtime = getRuntimeScope(state);
     reduceCooldowns(runtime);
-    const cooldown = pool.mode === 'random' ? toInt(member.cooldownTurns) : 0;
+    const cooldown = pool.mode === 'random' || options.forced === true ? toInt(member.cooldownTurns) : 0;
     runtime.cooldowns[member.id] = cooldown;
     if (cooldown > 0) runtime.cooldownElapsed[member.id] = 0;
     else delete runtime.cooldownElapsed[member.id];
     runtime.failures[member.id] = 0;
     runtime.lastPick = { memberId: member.id, identity: memberIdentity(member), requestKey };
     updateMissStreaks(pool, runtime, member);
+    runtime.missStreaks[member.id] = 0;
 }
 
 export function markRequestFailure(state, member) {

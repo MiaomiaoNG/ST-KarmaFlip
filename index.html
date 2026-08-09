@@ -21,8 +21,8 @@
         </div>
     </div>
 
-    <div class="kf-block">
-        <div class="kf-title">API条目</div>
+    <div class="kf-block" id="kf-api-entries-block">
+        <div class="kf-title"><span>API条目</span><span class="kf-close-btn kf-api-entries-close" id="kf-api-entries-close">✖</span></div>
         <div class="kf-responsive-controls kf-mode-controls">
             <label class="kf-toggle-chip kf-mode-control">
                 <input type="radio" name="kf-api-mode" id="kf-mode-fixed" value="fixed">
@@ -144,9 +144,35 @@
                 <span class="kf-square-box"></span>
             </label>
         </div>
+        <div class="kf-settings-row">
+            <span class="kf-settings-label">紧凑 API 条目模式</span>
+            <label class="kf-square-check" title="主面板仅显示 API 启用、名称、弹窗和删除按钮">
+                <input type="checkbox" id="kf-compact-api-entries">
+                <span class="kf-square-box"></span>
+            </label>
+        </div>
+        <div class="kf-settings-row">
+            <span class="kf-settings-label">开启快捷方式-指定API</span>
+            <label class="kf-square-check" title="在快捷回复栏显示指定 API 按钮">
+                <input type="checkbox" id="kf-shortcut-api-enabled">
+                <span class="kf-square-box"></span>
+            </label>
+        </div>
         <div class="kf-modal-actions kf-modal-actions-two">
             <button class="kf-action-btn kf-accent-fill" id="kf-settings-confirm">确认</button>
             <button class="kf-action-btn kf-accent-fill" id="kf-settings-cancel">取消</button>
+        </div>
+    </div>
+</div>
+
+<div class="kf-modal-overlay" id="kf-api-override-modal">
+    <div class="kf-modal-box kf-api-override-box">
+        <div class="kf-modal-header">指定下个请求API <span class="kf-close-btn" id="kf-api-override-close">✖</span></div>
+        <div class="kf-modal-message" id="kf-api-override-message"></div>
+        <div class="kf-api-override-list" id="kf-api-override-list"></div>
+        <div class="kf-modal-actions kf-modal-actions-single">
+            <button class="kf-action-btn kf-accent-fill" id="kf-api-override-restore">恢复自动选择</button>
+            <button class="kf-action-btn kf-accent-fill" id="kf-api-override-start">启动插件</button>
         </div>
     </div>
 </div>

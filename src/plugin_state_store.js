@@ -57,9 +57,11 @@ export function getDefaultState() {
         shortcuts: {
             modeEnabled: true,
             powerEnabled: true,
+            apiEnabled: false,
         },
         ui: {
             updateNoticeSeenVersion: '',
+            compactApiEntries: false,
         },
         runtime: {},
         logs: [],
@@ -184,13 +186,16 @@ function normalizeState(raw) {
         ...(s.shortcuts || {}),
         modeEnabled: s.shortcuts?.modeEnabled ?? s.shortcuts?.enabled ?? true,
         powerEnabled: s.shortcuts?.powerEnabled ?? s.shortcuts?.enabled ?? true,
+        apiEnabled: s.shortcuts?.apiEnabled ?? false,
     };
     s.shortcuts.modeEnabled = s.shortcuts.modeEnabled !== false;
     s.shortcuts.powerEnabled = s.shortcuts.powerEnabled !== false;
+    s.shortcuts.apiEnabled = s.shortcuts.apiEnabled === true;
     s.ui = {
         ...getDefaultState().ui,
         ...(s.ui || {}),
         updateNoticeSeenVersion: String(s.ui?.updateNoticeSeenVersion || ''),
+        compactApiEntries: s.ui?.compactApiEntries === true,
     };
     s.logs = [];
     return s;
@@ -336,15 +341,18 @@ function createPersistedState(source) {
             ...(base.shortcuts || {}),
             modeEnabled: base?.shortcuts?.modeEnabled ?? base?.shortcuts?.enabled ?? true,
             powerEnabled: base?.shortcuts?.powerEnabled ?? base?.shortcuts?.enabled ?? true,
+            apiEnabled: base?.shortcuts?.apiEnabled ?? false,
         },
         ui: {
             ...getDefaultState().ui,
             ...(base.ui || {}),
             updateNoticeSeenVersion: String(base?.ui?.updateNoticeSeenVersion || ''),
+            compactApiEntries: base?.ui?.compactApiEntries === true,
         },
     };
     snapshot.shortcuts.modeEnabled = snapshot.shortcuts.modeEnabled !== false;
     snapshot.shortcuts.powerEnabled = snapshot.shortcuts.powerEnabled !== false;
+    snapshot.shortcuts.apiEnabled = snapshot.shortcuts.apiEnabled === true;
     return normalizeState(snapshot);
 }
 
@@ -731,6 +739,8 @@ export function getRuntimeScope(state) {
             missStreaks: {},
             fixedCursor: 0,
             lastPick: null,
+            pendingApiOverride: null,
+            floorApiBinding: null,
         };
     }
     const scope = runtimeScopes[key];
@@ -741,6 +751,52 @@ export function getRuntimeScope(state) {
     if (!scope.missStreaks) scope.missStreaks = {};
     if (typeof scope.fixedCursor !== 'number') scope.fixedCursor = 0;
     return scope;
+}
+
+function apiOverrideRef(poolId, entryId, messageId) {
+    const ref = {
+        poolId: String(poolId || ''),
+        entryId: String(entryId || ''),
+    };
+    if (Number.isInteger(Number(messageId))) ref.messageId = Number(messageId);
+    return ref;
+}
+
+export function getApiOverrideState(state) {
+    const runtime = getRuntimeScope(state);
+    return {
+        pending: runtime.pendingApiOverride || null,
+        floorBinding: runtime.floorApiBinding || null,
+    };
+}
+
+export function setPendingApiOverride(state, poolId, entryId) {
+    const runtime = getRuntimeScope(state);
+    runtime.pendingApiOverride = apiOverrideRef(poolId, entryId);
+    return runtime.pendingApiOverride;
+}
+
+export function bindApiOverrideToFloor(state, poolId, entryId, messageId) {
+    const runtime = getRuntimeScope(state);
+    runtime.pendingApiOverride = null;
+    runtime.floorApiBinding = apiOverrideRef(poolId, entryId, messageId);
+    return runtime.floorApiBinding;
+}
+
+export function clearPendingApiOverride(state) {
+    const runtime = getRuntimeScope(state);
+    runtime.pendingApiOverride = null;
+}
+
+export function clearFloorApiBinding(state) {
+    const runtime = getRuntimeScope(state);
+    runtime.floorApiBinding = null;
+}
+
+export function clearApiOverride(state) {
+    const runtime = getRuntimeScope(state);
+    runtime.pendingApiOverride = null;
+    runtime.floorApiBinding = null;
 }
 
 export function pushLog(state, entry) {

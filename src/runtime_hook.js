@@ -1,4 +1,4 @@
-import { getActivePool, loadState, pushLog, toInt } from './plugin_state_store.js';
+import { bindApiOverrideToFloor, clearFloorApiBinding, clearPendingApiOverride, getActivePool, getApiOverrideState, loadState, pushLog, toInt } from './plugin_state_store.js';
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 import { makeId } from './compat.js';
 
@@ -67,6 +67,14 @@ function generationType(generateData) {
     return String(generateData?.type || 'normal');
 }
 
+function targetMessageId(type) {
+    const chat = context()?.chat;
+    const length = Array.isArray(chat) ? chat.length : 0;
+    // Mirrors SillyTavern's getNextMessageId(): a Swipe replaces the last floor;
+    // other chat generation types create the floor at the current chat length.
+    return type === 'swipe' ? Math.max(0, length - 1) : length;
+}
+
 function isBackgroundRequest(generateData) {
     if (!generateData || typeof generateData !== 'object') return true;
     return generateData.quiet === true ||
@@ -86,6 +94,47 @@ function canUseEntry(entry, mode) {
 
 function validRuntimeEntries(pool) {
     return (pool.entries || []).filter(entry => canUseEntry(entry, pool.mode));
+}
+
+function findApiOverride(state, pool, messageId) {
+    const override = getApiOverrideState(state);
+    let ref = override.pending;
+    let source = 'pending';
+
+    if (ref && ref.poolId !== pool.id) {
+        clearPendingApiOverride(state);
+        ref = null;
+    }
+    if (!ref) {
+        const binding = override.floorBinding;
+        if (binding && (binding.poolId !== pool.id || Number(binding.messageId) !== Number(messageId))) {
+            clearFloorApiBinding(state);
+        } else if (binding) {
+            ref = binding;
+            source = 'floor';
+        }
+    }
+    if (!ref) return null;
+
+    const member = (pool.entries || []).find(entry => entry?.id === ref.entryId) || null;
+    if (!member) {
+        if (source === 'pending') clearPendingApiOverride(state);
+        else clearFloorApiBinding(state);
+        showRuntimeToast('指定的 API 已不存在，本次恢复自动选择', 'warning', 3600);
+        return null;
+    }
+    if (!String(member.apiUrl || '').trim() || !String(member.model || '').trim()) {
+        showRuntimeToast('指定 API 无URL或未选择模型，本次请求无法由插件接管', 'error', 4200);
+        return { invalid: true, member, source };
+    }
+    return {
+        member,
+        source,
+        picked: {
+            member,
+            detail: { mode: 'specified', cooldownBlocked: [], forced: true },
+        },
+    };
 }
 
 function isTextGeneration(generateData) {
@@ -318,7 +367,7 @@ function makeTraceId() {
     return makeId('kf');
 }
 
-function startPendingRequest(state, pool, picked, member, type) {
+function startPendingRequest(state, pool, picked, member, type, messageId, forced = false) {
     const id = makeTraceId();
     pendingRequests.set(id, {
         id,
@@ -327,6 +376,8 @@ function startPendingRequest(state, pool, picked, member, type) {
         picked,
         member,
         type,
+        messageId,
+        forced,
         expiresAt: Date.now() + PENDING_TTL,
     });
     return id;
@@ -391,17 +442,72 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         failed: businessFailure.failed,
     });
     if (!businessFailure.failed) {
-        markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`);
-        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true, status: response.status });
+        markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`, { forced: pending.forced });
+        if (pending.forced) {
+            bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
+        }
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, messageId: pending.messageId, success: true, status: response.status });
         return { ok: true, response };
     }
     const count = markRequestFailure(pending.state, member);
     const detail = businessFailure.detail;
-    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: false, status: response.status, detail });
+    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, messageId: pending.messageId, success: false, status: response.status, detail });
     return { ok: false, response, count };
 }
 
+async function runForcedRetryPlan(input, init, pending) {
+    const state = pending.state;
+    const member = pending.member;
+    const maxFailures = retryLimit(state);
+    const delayMs = retryDelayMs(state);
+    let lastResponse = null;
+    let lastError = null;
+
+    retryDebug('forced-plan-start', {
+        traceId: pending.id,
+        maxFailures,
+        delayMs,
+        apiName: member?.name || '',
+        model: member?.model || '',
+        messageId: pending.messageId,
+    });
+
+    for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
+        if (retryAttempt > 0) await wait(delayMs);
+        try {
+            const result = await fetchWithMember(input, init, pending, pending.picked, member, retryAttempt);
+            if (result.ok) return result.response;
+            lastResponse = result.response;
+            lastError = null;
+        } catch (error) {
+            if (isUserAbortError(error, init)) throw error;
+            const count = markRequestFailure(state, member);
+            lastError = error;
+            lastResponse = null;
+            retryDebug('forced-network-error', {
+                traceId: pending.id,
+                retryAttempt,
+                apiName: member?.name || '',
+                model: member?.model || '',
+                count,
+                error: String(error?.message || error),
+            });
+            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: member.name, model: member.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+        }
+    }
+
+    await askFailureDecision(
+        `指定 API [${memberLabel(member)}] 已达到 ${maxFailures} 次重试上限，未切换其他 API；当前指定仍保留。`,
+        [{ value: 'close', label: '关闭' }],
+        'close',
+    );
+    if (lastError) throw lastError;
+    if (lastResponse) return lastResponse;
+    throw new Error('指定 API 请求失败');
+}
+
 async function runRetryPlan(input, init, pending, onStatus) {
+    if (pending.forced) return runForcedRetryPlan(input, init, pending);
     const state = pending.state;
     const pool = pending.pool;
     const maxFailures = retryLimit(state);
@@ -438,7 +544,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                 apiName: currentMember?.name || '',
                 model: currentMember?.model || '',
             });
-            queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: true });
+            queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, messageId: pending.messageId, success: true });
             showModelAlert(state, currentMember);
             if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(currentMember)} | ${pending.type}`);
         }
@@ -461,7 +567,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                     count,
                     error: String(error?.message || error),
                 });
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
             }
         }
 
@@ -503,7 +609,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
             } catch (error) {
                 if (isUserAbortError(error, init)) throw error;
                 lastError = error;
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, success: false, error: String(error?.message || error) });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error) });
             }
             const nextDecision = await askFailureDecision(
                 secondFailureMessage(currentMember),
@@ -582,21 +688,24 @@ function bindChatCompletionSettings(onStatus) {
 
             const pool = getActivePool(state);
             if (!Array.isArray(pool.entries) || !pool.entries.length) return;
-            if (!validRuntimeEntries(pool).length) return;
+            const type = generationType(generateData);
+            const messageId = targetMessageId(type);
+            const override = findApiOverride(state, pool, messageId);
+            if (override?.invalid) return;
+            if (!override && !validRuntimeEntries(pool).length) return;
 
             const pickStartedAt = nowMs();
-            const picked = pickMember(state, pool);
+            const picked = override?.picked || pickMember(state, pool);
             warnSlowPath('pick-member', pickStartedAt, PERF_WARN_MS.pickMember);
             if (!picked?.member) return;
 
             const member = picked.member;
             patchGenerateData(generateData, member);
 
-            const type = generationType(generateData);
-            generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type);
-            queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, success: true });
+            generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type, messageId, !!override);
+            queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, messageId, success: true });
             showModelAlert(state, member);
-            if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(member)} | ${type}`);
+            if (typeof onStatus === 'function') onStatus(`${override ? '指定' : '命中'}: ${memberLabel(member)} | ${type} | #${messageId}`);
         } catch (error) {
             reportRuntimeError('CHAT_COMPLETION_SETTINGS_READY 处理失败', error);
         } finally {
