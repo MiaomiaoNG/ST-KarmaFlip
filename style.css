@@ -595,6 +595,19 @@
     content: '暂无日志';
     color: rgba(128, 128, 128, 0.78);
 }
+.kf-modal-overlay .kf-log-copy-url {
+    color: var(--underline-color, currentColor);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+.kf-modal-overlay .kf-log-copy-url:focus-visible {
+    outline: 1px solid var(--underline-color, currentColor);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
 .kf-modal-overlay .kf-log-filter-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));

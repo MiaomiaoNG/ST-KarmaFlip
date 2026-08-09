@@ -1,5 +1,5 @@
 import { clearLogs, enableStatePersistence, getActivePool, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, saveState, saveStateDebounced, toInt } from './plugin_state_store.js';
-import { buildFixedSequence, memberIdentity } from './router.js';
+import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal'];
@@ -24,6 +24,7 @@ const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_I
 const QR_ASSISTANT_MANAGED_DOM_IDS = [...QR_ASSISTANT_LEGACY_DOM_IDS, ...QR_ASSISTANT_CURRENT_DOM_IDS];
 const MAGIC_WAND_CONTAINER_ID = 'kf-magic-wand-container';
 const MAGIC_WAND_ENTRY_ID = 'kf-magic-wand-entry';
+const LOG_URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 let uiPersistenceReady = false;
 let chatShortcutRetryTimer = null;
 let chatShortcutObserver = null;
@@ -1312,6 +1313,75 @@ function formatUsageStat(stat) {
     return `[${stat.apiName || '未命名'}] [${stat.model || '未填模型'}] 调取次数(包括固定和随机模式) - ${stat.count || 0} - ${timestamp}`;
 }
 
+function splitLogUrl(rawUrl) {
+    let url = String(rawUrl || '').replace(/[.,;!?，。；：！？、]+$/u, '');
+    const bracketPairs = [['(', ')'], ['[', ']'], ['{', '}']];
+    for (const [open, close] of bracketPairs) {
+        while (url.endsWith(close) && url.split(close).length > url.split(open).length) {
+            url = url.slice(0, -1);
+        }
+    }
+    return { url, trailing: String(rawUrl || '').slice(url.length) };
+}
+
+function appendCopyableLogText(target, text) {
+    const value = String(text || '');
+    let cursor = 0;
+    LOG_URL_PATTERN.lastIndex = 0;
+    for (const match of value.matchAll(LOG_URL_PATTERN)) {
+        const rawUrl = match[0];
+        const { url, trailing } = splitLogUrl(rawUrl);
+        target.appendChild(document.createTextNode(value.slice(cursor, match.index)));
+        let valid = false;
+        try {
+            valid = ['http:', 'https:'].includes(new URL(url).protocol);
+        } catch {
+            valid = false;
+        }
+        if (valid) {
+            const link = document.createElement('span');
+            link.className = 'kf-log-copy-url';
+            link.dataset.url = url;
+            link.tabIndex = 0;
+            link.setAttribute('role', 'button');
+            link.setAttribute('title', '点击复制 URL');
+            link.textContent = url;
+            target.appendChild(link);
+            target.appendChild(document.createTextNode(trailing));
+        } else {
+            target.appendChild(document.createTextNode(rawUrl));
+        }
+        cursor = match.index + rawUrl.length;
+    }
+    target.appendChild(document.createTextNode(value.slice(cursor)));
+}
+
+async function copyTextToClipboard(text) {
+    const value = String(text || '');
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return;
+        }
+    } catch {
+        // Clipboard API may be unavailable in some WebView contexts; use the legacy fallback below.
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } finally {
+        textarea.remove();
+    }
+    if (!copied) throw new Error('copy failed');
+}
+
 function currentLogFilter() {
     return $('.kf-log-filter.kf-active').data('filter') || 'all';
 }
@@ -1331,16 +1401,22 @@ function renderLogs(state, filter = currentLogFilter()) {
         lines = filtered.slice(-50).map(formatLog);
     }
     const logBox = $('#kf-logs-list');
-    logBox.text(lines.join('\n'));
+    logBox.empty();
     const node = logBox.get(0);
     if (node) {
+        const fragment = document.createDocumentFragment();
+        lines.forEach((line, index) => {
+            appendCopyableLogText(fragment, line);
+            if (index < lines.length - 1) fragment.appendChild(document.createTextNode('\n'));
+        });
+        node.appendChild(fragment);
         nextFrame(() => {
             node.scrollTop = node.scrollHeight;
         });
     }
 }
 
-function syncEntryFromRow(entry, row) {
+function syncEntryFromRow(entry, row, state) {
     const previousName = String(entry.name || '').trim();
     entry.enabled = row.find('.kf-entry-enabled').prop('checked');
     entry.name = String(row.find('.kf-entry-name').val() || '');
@@ -1353,6 +1429,7 @@ function syncEntryFromRow(entry, row) {
     entry.weight = toInt(row.find('.kf-entry-weight').val());
     entry.pityTurns = toInt(row.find('.kf-entry-pity').val());
     entry.cooldownTurns = toInt(row.find('.kf-entry-cooldown').val());
+    reconcileMemberCooldown(state, entry.id, entry.cooldownTurns);
     entry.collapsed = row.hasClass('kf-collapsed');
 }
 
@@ -1439,7 +1516,7 @@ function syncAllEntries(state) {
     $('#kf-entry-list .kf-entry-block').each(function () {
         const id = $(this).data('id');
         const entry = pool.entries.find(e => e.id === id);
-        if (entry) syncEntryFromRow(entry, $(this));
+        if (entry) syncEntryFromRow(entry, $(this), state);
     });
 }
 
@@ -1572,7 +1649,7 @@ function openSequenceModal(summary, rows) {
 
 function showSequenceCheck(state) {
     if (state.enabled === false) {
-        openSequenceModal('插件暂未开启', []);
+        openSequenceModal('插件暂未开启，开启后显示api顺序', []);
         return;
     }
     syncAllEntries(state);
@@ -2416,7 +2493,7 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
-        syncEntryFromRow(entry, row);
+        syncEntryFromRow(entry, row, state);
         const name = String($(this).val() || '').trim();
         const preset = findSavedApiEntry(state, name, entry.id);
         if (preset) {
@@ -2431,7 +2508,7 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
-        syncEntryFromRow(entry, row);
+        syncEntryFromRow(entry, row, state);
         persistStructure(state);
     });
     $('#kf-entry-list').on('focusin.kf', '.kf-entry-key', function () {
@@ -2459,7 +2536,7 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
-        syncEntryFromRow(entry, row);
+        syncEntryFromRow(entry, row, state);
         const equalized = $(this).hasClass('kf-entry-weight') && maybeEqualizeWeights(state);
         persistStructure(state);
         if (equalized) rerender();
@@ -2533,7 +2610,7 @@ function bind(state, rerender, setStatus) {
         const id = row.data('id');
         const entry = pool.entries.find(e => e.id === id);
         if (entry) {
-            syncEntryFromRow(entry, row);
+            syncEntryFromRow(entry, row, state);
             saveApiPresetIfNamed(state, entry);
         }
         pool.entries = pool.entries.filter(e => e.id !== id);
@@ -2546,7 +2623,7 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
-        syncEntryFromRow(entry, row);
+        syncEntryFromRow(entry, row, state);
         setStatus(`正在获取${providerLabel(entry.provider)}模型，请稍候`);
         try {
             const models = await fetchProviderModels(entry);
@@ -2567,7 +2644,7 @@ function bind(state, rerender, setStatus) {
         const row = $(this).closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
-        syncEntryFromRow(entry, row);
+        syncEntryFromRow(entry, row, state);
         const button = $(this);
         button.prop('disabled', true).text('测试中');
         try {
@@ -2628,6 +2705,22 @@ function bind(state, rerender, setStatus) {
         renderLogs(state);
         setStatus('日志已清空');
     });
+    $('#kf-logs-list').off('.kfLogUrl')
+        .on('click.kfLogUrl', '.kf-log-copy-url', async function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                await copyTextToClipboard(String($(this).attr('data-url') || ''));
+                showToast('URL 已复制', 'info');
+            } catch {
+                showToast('URL 复制失败，请长按链接手动复制', 'error');
+            }
+        })
+        .on('keydown.kfLogUrl', '.kf-log-copy-url', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            $(this).trigger('click');
+        });
     $('.kf-log-filter').off('click.kf').on('click.kf', function () {
         $('.kf-log-filter').removeClass('kf-active');
         $(this).addClass('kf-active');

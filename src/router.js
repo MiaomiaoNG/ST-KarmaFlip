@@ -26,12 +26,30 @@ function weightedPick(entries) {
 
 function reduceCooldowns(runtime) {
     for (const id of Object.keys(runtime.cooldowns || {})) {
+        if (Object.prototype.hasOwnProperty.call(runtime.cooldownElapsed || {}, id)) {
+            runtime.cooldownElapsed[id] = toInt(runtime.cooldownElapsed[id]) + 1;
+        }
         runtime.cooldowns[id] = Math.max(0, toInt(runtime.cooldowns[id]) - 1);
     }
 }
 
 function clearCooldowns(runtime) {
     for (const id of Object.keys(runtime.cooldowns || {})) runtime.cooldowns[id] = 0;
+    runtime.cooldownElapsed = {};
+}
+
+function reconcileRuntimeCooldown(runtime, memberId, cooldownTurns) {
+    const id = String(memberId || '').trim();
+    if (!id || !Object.prototype.hasOwnProperty.call(runtime.cooldownElapsed || {}, id)) {
+        return toInt(runtime.cooldowns?.[id]);
+    }
+    const remaining = Math.max(0, toInt(cooldownTurns) - toInt(runtime.cooldownElapsed[id]));
+    runtime.cooldowns[id] = remaining;
+    return remaining;
+}
+
+export function reconcileMemberCooldown(state, memberId, cooldownTurns) {
+    return reconcileRuntimeCooldown(getRuntimeScope(state), memberId, cooldownTurns);
 }
 
 export function memberIdentity(entry) {
@@ -111,7 +129,7 @@ function randomPick(pool, runtime) {
     if (!candidates.length) candidates = active;
 
     let cooldownCandidates = candidates.filter(e => {
-        const onCooldown = toInt(runtime.cooldowns?.[e.id]) > 0;
+        const onCooldown = reconcileRuntimeCooldown(runtime, e.id, e.cooldownTurns) > 0;
         if (onCooldown) blocked.push({ entry: e, reason: 'cooldown' });
         return !onCooldown;
     });
@@ -161,7 +179,10 @@ export function pickMember(state, pool) {
 export function markRequestSuccess(state, pool, member, requestKey) {
     const runtime = getRuntimeScope(state);
     reduceCooldowns(runtime);
-    runtime.cooldowns[member.id] = pool.mode === 'random' ? toInt(member.cooldownTurns) : 0;
+    const cooldown = pool.mode === 'random' ? toInt(member.cooldownTurns) : 0;
+    runtime.cooldowns[member.id] = cooldown;
+    if (cooldown > 0) runtime.cooldownElapsed[member.id] = 0;
+    else delete runtime.cooldownElapsed[member.id];
     runtime.failures[member.id] = 0;
     runtime.lastPick = { memberId: member.id, identity: memberIdentity(member), requestKey };
     updateMissStreaks(pool, runtime, member);
@@ -170,6 +191,7 @@ export function markRequestSuccess(state, pool, member, requestKey) {
 export function markRequestFailure(state, member) {
     const runtime = getRuntimeScope(state);
     runtime.cooldowns[member.id] = 0;
+    delete runtime.cooldownElapsed[member.id];
     runtime.failures[member.id] = toInt(runtime.failures[member.id]) + 1;
     return runtime.failures[member.id];
 }

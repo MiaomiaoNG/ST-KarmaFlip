@@ -725,6 +725,7 @@ export function getRuntimeScope(state) {
         runtimeScopes[key] = {
             turn: 0,
             cooldowns: {},
+            cooldownElapsed: {},
             failures: {},
             disabledByFailure: {},
             missStreaks: {},
@@ -734,6 +735,7 @@ export function getRuntimeScope(state) {
     }
     const scope = runtimeScopes[key];
     if (!scope.cooldowns) scope.cooldowns = {};
+    if (!scope.cooldownElapsed) scope.cooldownElapsed = {};
     if (!scope.failures) scope.failures = {};
     if (!scope.disabledByFailure) scope.disabledByFailure = {};
     if (!scope.missStreaks) scope.missStreaks = {};
