@@ -34,6 +34,8 @@
                 </button>
             </header>
 
+            <button class="kf-api-entries-backdrop" id="kf-api-entries-backdrop" type="button" tabindex="-1" aria-label="关闭 API 条目编辑"></button>
+
             <main class="kf-plugin-container" id="kf-root" data-mode="fixed">
                 <section class="kf-block">
                     <div class="kf-section-head">
@@ -58,7 +60,6 @@
                         <div class="kf-section-actions">
                             <button class="kf-icon-btn" id="kf-btn-sequence-check" type="button" title="顺序检测" aria-label="顺序检测"><svg><use href="#kf-i-search"/></svg></button>
                             <button class="kf-icon-btn" id="kf-btn-add-entry" type="button" title="添加条目" aria-label="添加条目"><svg><use href="#kf-i-plus"/></svg></button>
-                            <button class="kf-icon-btn kf-api-entries-close" id="kf-api-entries-close" type="button" title="关闭完整编辑" aria-label="关闭完整编辑"><svg><use href="#kf-i-x"/></svg></button>
                         </div>
                     </div>
                     <div class="kf-section-divider"></div>
@@ -209,8 +210,8 @@
                         <button class="kf-theme-preset" type="button" data-preset="mist-purple" data-primary="#7659e8" data-secondary="#fbfaff"><span style="--swatch-a:#7659e8;--swatch-b:#fbfaff"><i></i><i></i></span><em>雾紫白</em></button>
                         <button class="kf-theme-preset" type="button" data-preset="mint" data-primary="#119d9a" data-secondary="#f7fffd"><span style="--swatch-a:#119d9a;--swatch-b:#f7fffd"><i></i><i></i></span><em>薄荷青白</em></button>
                         <button class="kf-theme-preset" type="button" data-preset="sakura" data-primary="#df5f91" data-secondary="#fff8fb"><span style="--swatch-a:#df5f91;--swatch-b:#fff8fb"><i></i><i></i></span><em>樱粉白</em></button>
-                        <button class="kf-theme-preset" type="button" data-preset="gray-blue" data-primary="#681414" data-secondary="#d7ccb6"><span style="--swatch-a:#681414;--swatch-b:#d7ccb6"><i></i><i></i></span><em>复古红</em></button>
-                        <button class="kf-theme-preset" type="button" data-preset="retro-red" data-primary="#3d5a80" data-secondary="##eaf2f8"><span style="--swatch-a:#3d5a80;--swatch-b:##eaf2f8"><i></i><i></i></span><em>雾色灰蓝</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="retro-red" data-primary="#681414" data-secondary="#d7ccb6"><span style="--swatch-a:#681414;--swatch-b:#d7ccb6"><i></i><i></i></span><em>复古红</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="gray-blue" data-primary="#3d5a80" data-secondary="#eaf2f8"><span style="--swatch-a:#3d5a80;--swatch-b:#eaf2f8"><i></i><i></i></span><em>雾霾灰蓝</em></button>
                     </div>
                     <input type="hidden" id="kf-theme-preset" value="default">
                 </section>
@@ -305,6 +306,11 @@
                         <span class="kf-io-option-icon"><svg><use href="#kf-i-download"/></svg></span>
                         <span class="kf-io-option-title">API 条目</span>
                         <span class="kf-io-option-desc">仅导出已保存的 API 条目</span>
+                    </button>
+                    <button class="kf-io-option kf-io-option-full" id="kf-export-all-config" type="button">
+                        <span class="kf-io-option-icon"><svg><use href="#kf-i-download"/></svg></span>
+                        <span class="kf-io-option-title">全部导出</span>
+                        <span class="kf-io-option-desc">导出所有组合、配置、插件设置</span>
                     </button>
                 </div>
                 <div class="kf-io-split"></div>

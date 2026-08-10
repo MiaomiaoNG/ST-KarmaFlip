@@ -1,4 +1,4 @@
-import { clearApiOverride, clearLogs, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, saveState, saveStateDebounced, setPendingApiOverride, toInt } from './plugin_state_store.js';
+import { clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, saveState, saveStateDebounced, setPendingApiOverride, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
@@ -43,8 +43,8 @@ const THEME_PRESETS = {
     'mist-purple': { primary: '#7659e8', secondary: '#fbfaff' },
     mint: { primary: '#119d9a', secondary: '#f7fffd' },
     sakura: { primary: '#df5f91', secondary: '#fff8fb' },
-    'warm-orange': { primary: '#e88627', secondary: '#fffaf3' },
-    'warm-yellow': { primary: '#d7a51f', secondary: '#fffbee' },
+    'retro-red': { primary: '#681414', secondary: '#d7ccb6' },
+    'gray-blue': { primary: '#3d5a80', secondary: '#eaf2f8' },
 };
 
 function normalizeProvider(provider) {
@@ -1576,7 +1576,7 @@ function renderEntries(state) {
                     <button class="kf-action-btn kf-accent-fill kf-fetch-models kf-entry-side-control">拉取模型</button>
                 </div>
                 <div class="kf-row kf-fixed-only kf-entry-details">
-                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">重试次数</span><input type="number" min="1" class="kf-inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">运行次数</span><input type="number" min="1" class="kf-inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
                 </div>
                 <div class="kf-row kf-random-only kf-entry-details">
                     <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">权重</span><input type="number" min="0" class="kf-inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
@@ -2162,6 +2162,17 @@ function exportApiPresets(state) {
     });
 }
 
+function exportAllConfig(state) {
+    syncAllFromControls(state);
+    syncActivePoolPresets(state);
+    exportJson(`ST-KarmaFlip-full-${exportStamp()}.json`, {
+        kind: 'ST-KarmaFlip/full',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        state: createExportSnapshot(state),
+    });
+}
+
 function readImportPools(payload) {
     if (payload?.kind === 'ST-KarmaFlip/pool' && payload.pool) return [payload.pool];
     if (payload?.kind === 'ST-KarmaFlip/pools' && Array.isArray(payload.pools)) return payload.pools;
@@ -2181,6 +2192,17 @@ function readImportPresets(payload) {
 }
 
 function importConfigPayload(state, payload) {
+    if (payload?.kind === 'ST-KarmaFlip/full' && payload.state && typeof payload.state === 'object') {
+        const imported = createExportSnapshot(payload.state);
+        for (const key of ['enabled', 'activePoolId', 'pools', 'apiPresets', 'theme', 'failure', 'shortcuts', 'ui']) {
+            state[key] = imported[key];
+        }
+        return {
+            pools: imported.pools.length,
+            presets: imported.apiPresets.length,
+            full: true,
+        };
+    }
     const pools = readImportPools(payload).map(clonePoolForImport);
     const presets = readImportPresets(payload).map(copyPresetForImport);
     if (!pools.length && !presets.length) {
@@ -2201,7 +2223,9 @@ async function importFromFile(state, file, rerender, setStatus) {
     persistNow(state);
     rerender();
     closeModal('kf-import-export-modal');
-    setStatus(`已导入 ${result.pools} 个组合，${result.presets} 个 API 条目`);
+    setStatus(result.full
+        ? `已恢复完整配置：${result.pools} 个组合，${result.presets} 个 API 条目`
+        : `已导入 ${result.pools} 个组合，${result.presets} 个 API 条目`);
 }
 
 function closeModal(id) {
@@ -2961,6 +2985,10 @@ function bind(state, rerender, setStatus) {
         exportApiPresets(state);
         setStatus('API 条目已导出');
     });
+    $('#kf-export-all-config').off('click.kf').on('click.kf', () => {
+        exportAllConfig(state);
+        setStatus('全部配置已导出');
+    });
     $('#kf-import-config').off('click.kf').on('click.kf', () => $('#kf-import-file').val('').trigger('click'));
     $('#kf-import-file').off('change.kf').on('change.kf', async function () {
         const file = this.files?.[0];
@@ -3011,7 +3039,10 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeThemeModal(state));
     $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('kf-settings-modal'));
-    $('#kf-api-entries-close').off('click.kf').on('click.kf', () => closeApiEntriesEditor(state, rerender, setStatus));
+    $('#kf-main-modal').off('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop').on('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop', function (event) {
+        event.stopPropagation();
+        closeApiEntriesEditor(state, rerender, setStatus);
+    });
     $('#kf-api-override-close').off('click.kf').on('click.kf', () => closeModal('kf-api-override-modal'));
     $('#kf-api-override-list').off('click.kf').on('click.kf', '.kf-api-override-option', function () {
         const pool = getActivePool(state);
@@ -3110,7 +3141,9 @@ function bind(state, rerender, setStatus) {
             colorPickerDragging = false;
         });
     $(document).off('keydown.kfColorPicker').on('keydown.kfColorPicker', function (event) {
-        if (event.key === 'Escape' && $('#kf-color-picker-modal').hasClass('kf-show')) closeColorPicker();
+        if (event.key !== 'Escape') return;
+        if ($('#kf-color-picker-modal').hasClass('kf-show')) closeColorPicker();
+        else if (apiEntriesEditorOpen) closeApiEntriesEditor(state, rerender, setStatus);
     });
 
     $('.kf-theme-preset').off('click.kf').on('click.kf', function () {

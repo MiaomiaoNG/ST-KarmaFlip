@@ -363,7 +363,11 @@ function createPersistedState(source) {
     snapshot.shortcuts.modeEnabled = snapshot.shortcuts.modeEnabled !== false;
     snapshot.shortcuts.powerEnabled = snapshot.shortcuts.powerEnabled !== false;
     snapshot.shortcuts.apiEnabled = snapshot.shortcuts.apiEnabled === true;
-    return normalizeState(snapshot);
+    return snapshot;
+}
+
+export function createExportSnapshot(state) {
+    return createPersistedState(state);
 }
 
 export function loadState() {
