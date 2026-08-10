@@ -2,16 +2,13 @@ import { clearApiOverride, clearLogs, enableStatePersistence, getActivePool, get
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-api-test-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.0';
+const UPDATE_NOTICE_VERSION = '1.2.5';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-1. 在日志中增加了请求API所对应的楼层；
-2. 增加新功能“指定API”。在设置中勾选“开启快捷方式-指定API”后可在快捷方式（QR按钮）中可以指定下一次聊天请求的API；
-3. 为适应API条目显示不全，增加新设置“紧凑 API 条目模式”；
-4. 修复了修改冷却时没有即时生效的问题
+1. 重做插件美化；
 
 2026年8月10日`;
 
@@ -38,12 +35,16 @@ let mainPanelBaseHeight = 0;
 let keyboardEditReleaseTimer = null;
 let apiEntriesEditorOpen = false;
 let apiEntriesForcedExpandedIds = new Set();
+let colorPickerTargetId = '';
+let colorPickerDragging = false;
+let colorPickerDraft = { h: 0, s: 1, v: 1 };
 const THEME_PRESETS = {
-    default: { bgMain: '#ffffff', bgSub: '#f7f9fc', underline: '#617b9b' },
-    'deep-space': { bgMain: '#1a1d24', bgSub: '#242831', underline: '#5c7c99' },
-    'black-coffee': { bgMain: '#24211e', bgSub: '#302c28', underline: '#ad7c59' },
-    'night-fir': { bgMain: '#1b211d', bgSub: '#242c26', underline: '#688e73' },
-    'soft-dark': { bgMain: '#141414', bgSub: '#1f1f1f', underline: '#666666' },
+    default: { primary: '#1677ff', secondary: '#ffffff' },
+    'mist-purple': { primary: '#7659e8', secondary: '#fbfaff' },
+    mint: { primary: '#119d9a', secondary: '#f7fffd' },
+    sakura: { primary: '#df5f91', secondary: '#fff8fb' },
+    'warm-orange': { primary: '#e88627', secondary: '#fffaf3' },
+    'warm-yellow': { primary: '#d7a51f', secondary: '#fffbee' },
 };
 
 function normalizeProvider(provider) {
@@ -57,69 +58,240 @@ function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function contrastText(hex) {
-    const clean = String(hex || '#ffffff').replace('#', '');
-    const r = parseInt(clean.slice(0, 2), 16);
-    const g = parseInt(clean.slice(2, 4), 16);
-    const b = parseInt(clean.slice(4, 6), 16);
-    const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-    return yiq >= 128 ? '#000000' : '#ffffff';
+function hexToRgb(hex) {
+    return hexToRgbArray(hex).map(value => Math.round(value)).join(', ');
 }
 
-function hexToRgb(hex) {
-    const clean = String(hex || '#617b9b').replace('#', '');
-    const value = clean.length === 3
-        ? clean.split('').map(x => x + x).join('')
-        : clean.padEnd(6, '0').slice(0, 6);
-    const r = parseInt(value.slice(0, 2), 16);
-    const g = parseInt(value.slice(2, 4), 16);
-    const b = parseInt(value.slice(4, 6), 16);
-    return [r, g, b].map(x => Number.isFinite(x) ? x : 0).join(', ');
+function normalizeHex(value, fallback = '#ffffff') {
+    const raw = String(value || '').trim();
+    const short = /^#([0-9a-f]{3})$/i.exec(raw);
+    if (short) return `#${short[1].split('').map(char => char + char).join('')}`.toLowerCase();
+    return /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : fallback;
+}
+
+function hexToRgbArray(hex) {
+    const clean = normalizeHex(hex, '#000000');
+    return [
+        parseInt(clean.slice(1, 3), 16),
+        parseInt(clean.slice(3, 5), 16),
+        parseInt(clean.slice(5, 7), 16),
+    ];
+}
+
+function rgbToHex(rgb) {
+    return `#${rgb.map(value => Math.round(value).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function mixRgb(from, to, amount) {
+    return from.map((value, index) => value * (1 - amount) + to[index] * amount);
+}
+
+function relativeLuminance(rgb) {
+    const channels = rgb.map(value => {
+        const channel = value / 255;
+        return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+    });
+    return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
+}
+
+function adaptiveText(rgb) {
+    return relativeLuminance(rgb) > 0.43 ? '#202938' : '#f7f9fc';
+}
+
+function clampNumber(value, min, max) {
+    const number = Number(value);
+    return Math.min(max, Math.max(min, Number.isFinite(number) ? number : min));
+}
+
+function rgbToHsv(rgb) {
+    const [r, g, b] = rgb.map(value => clampNumber(value, 0, 255) / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+    let hue = 0;
+    if (delta) {
+        if (max === r) hue = 60 * (((g - b) / delta) % 6);
+        else if (max === g) hue = 60 * (((b - r) / delta) + 2);
+        else hue = 60 * (((r - g) / delta) + 4);
+    }
+    if (hue < 0) hue += 360;
+    return { h: hue, s: max ? delta / max : 0, v: max };
+}
+
+function hsvToRgb({ h, s, v }) {
+    const hue = ((clampNumber(h, 0, 360) % 360) + 360) % 360;
+    const saturation = clampNumber(s, 0, 1);
+    const value = clampNumber(v, 0, 1);
+    const chroma = value * saturation;
+    const x = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const match = value - chroma;
+    let channels;
+    if (hue < 60) channels = [chroma, x, 0];
+    else if (hue < 120) channels = [x, chroma, 0];
+    else if (hue < 180) channels = [0, chroma, x];
+    else if (hue < 240) channels = [0, x, chroma];
+    else if (hue < 300) channels = [x, 0, chroma];
+    else channels = [chroma, 0, x];
+    return channels.map(channel => (channel + match) * 255);
+}
+
+function colorPickerHex() {
+    return rgbToHex(hsvToRgb(colorPickerDraft));
+}
+
+function setThemeColorControlValue(targetId, value) {
+    const color = normalizeHex(value, targetId === 'kf-theme-underline' ? '#1677ff' : '#ffffff');
+    $(`#${targetId}`).val(color);
+    $(`.kf-color-picker-trigger[data-color-target="${targetId}"]`)
+        .val(color)
+        .css('--kf-trigger-color', color);
+    return color;
+}
+
+function renderColorPicker() {
+    const hue = clampNumber(colorPickerDraft.h, 0, 360);
+    const saturation = clampNumber(colorPickerDraft.s, 0, 1);
+    const value = clampNumber(colorPickerDraft.v, 0, 1);
+    const rgb = hsvToRgb({ h: hue, s: saturation, v: value }).map(channel => Math.round(channel));
+    const hex = rgbToHex(rgb).toUpperCase();
+    $('#kf-color-field')
+        .css('--kf-picker-hue', hue)
+        .attr('aria-valuetext', hex)
+        .find('.kf-color-field-pointer')
+        .css({ left: `${saturation * 100}%`, top: `${(1 - value) * 100}%` });
+    $('#kf-color-hue').val(Math.round(hue)).css('--kf-picker-hue', hue);
+    $('#kf-color-preview').css('background-color', hex);
+    $('#kf-color-picker-hex').text(hex);
+    $('#kf-color-r').val(rgb[0]);
+    $('#kf-color-g').val(rgb[1]);
+    $('#kf-color-b').val(rgb[2]);
+}
+
+function openColorPicker(targetId) {
+    colorPickerTargetId = targetId;
+    const fallback = targetId === 'kf-theme-underline' ? '#1677ff' : '#ffffff';
+    const color = normalizeHex($(`#${targetId}`).val(), fallback);
+    colorPickerDraft = rgbToHsv(hexToRgbArray(color));
+    $('#kf-color-picker-title').text(targetId === 'kf-theme-underline' ? '选择主色调' : '选择辅色调');
+    renderColorPicker();
+    $('#kf-color-picker-modal').addClass('kf-show');
+    window.setTimeout(() => $('#kf-color-field').trigger('focus'), 0);
+}
+
+function closeColorPicker() {
+    colorPickerDragging = false;
+    closeModal('kf-color-picker-modal');
+}
+
+function updateColorPickerFromPointer(event) {
+    const field = document.getElementById('kf-color-field');
+    if (!field) return;
+    const rect = field.getBoundingClientRect();
+    colorPickerDraft.s = clampNumber((event.clientX - rect.left) / rect.width, 0, 1);
+    colorPickerDraft.v = 1 - clampNumber((event.clientY - rect.top) / rect.height, 0, 1);
+    renderColorPicker();
+}
+
+function resolveThemePalette(theme = {}) {
+    const primary = normalizeHex(theme.underline, '#1677ff');
+    const secondary = normalizeHex(theme.bgMain, '#ffffff');
+    const mode = theme.mode === 'dark' ? 'dark' : 'light';
+    const primaryRgb = hexToRgbArray(primary);
+    const secondaryRgb = hexToRgbArray(secondary);
+    const white = [255, 255, 255];
+    const black = [0, 0, 0];
+    let surface;
+    let surfaceSoft;
+    let surfaceStrong;
+    let pageStart;
+    let pageEnd;
+    let shadow;
+
+    if (mode === 'dark') {
+        const night = [23, 27, 34];
+        surface = mixRgb(night, secondaryRgb, 0.055);
+        surface = mixRgb(surface, primaryRgb, 0.020);
+        surfaceSoft = mixRgb(surface, white, 0.060);
+        surfaceStrong = mixRgb(surface, white, 0.115);
+        pageStart = mixRgb(surface, [12, 15, 20], 0.28);
+        pageStart = mixRgb(pageStart, primaryRgb, 0.018);
+        pageEnd = mixRgb(surface, [7, 9, 13], 0.48);
+        shadow = black;
+    } else {
+        surface = mixRgb(secondaryRgb, white, 0.72);
+        surfaceSoft = mixRgb(surface, primaryRgb, 0.020);
+        surfaceStrong = mixRgb(surface, white, 0.42);
+        pageStart = mixRgb(surface, primaryRgb, 0.028);
+        pageEnd = mixRgb(surface, primaryRgb, 0.060);
+        shadow = mixRgb(primaryRgb, [42, 72, 112], 0.72);
+    }
+
+    const ink = hexToRgbArray(adaptiveText(surface));
+    const muted = mixRgb(ink, surface, 0.43);
+    const mutedLight = mixRgb(ink, surface, 0.60);
+    const primaryStrong = mode === 'dark'
+        ? mixRgb(primaryRgb, white, 0.10)
+        : mixRgb(primaryRgb, black, 0.09);
+
+    return {
+        mode,
+        primary,
+        secondary,
+        primaryStrong: rgbToHex(primaryStrong),
+        surface: rgbToHex(surface),
+        surfaceSoft: rgbToHex(surfaceSoft),
+        surfaceStrong: rgbToHex(surfaceStrong),
+        pageStart: rgbToHex(pageStart),
+        pageEnd: rgbToHex(pageEnd),
+        ink: rgbToHex(ink),
+        muted: rgbToHex(muted),
+        mutedLight: rgbToHex(mutedLight),
+        onPrimary: adaptiveText(primaryRgb),
+        onPrimaryStrong: adaptiveText(primaryStrong),
+        onSecondary: adaptiveText(secondaryRgb),
+        shadow: rgbToHex(shadow),
+    };
 }
 
 function setThemeVars(target, theme) {
     if (!target) return;
-    const underline = theme.underline || '#617b9b';
-    target.style.setProperty('--bg-main', theme.bgMain || '#ffffff');
-    target.style.setProperty('--bg-sub', theme.bgSub || '#f7f9fc');
-    target.style.setProperty('--text-main', contrastText(theme.bgMain || '#ffffff'));
-    target.style.setProperty('--text-sub', contrastText(theme.bgSub || '#f7f9fc'));
-    target.style.setProperty('--text-accent', contrastText(underline));
-    target.style.setProperty('--underline-color', underline);
-    target.style.setProperty('--underline-rgb', hexToRgb(underline));
-}
-
-function applyBrush(root, style) {
-    let blend = 'multiply';
-    let opacity = '1';
-    const resolvedStyle = ['simple', 'native'].includes(style) ? style : 'simple';
-    root.style.setProperty('--brush-blend', blend);
-    root.style.setProperty('--brush-opacity', opacity);
-    root.dataset.brush = resolvedStyle;
-    for (const target of MODAL_IDS.map(id => document.getElementById(id)).filter(Boolean)) {
-        target.style.setProperty('--brush-blend', blend);
-        target.style.setProperty('--brush-opacity', opacity);
-        target.dataset.brush = resolvedStyle;
-    }
-    const toastLayer = document.getElementById('kf-toast-layer');
-    if (toastLayer) toastLayer.dataset.brush = resolvedStyle;
-    applyNativeClasses(resolvedStyle === 'native');
-}
-
-function applyNativeClasses(enabled) {
-    const root = $('#kf-root');
-    const modals = $('.kf-modal-overlay');
-    const scope = root.add(modals);
-    scope.find('.kf-action-btn').toggleClass('menu_button', enabled);
-    scope.find('.kf-inner-input,.kf-inner-select,select,textarea,.kf-stepper-input').toggleClass('text_pole', enabled);
-    modals.toggleClass('popup kf-native-popup', enabled);
+    const palette = resolveThemePalette(theme);
+    target.dataset.themeMode = palette.mode;
+    target.style.setProperty('--primary', palette.primary);
+    target.style.setProperty('--primary-strong', palette.primaryStrong);
+    target.style.setProperty('--primary-rgb', hexToRgb(palette.primary));
+    target.style.setProperty('--secondary', palette.secondary);
+    target.style.setProperty('--secondary-rgb', hexToRgb(palette.secondary));
+    target.style.setProperty('--surface', palette.surface);
+    target.style.setProperty('--surface-soft', palette.surfaceSoft);
+    target.style.setProperty('--surface-strong', palette.surfaceStrong);
+    target.style.setProperty('--surface-rgb', hexToRgb(palette.surface));
+    target.style.setProperty('--page-bg-start', palette.pageStart);
+    target.style.setProperty('--page-bg-end', palette.pageEnd);
+    target.style.setProperty('--ink', palette.ink);
+    target.style.setProperty('--muted', palette.muted);
+    target.style.setProperty('--muted-light', palette.mutedLight);
+    target.style.setProperty('--on-primary', palette.onPrimary);
+    target.style.setProperty('--on-primary-strong', palette.onPrimaryStrong);
+    target.style.setProperty('--on-secondary', palette.onSecondary);
+    target.style.setProperty('--shadow-color', hexToRgb(palette.shadow));
+    target.style.setProperty('--line', `rgba(${hexToRgb(palette.primary)}, 0.11)`);
+    target.style.setProperty('--line-strong', `rgba(${hexToRgb(palette.primary)}, 0.18)`);
+    target.style.setProperty('--bg-main', palette.surface);
+    target.style.setProperty('--bg-sub', palette.surfaceSoft);
+    target.style.setProperty('--text-main', palette.ink);
+    target.style.setProperty('--text-sub', palette.ink);
+    target.style.setProperty('--text-accent', palette.onPrimary);
+    target.style.setProperty('--underline-color', palette.primary);
+    target.style.setProperty('--underline-rgb', hexToRgb(palette.primary));
 }
 
 function updateGlobalToggleState(state) {
     const enabled = state.enabled !== false;
     const toggle = $('#kf-global-toggle');
     toggle.toggleClass('kf-active', enabled);
-    toggle.text(enabled ? '插件已开启' : '插件已关闭');
+    toggle.attr('data-enabled', String(enabled));
+    toggle.find('.kf-global-toggle-label').text(enabled ? '插件已开启' : '插件已关闭');
 }
 
 function updateModeState(state) {
@@ -128,11 +300,6 @@ function updateModeState(state) {
     $('#kf-mode-fixed').prop('checked', pool.mode === 'fixed');
     $('#kf-mode-random').prop('checked', pool.mode === 'random');
     $('#kf-no-streak').prop('checked', !!pool.random?.noConsecutive);
-}
-
-function updateThemePresetVisibility(state) {
-    const brush = state.theme?.brush === 'native' ? 'native' : 'simple';
-    $('#kf-theme-preset-row').toggle(brush === 'simple');
 }
 
 function getQrAssistantSettings() {
@@ -914,55 +1081,6 @@ function setPoolMode(state, nextMode, rerender, setStatus) {
     if (equalized) rerender();
 }
 
-function bindPressHold(area, options = {}) {
-    let timer = null;
-    let pointerId = null;
-    let startX = 0;
-    let startY = 0;
-    let longTriggered = false;
-    const threshold = Number(options.threshold) || 560;
-    const moveTolerance = Number(options.moveTolerance) || 8;
-    const clear = () => {
-        if (timer) window.clearTimeout(timer);
-        timer = null;
-        pointerId = null;
-        area.removeClass('pressing-on pressing-off');
-    };
-
-    area.off('.kfHold');
-    area.on('pointerdown.kfHold', function (event) {
-        if (event.button && event.button !== 0) return;
-        const active = typeof options.isActive === 'function' ? !!options.isActive() : false;
-        pointerId = event.pointerId;
-        startX = Number(event.clientX || 0);
-        startY = Number(event.clientY || 0);
-        longTriggered = false;
-        area.addClass(active ? 'pressing-off' : 'pressing-on');
-        area.get(0)?.setPointerCapture?.(event.pointerId);
-        timer = window.setTimeout(() => {
-            longTriggered = true;
-            clear();
-            options.onLong?.(event);
-        }, threshold);
-    });
-    area.on('pointermove.kfHold', function (event) {
-        if (pointerId !== event.pointerId) return;
-        const movedX = Math.abs(Number(event.clientX || 0) - startX);
-        const movedY = Math.abs(Number(event.clientY || 0) - startY);
-        if (movedX > moveTolerance || movedY > moveTolerance) clear();
-    });
-    area.on('pointerup.kfHold', function (event) {
-        if (pointerId !== null && pointerId !== event.pointerId) return;
-        const shouldRunShort = !longTriggered;
-        clear();
-        if (shouldRunShort) options.onShort?.(event);
-    });
-    area.on('pointercancel.kfHold pointerleave.kfHold', function (event) {
-        if (pointerId !== null && pointerId !== event.pointerId) return;
-        clear();
-    });
-}
-
 function bindChatShortcut(state, rerender, setStatus) {
     const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
     const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
@@ -984,7 +1102,6 @@ function applyThemeVisual(theme = {}) {
     if (!root) return;
     const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer')].filter(Boolean);
     for (const target of targets) setThemeVars(target, theme);
-    applyBrush(root, theme.brush || 'simple');
 }
 
 function applyTheme(state) {
@@ -992,35 +1109,54 @@ function applyTheme(state) {
     applyThemeVisual(theme);
     populateThemeControls(state);
     populateSettingsControls(state);
-    updateThemePresetVisibility(state);
     updateChatShortcut(state);
 }
 
 function populateThemeControls(state) {
     const theme = state.theme || {};
-    $('#kf-theme-bg-main').val(theme.bgMain || '#ffffff');
-    $('#kf-theme-bg-sub').val(theme.bgSub || '#f7f9fc');
-    $('#kf-theme-underline').val(theme.underline || '#617b9b');
-    const resolvedBrush = ['simple', 'native'].includes(theme.brush) ? theme.brush : 'simple';
-    $('#kf-theme-brush').val(resolvedBrush);
-    $('#kf-theme-preset').val(String(theme.preset || 'default'));
-    updateThemePresetVisibility(state);
+    const primary = normalizeHex(theme.underline, '#1677ff');
+    const secondary = normalizeHex(theme.bgMain, '#ffffff');
+    const mode = theme.mode === 'dark' ? 'dark' : 'light';
+    const requestedPreset = String(theme.preset || 'default');
+    const presetConfig = THEME_PRESETS[requestedPreset];
+    const preset = presetConfig
+        && normalizeHex(presetConfig.primary, '') === primary
+        && normalizeHex(presetConfig.secondary, '') === secondary
+        ? requestedPreset
+        : 'custom';
+    setThemeColorControlValue('kf-theme-bg-main', secondary);
+    $('#kf-theme-bg-sub').val(resolveThemePalette({ ...theme, bgMain: secondary, underline: primary, mode }).surfaceSoft);
+    setThemeColorControlValue('kf-theme-underline', primary);
+    $('#kf-theme-primary-hex').val(primary.toUpperCase());
+    $('#kf-theme-secondary-hex').val(secondary.toUpperCase());
+    $('#kf-theme-preset').val(preset);
+    $('.kf-theme-preset').toggleClass('kf-active', false)
+        .filter(function () { return String($(this).data('preset') || '') === preset; }).addClass('kf-active');
+    $('.kf-theme-mode').toggleClass('kf-active', false)
+        .filter(`[data-theme-mode="${mode}"]`).addClass('kf-active');
+    $('.kf-theme-quick-btn').each(function () {
+        const active = String($(this).data('themeMode') || '') === mode;
+        $(this).toggleClass('kf-active', active).attr('aria-pressed', String(active));
+    });
 }
 
 function readThemeDraftFromControls() {
-    const brush = String($('#kf-theme-brush').val() || 'simple');
+    const primary = normalizeHex($('#kf-theme-underline').val(), '#1677ff');
+    const secondary = normalizeHex($('#kf-theme-bg-main').val(), '#ffffff');
+    const mode = String($('.kf-theme-mode.kf-active').data('themeMode') || 'light') === 'dark' ? 'dark' : 'light';
+    const palette = resolveThemePalette({ underline: primary, bgMain: secondary, mode });
     return {
-        bgMain: $('#kf-theme-bg-main').val() || '#ffffff',
-        bgSub: $('#kf-theme-bg-sub').val() || '#f7f9fc',
-        underline: $('#kf-theme-underline').val() || '#617b9b',
-        brush: ['simple', 'native'].includes(brush) ? brush : 'simple',
+        bgMain: secondary,
+        bgSub: palette.surfaceSoft,
+        underline: primary,
+        mode,
         preset: String($('#kf-theme-preset').val() || 'default'),
     };
 }
 
 function previewThemeFromControls() {
     const draft = readThemeDraftFromControls();
-    $('#kf-theme-preset-row').toggle(draft.brush === 'simple');
+    $('#kf-theme-bg-sub').val(draft.bgSub);
     applyThemeVisual(draft);
 }
 
@@ -1299,17 +1435,19 @@ function renderPool(state) {
 
 function providerSelect(entry) {
     const options = [
-        ['open', 'OpenAI 兼容'],
-        ['gemini', 'Gemini 官方'],
-        ['claude', 'Claude 官方'],
+        ['open', 'OpenAI', 'OpenAI 兼容'],
+        ['gemini', 'Gemini', 'Gemini 官方'],
+        ['claude', 'Claude', 'Claude 官方'],
     ];
     const provider = normalizeProvider(entry.provider);
-    const selected = options.find(([value]) => value === provider)?.[1] || options[0][1];
+    const selectedOption = options.find(([value]) => value === provider) || options[0];
+    const selected = selectedOption[1];
+    const accessibleLabel = selectedOption[2];
     return `
-        <div class="kf-select-wrapper kf-provider-wrapper kf-two-strokes kf-accent-fill kf-flex-3">
-            <button type="button" class="kf-inner-select kf-entry-provider-display" data-provider="${esc(provider)}" aria-label="接口：${esc(selected)}">
+        <div class="kf-select-wrapper kf-provider-wrapper kf-two-strokes kf-accent-fill kf-entry-side-control">
+            <button type="button" class="kf-inner-select kf-entry-provider-display" data-provider="${esc(provider)}" aria-label="接口：${esc(accessibleLabel)}" title="${esc(accessibleLabel)}">
                 <span class="kf-provider-label">${esc(selected)}</span>
-                <span class="kf-provider-caret" aria-hidden="true">▼</span>
+                <svg class="kf-provider-caret" aria-hidden="true"><use href="#kf-i-chevron"/></svg>
             </button>
         </div>
     `;
@@ -1317,9 +1455,9 @@ function providerSelect(entry) {
 
 function providerOptions() {
     return [
-        { value: 'open', label: 'OpenAI 兼容' },
-        { value: 'gemini', label: 'Gemini 官方' },
-        { value: 'claude', label: 'Claude 官方' },
+        { value: 'open', label: 'OpenAI' },
+        { value: 'gemini', label: 'Gemini' },
+        { value: 'claude', label: 'Claude' },
     ];
 }
 
@@ -1353,20 +1491,14 @@ function updateEntryCollapsedRow(row, collapsed) {
     row.toggleClass('kf-collapsed', isCollapsed);
     const button = row.find('.kf-collapse');
     if (!button.length) return;
-    const label = isCollapsed ? '展开 API 条目' : '折叠 API 条目';
+    const label = isCollapsed ? '展开连接信息' : '折叠连接信息';
     button.attr('aria-label', label);
     button.attr('title', label);
     button.html(fanIcon(!isCollapsed));
 }
 
 function trashIcon() {
-    return `<svg class="kf-trash-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M4 7 H20"/>
-        <path d="M10 7 V5 H14 V7"/>
-        <path d="M7 7 L8 20 H16 L17 7"/>
-        <path d="M10 11 V17"/>
-        <path d="M14 11 V17"/>
-    </svg>`;
+    return '<svg class="kf-trash-icon" aria-hidden="true"><use href="#kf-i-trash"/></svg>';
 }
 
 function renderEntries(state) {
@@ -1380,7 +1512,7 @@ function renderEntries(state) {
     for (const entry of pool.entries || []) {
         const enabledChecked = entry.enabled !== false ? 'checked' : '';
         const nameHasOptions = apiPresetNames.some(name => name !== entry.name);
-        const nameArrow = nameHasOptions ? '<button class="kf-dropdown-arrow kf-entry-name-arrow" type="button">▼</button>' : '';
+        const nameArrow = nameHasOptions ? '<button class="kf-dropdown-arrow kf-entry-name-arrow" type="button" aria-label="选择 API 名称"><svg><use href="#kf-i-chevron"/></svg></button>' : '';
         if (compact) {
             root.append(`
                 <div class="kf-entry-block kf-compact-entry" data-id="${esc(entry.id)}">
@@ -1391,8 +1523,10 @@ function renderEntries(state) {
                             <span class="kf-check-text kf-accent-fill">启用</span>
                         </label>
                         <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}" placeholder="API 名称">${nameArrow}</div>
-                        <button class="kf-icon-btn kf-entry-window" type="button" aria-label="打开完整 API 条目" title="打开完整 API 条目">${entryWindowIcon()}</button>
-                        <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
+                        <div class="kf-entry-actions">
+                            <button class="kf-icon-btn kf-entry-window" type="button" aria-label="打开完整 API 条目" title="打开完整 API 条目">${entryWindowIcon()}</button>
+                            <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
+                        </div>
                     </div>
                 </div>
             `);
@@ -1406,9 +1540,9 @@ function renderEntries(state) {
         const collapsedClass = visualCollapsed ? ' kf-collapsed' : '';
         const preserveCollapsed = forceExpanded ? ' data-preserve-collapsed="true"' : '';
         const collapseIcon = fanIcon(!visualCollapsed);
-        const collapseLabel = visualCollapsed ? '展开 API 条目' : '折叠 API 条目';
+        const collapseLabel = visualCollapsed ? '展开连接信息' : '折叠连接信息';
         const modelHasOptions = getModelOptions(entry).some(model => model !== entry.model);
-        const modelArrow = modelHasOptions ? '<button class="kf-dropdown-arrow kf-entry-model-arrow" type="button">▼</button>' : '';
+        const modelArrow = modelHasOptions ? '<button class="kf-dropdown-arrow kf-entry-model-arrow" type="button" aria-label="选择模型"><svg><use href="#kf-i-chevron"/></svg></button>' : '';
         const urlPlaceholder = providerUrlPlaceholder(entry.provider);
         root.append(`
             <div class="kf-entry-block${collapsedClass}" data-id="${esc(entry.id)}"${preserveCollapsed}>
@@ -1419,29 +1553,30 @@ function renderEntries(state) {
                         <span class="kf-check-text kf-accent-fill">启用</span>
                     </label>
                     <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}" placeholder="API 名称">${nameArrow}</div>
-                    <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
-                    <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
+                    <div class="kf-entry-actions">
+                        <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
+                        <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
+                    </div>
                 </div>
-                <div class="kf-row kf-entry-details kf-entry-provider-row">
-                    <div class="kf-input-wrapper kf-flex-7"><span class="kf-label">URL</span><input type="text" class="kf-inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="${esc(urlPlaceholder)}"></div>
-                    ${providerSelect(entry)}
+                <div class="kf-row kf-entry-details kf-entry-secret-details">
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">URL</span><input type="text" class="kf-inner-input kf-entry-url" value="${esc(entry.apiUrl)}" placeholder="${esc(urlPlaceholder)}"></div>
                 </div>
-                <div class="kf-row kf-entry-details">
+                <div class="kf-row kf-entry-details kf-entry-secret-details kf-entry-side-row">
                     <div class="kf-input-wrapper kf-flex-1 kf-entry-key-wrap">
                         <span class="kf-label">KEY</span>
                         <input type="text" class="kf-inner-input kf-entry-key kf-key-masked" value="${esc(entry.key)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="latin" enterkeyhint="done" lang="en">
                         <button class="kf-eye-btn kf-key-eye" type="button" aria-label="显示 KEY" title="显示 KEY">
-                            <i class="fa-regular fa-eye"></i>
+                            <svg><use href="#kf-i-eye"/></svg>
                         </button>
                     </div>
-                    <button class="kf-action-btn kf-accent-fill kf-test-api" type="button">测试</button>
+                    ${providerSelect(entry)}
                 </div>
-                <div class="kf-row kf-entry-details">
+                <div class="kf-row kf-entry-details kf-entry-side-row">
                     <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">模型</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
-                    <button class="kf-action-btn kf-accent-fill kf-fetch-models">拉取模型</button>
+                    <button class="kf-action-btn kf-accent-fill kf-fetch-models kf-entry-side-control">拉取模型</button>
                 </div>
                 <div class="kf-row kf-fixed-only kf-entry-details">
-                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">运行次数</span><input type="number" min="1" class="kf-inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
+                    <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">重试次数</span><input type="number" min="1" class="kf-inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
                 </div>
                 <div class="kf-row kf-random-only kf-entry-details">
                     <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">权重</span><input type="number" min="0" class="kf-inner-input kf-entry-weight" value="${esc(entry.weight)}"></div>
@@ -1453,50 +1588,103 @@ function renderEntries(state) {
     }
 }
 
-function formatLog(log) {
+function logKind(log) {
     const event = String(log.event || '');
-    const type = event === 'pick'
-        ? '抽选记录'
-        : (log.success === false || event.includes('error') ? '发送报错' : '发送结果');
-    const date = new Date(log.time);
+    if (event === 'pick') return 'pick';
+    if (log.success === false || event.includes('error')) return 'error';
+    return 'success';
+}
+
+function logTimeParts(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return { full: String(value || ''), clock: String(value || '') };
     const pad = value => String(value).padStart(2, '0');
-    const timestamp = [
+    const day = [
         date.getFullYear(),
         pad(date.getMonth() + 1),
         pad(date.getDate()),
-    ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(':');
-    const parts = [
-        log.event || 'unknown',
-        log.trigger || '',
-        log.mode || '',
-        log.apiName || '',
-        log.model || '',
-        log.success === false ? '失败' : '成功',
-    ].filter(Boolean);
-    const status = log.status ? `HTTP ${log.status}` : '';
-    const error = log.error ? String(log.error) : '';
-    const detail = log.detail ? String(log.detail) : '';
-    const floor = log.messageId !== undefined && Number.isInteger(Number(log.messageId))
-        ? `[楼层:#${Number(log.messageId)}]`
-        : '';
-    return `[${type}][${timestamp}]${floor}${parts.join(' - ')}${status ? ` - ${status}` : ''}${error ? ` - ${error}` : ''}${detail ? ` - ${detail}` : ''}`;
+    ].join('-');
+    const clock = [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(':');
+    return { full: `${day} ${clock}`, clock };
 }
 
 function entryWindowIcon() {
-    return '<i class="fa-solid fa-arrow-up-right-from-square"></i>';
+    return '<svg aria-hidden="true"><use href="#kf-i-external"/></svg>';
 }
 
-function formatUsageStat(stat) {
-    const date = new Date(stat.lastTime);
-    const pad = value => String(value).padStart(2, '0');
-    const timestamp = Number.isNaN(date.getTime())
-        ? String(stat.lastTime || '')
-        : [
-            date.getFullYear(),
-            pad(date.getMonth() + 1),
-            pad(date.getDate()),
-        ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':');
-    return `[${stat.apiName || '未命名'}] [${stat.model || '未填模型'}] 调取次数(包括固定和随机模式) - ${stat.count || 0} - ${timestamp}`;
+function createLogSummary(log, kind) {
+    const summary = document.createElement('div');
+    summary.className = 'kf-log-summary';
+
+    const badge = document.createElement('span');
+    badge.className = `kf-log-badge kf-${kind}`;
+    badge.textContent = kind === 'pick' ? '抽选' : (kind === 'error' ? '报错' : '成功');
+
+    const center = document.createElement('div');
+    center.className = 'kf-log-center';
+    const model = document.createElement('span');
+    model.className = 'kf-log-model';
+    const apiName = String(log.apiName || '').trim();
+    const modelName = String(log.model || '').trim();
+    model.textContent = [apiName, modelName].filter(Boolean).join(' / ') || '未命名请求';
+    model.title = model.textContent;
+    const time = document.createElement('span');
+    time.className = 'kf-log-time';
+    const timeParts = logTimeParts(log.time);
+    time.textContent = timeParts.clock;
+    time.title = timeParts.full;
+    center.append(model, time);
+
+    const floor = document.createElement('span');
+    floor.className = 'kf-log-floor';
+    floor.textContent = log.messageId !== undefined && Number.isInteger(Number(log.messageId))
+        ? `#${Number(log.messageId)}`
+        : (log.status ? `HTTP ${log.status}` : '');
+    summary.append(badge, center, floor);
+    return summary;
+}
+
+function createLogRow(log) {
+    const kind = logKind(log);
+    const row = document.createElement('article');
+    row.className = 'kf-log-row';
+    row.dataset.kind = kind;
+    row.appendChild(createLogSummary(log, kind));
+    if (kind !== 'error') return row;
+
+    const detail = document.createElement('div');
+    detail.className = 'kf-log-detail';
+    const apiUrl = String(log.apiUrl || '').trim();
+    if (apiUrl) appendCopyableLogText(detail, `URL: ${apiUrl}`);
+    const responseDetail = String(log.responseBody ?? log.error ?? log.detail ?? '');
+    if (responseDetail) {
+        if (apiUrl) detail.appendChild(document.createTextNode('\n'));
+        appendCopyableLogText(detail, responseDetail);
+    }
+    if (detail.childNodes.length) row.appendChild(detail);
+    return row;
+}
+
+function createUsageStatRow(stat) {
+    const row = document.createElement('article');
+    row.className = 'kf-log-stat-row';
+    const summary = document.createElement('div');
+    summary.className = 'kf-log-summary';
+    const badge = document.createElement('span');
+    badge.className = 'kf-log-badge';
+    badge.textContent = `${stat.count || 0} 次`;
+    const center = document.createElement('div');
+    center.className = 'kf-log-center';
+    const model = document.createElement('span');
+    model.className = 'kf-log-model';
+    model.textContent = `${stat.apiName || '未命名'} / ${stat.model || '未填模型'}`;
+    center.appendChild(model);
+    const time = document.createElement('span');
+    time.className = 'kf-log-floor';
+    time.textContent = logTimeParts(stat.lastTime).clock;
+    summary.append(badge, center, time);
+    row.appendChild(summary);
+    return row;
 }
 
 function splitLogUrl(rawUrl) {
@@ -1574,32 +1762,34 @@ function currentLogFilter() {
 
 function renderLogs(state, filter = currentLogFilter()) {
     const source = loadState();
-    let lines = [];
-    if (filter === 'stats') {
-        lines = getUsageStats().slice(0, 50).map(formatUsageStat);
+    const titles = {
+        all: ['全部日志', '按时间倒序'],
+        error: ['报错', 'API 返回的原始信息'],
+        pick: ['抽选记录', '按时间倒序'],
+        stats: ['次数统计', '成功请求累计'],
+    };
+    const resolvedFilter = ['all', 'error', 'pick', 'stats'].includes(filter) ? filter : 'all';
+    const [title, meta] = titles[resolvedFilter];
+    $('#kf-log-panel-title').text(title);
+    $('#kf-log-panel-meta').text(meta);
+    const logBox = $('#kf-logs-list').empty();
+    const node = logBox.get(0);
+    if (!node) return;
+    const fragment = document.createDocumentFragment();
+
+    if (resolvedFilter === 'stats') {
+        getUsageStats().slice(0, 50).forEach(stat => fragment.appendChild(createUsageStatRow(stat)));
     } else {
-        const logs = [...(source.logs || [])].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        const logs = [...(source.logs || [])].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
         const filtered = logs.filter(log => {
-            if (filter === 'error') return log.success === false || String(log.event || '').includes('error');
-            if (filter === 'pick') return log.event === 'pick' || (log.event === 'request' && log.success !== false);
+            if (resolvedFilter === 'error') return logKind(log) === 'error';
+            if (resolvedFilter === 'pick') return log.event === 'pick';
             return String(log.event || '') !== 'stats';
         });
-        lines = filtered.slice(-50).map(formatLog);
+        filtered.slice(0, 50).forEach(log => fragment.appendChild(createLogRow(log)));
     }
-    const logBox = $('#kf-logs-list');
-    logBox.empty();
-    const node = logBox.get(0);
-    if (node) {
-        const fragment = document.createDocumentFragment();
-        lines.forEach((line, index) => {
-            appendCopyableLogText(fragment, line);
-            if (index < lines.length - 1) fragment.appendChild(document.createTextNode('\n'));
-        });
-        node.appendChild(fragment);
-        nextFrame(() => {
-            node.scrollTop = node.scrollHeight;
-        });
-    }
+    node.appendChild(fragment);
+    nextFrame(() => { node.scrollTop = 0; });
 }
 
 function syncEntryFromRow(entry, row, state) {
@@ -1626,7 +1816,7 @@ function setKeyMaskState(input, masked) {
     const button = keyInput.closest('.kf-input-wrapper').find('.kf-key-eye');
     button.attr('aria-label', masked ? '显示 KEY' : '隐藏 KEY');
     button.attr('title', masked ? '显示 KEY' : '隐藏 KEY');
-    button.html(`<i class="fa-regular ${masked ? 'fa-eye' : 'fa-eye-slash'}"></i>`);
+    button.html(`<svg aria-hidden="true"><use href="#kf-i-${masked ? 'eye' : 'eye-off'}"/></svg>`);
 }
 
 function rememberMainPanelBaseHeight() {
@@ -1721,29 +1911,9 @@ function syncThemeFromControls(state) {
     state.theme.bgMain = draft.bgMain;
     state.theme.bgSub = draft.bgSub;
     state.theme.underline = draft.underline;
-    state.theme.brush = draft.brush;
+    state.theme.mode = draft.mode;
+    delete state.theme.brush;
     state.theme.preset = draft.preset;
-}
-
-function applyThemePreset(state, presetKey) {
-    const preset = THEME_PRESETS[presetKey] || THEME_PRESETS.default;
-    state.theme.bgMain = preset.bgMain;
-    state.theme.bgSub = preset.bgSub;
-    state.theme.underline = preset.underline;
-    state.theme.preset = presetKey in THEME_PRESETS ? presetKey : 'default';
-}
-
-function syncFailureFromControls(state) {
-    state.failure.retryCount = Math.max(1, toInt($('#kf-failure-retry-count').val() || 3));
-    state.failure.retryDelaySeconds = toInt($('#kf-failure-retry-delay').val() ?? 3);
-    state.failure.alertEnabled = $('#kf-failure-alert-enabled').prop('checked');
-    state.failure.modelAlertEnabled = $('#kf-model-alert-enabled').prop('checked');
-    state.shortcuts = state.shortcuts || {};
-    state.shortcuts.modeEnabled = $('#kf-shortcut-mode-enabled').prop('checked');
-    state.shortcuts.powerEnabled = $('#kf-shortcut-power-enabled').prop('checked');
-    state.shortcuts.apiEnabled = $('#kf-shortcut-api-enabled').prop('checked');
-    state.ui = state.ui || {};
-    state.ui.compactApiEntries = $('#kf-compact-api-entries').prop('checked');
 }
 
 function readFailureSettingsDraft() {
@@ -2105,10 +2275,6 @@ function ensureToastLayer() {
     layer = $('<div id="kf-toast-layer" class="kf-toast-layer"></div>');
     layer.attr('data-global-toast', 'true');
     document.body.appendChild(layer.get(0));
-    const state = loadState();
-    const root = document.getElementById('kf-root');
-    const resolvedBrush = root?.dataset?.brush || state.theme?.brush || 'simple';
-    layer.get(0).dataset.brush = ['simple', 'native'].includes(resolvedBrush) ? resolvedBrush : 'simple';
     return layer;
 }
 
@@ -2126,7 +2292,7 @@ function showToast(message, type = 'info', timeout = 2800) {
 window.STKarmaFlip.showToast = showToast;
 
 function closeDropdown() {
-    $('#kf-dropdown-modal').removeClass('kf-show');
+    $('#kf-dropdown-modal').removeClass('kf-show kf-api-name-picker');
     $('#kf-mobile-options').empty();
 }
 
@@ -2152,13 +2318,16 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
 
     closeDropdown();
     $('#kf-dropdown-title').text(title || '选择');
+    $('#kf-dropdown-modal').toggleClass('kf-api-name-picker', config.kind === 'api-name');
     const box = $('#kf-mobile-options').empty();
     for (const option of unique) {
         const deleteButton = config.deletable
-            ? '<button class="kf-option-delete kf-action-btn kf-accent-fill" type="button">删除</button>'
+            ? `<button class="kf-option-delete kf-icon-btn kf-danger" type="button" title="删除 API 条目" aria-label="删除 API 条目">${trashIcon()}</button>`
             : '';
         if (config.deletable) {
-            box.append(`<div class="kf-mobile-option-row" data-value="${esc(option.value)}">${deleteButton}<button class="kf-mobile-option kf-option-label kf-option-name" type="button" data-value="${esc(option.value)}">${esc(option.label)}</button></div>`);
+            const detail = String(option.item?.model || option.item?.apiUrl || '').trim();
+            const detailHtml = detail ? `<span class="kf-option-meta">${esc(detail)}</span>` : '';
+            box.append(`<div class="kf-mobile-option-row" data-value="${esc(option.value)}"><button class="kf-mobile-option kf-option-label kf-option-name" type="button" data-value="${esc(option.value)}"><span class="kf-option-title">${esc(option.label)}</span>${detailHtml}</button>${deleteButton}</div>`);
         } else {
             box.append(`<div class="kf-mobile-option" data-value="${esc(option.value)}">${esc(option.label)}</div>`);
         }
@@ -2222,7 +2391,7 @@ function openEntryNamePicker(state, row, input, rerender) {
     const pool = getActivePool(state);
     const entry = pool.entries.find(e => e.id === row.data('id'));
     const options = savedApiEntries(state).map(item => ({ value: item.name, label: item.name, item }));
-    openOptionPicker(input, options, '选择 API 设定', (name) => {
+    openOptionPicker(input, options, '选择 API 名称', (name) => {
         if (!entry) return;
         const preset = findSavedApiEntry(state, name, entry.id);
         if (preset) {
@@ -2234,6 +2403,7 @@ function openEntryNamePicker(state, row, input, rerender) {
         saveApiPreset(state, entry);
         persistNow(state);
     }, {
+        kind: 'api-name',
         deletable: true,
         onDelete: (item) => {
             const deleted = deleteSavedApiEntry(state, item);
@@ -2309,23 +2479,6 @@ function buildStatusPayload(entry) {
     };
     if (source === 'makersuite') payload.google_model = entry.model || '';
     if (source === 'claude') payload.claude_model = entry.model || '';
-    return payload;
-}
-
-function buildTestGeneratePayload(entry) {
-    const source = chatCompletionSource(entry.provider);
-    const payload = {
-        chat_completion_source: source,
-        reverse_proxy: providerBaseUrl(entry.apiUrl, entry.provider),
-        proxy_password: entry.key,
-        model: entry.model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 1,
-        stream: false,
-        quiet: true,
-    };
-    if (source === 'makersuite') payload.google_model = entry.model;
-    if (source === 'claude') payload.claude_model = entry.model;
     return payload;
 }
 
@@ -2426,63 +2579,6 @@ function statusFailureMessage(payload, rawBody) {
         return payload.message;
     }
     return '';
-}
-
-async function testStatusEntry(entry) {
-    if (!entry.apiUrl) throw new Error('请先填写 URL');
-    const response = await postChatBackend('/api/backends/chat-completions/status', buildStatusPayload(entry));
-    const body = await readResponseText(response);
-    const payload = parseMaybeJson(body);
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}${body ? `\n${body}` : ''}`);
-    }
-    const failure = statusFailureMessage(payload, body);
-    if (failure) throw new Error(failure);
-    const models = modelsFromStatusPayload(payload);
-    const ok = payload === true || payload?.ok === true || payload?.success === true || payload?.result === true || payload?.online === true || payload?.connected === true || models.length > 0;
-    if (!ok) {
-        return {
-            status: response.status,
-            models,
-            body: body || '状态接口返回空内容',
-            uncertain: true,
-        };
-    }
-    return {
-        status: response.status,
-        models,
-        body: body || responsePreview(payload),
-    };
-}
-
-async function testGenerateEntry(entry) {
-    if (!entry.apiUrl) throw new Error('请先填写 URL');
-    if (!entry.model) throw new Error('请先填写模型');
-    const response = await postChatBackend('/api/backends/chat-completions/generate', buildTestGeneratePayload(entry));
-    const body = await readResponseText(response);
-    const payload = parseMaybeJson(body);
-    if (!response.ok) throw new Error(`HTTP ${response.status}${body ? `\n${body}` : ''}`);
-    const failure = statusFailureMessage(payload, body);
-    if (failure) throw new Error(failure);
-    return {
-        status: response.status,
-        models: [],
-        body: body || responsePreview(payload) || '生成接口返回空内容',
-    };
-}
-
-async function testProviderEntry(entry) {
-    if (normalizeProvider(entry.provider) === 'claude') return testGenerateEntry(entry);
-    return testStatusEntry(entry);
-}
-
-function showApiTestResult(ok, message, detail = '') {
-    $('#kf-api-test-status')
-        .toggleClass('kf-success', !!ok)
-        .toggleClass('kf-error', !ok)
-        .text(message || (ok ? '测试成功' : '测试失败'));
-    $('#kf-api-test-detail').text(detail || '');
-    $('#kf-api-test-modal').addClass('kf-show');
 }
 
 function isDragExcluded(target) {
@@ -2844,31 +2940,6 @@ function bind(state, rerender, setStatus) {
             showToast(message, 'error');
         }
     });
-    $('#kf-entry-list').on('click.kf', '.kf-test-api', async function () {
-        const pool = getActivePool(state);
-        const row = $(this).closest('.kf-entry-block');
-        const entry = pool.entries.find(e => e.id === row.data('id'));
-        if (!entry) return;
-        syncEntryFromRow(entry, row, state);
-        const button = $(this);
-        button.prop('disabled', true).text('测试中');
-        try {
-            const result = await testProviderEntry(entry);
-            showApiTestResult(
-                !result.uncertain,
-                `${result.uncertain ? '状态未确认' : '连接成功'}：HTTP ${result.status}`,
-                result.models.length ? `可用模型数：${result.models.length}\n${result.models.join('\n')}` : result.body,
-            );
-            setStatus(result.uncertain ? 'API连通状态未确认' : 'API连通测试成功');
-        } catch (error) {
-            const message = String(error?.message || error || '测试失败');
-            showApiTestResult(false, '连接失败', message);
-            setStatus('API连通测试失败');
-        } finally {
-            button.prop('disabled', false).text('测试');
-        }
-    });
-
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => {
         populateSettingsControls(state);
         $('#kf-settings-modal').addClass('kf-show');
@@ -2965,7 +3036,6 @@ function bind(state, rerender, setStatus) {
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
     $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, rerender, setStatus));
     $('#kf-update-notice-close,#kf-update-notice-confirm').off('click.kf').on('click.kf', () => confirmUpdateNotice(state));
-    $('#kf-api-test-close').off('click.kf').on('click.kf', () => closeModal('kf-api-test-modal'));
     $('#kf-sequence-confirm').off('click.kf').on('click.kf', () => closeModal('kf-sequence-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
     $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));
@@ -2982,6 +3052,7 @@ function bind(state, rerender, setStatus) {
             event.stopPropagation();
             if (event.target !== this) return;
             if (this.id === 'kf-theme-modal') closeThemeModal(state);
+            else if (this.id === 'kf-color-picker-modal') closeColorPicker();
             else if (this.id === 'kf-update-notice-modal') confirmUpdateNotice(state);
             else if (this.id === 'kf-main-modal' && apiEntriesEditorOpen) closeApiEntriesEditor(state, rerender, setStatus);
             else $(this).removeClass('kf-show');
@@ -2995,19 +3066,106 @@ function bind(state, rerender, setStatus) {
         closeDropdown();
     });
 
-    $('#kf-theme-brush').off('input.kf change.kf').on('input.kf change.kf', function () {
-        previewThemeFromControls();
+    $('.kf-color-picker-trigger').off('click.kf').on('click.kf', function () {
+        openColorPicker(String($(this).data('colorTarget') || 'kf-theme-underline'));
     });
-    $('#kf-theme-preset').off('change.kf').on('change.kf', function () {
-        const presetKey = String($(this).val() || 'default');
+    $('#kf-color-picker-close,#kf-color-picker-cancel').off('click.kf').on('click.kf', () => closeColorPicker());
+    $('#kf-color-picker-confirm').off('click.kf').on('click.kf', function () {
+        if (!colorPickerTargetId) return closeColorPicker();
+        const color = setThemeColorControlValue(colorPickerTargetId, colorPickerHex());
+        $(`#${colorPickerTargetId}`).val(color).trigger('input');
+        closeColorPicker();
+    });
+    $('#kf-color-hue').off('input.kf change.kf').on('input.kf change.kf', function () {
+        colorPickerDraft.h = clampNumber($(this).val(), 0, 360);
+        renderColorPicker();
+    });
+    $('#kf-color-r,#kf-color-g,#kf-color-b').off('input.kf change.kf').on('input.kf change.kf', function () {
+        const values = ['#kf-color-r', '#kf-color-g', '#kf-color-b'].map(selector => String($(selector).val() ?? '').trim());
+        if (values.some(value => value === '')) return;
+        colorPickerDraft = rgbToHsv(values.map(value => clampNumber(value, 0, 255)));
+        renderColorPicker();
+    });
+    $('#kf-color-field').off('pointerdown.kf keydown.kf')
+        .on('pointerdown.kf', function (event) {
+            event.preventDefault();
+            colorPickerDragging = true;
+            updateColorPickerFromPointer(event);
+        })
+        .on('keydown.kf', function (event) {
+            const step = event.shiftKey ? 0.05 : 0.01;
+            if (event.key === 'ArrowLeft') colorPickerDraft.s = clampNumber(colorPickerDraft.s - step, 0, 1);
+            else if (event.key === 'ArrowRight') colorPickerDraft.s = clampNumber(colorPickerDraft.s + step, 0, 1);
+            else if (event.key === 'ArrowUp') colorPickerDraft.v = clampNumber(colorPickerDraft.v + step, 0, 1);
+            else if (event.key === 'ArrowDown') colorPickerDraft.v = clampNumber(colorPickerDraft.v - step, 0, 1);
+            else return;
+            event.preventDefault();
+            renderColorPicker();
+        });
+    $(document).off('pointermove.kfColorPicker pointerup.kfColorPicker pointercancel.kfColorPicker')
+        .on('pointermove.kfColorPicker', function (event) {
+            if (colorPickerDragging) updateColorPickerFromPointer(event);
+        })
+        .on('pointerup.kfColorPicker pointercancel.kfColorPicker', function () {
+            colorPickerDragging = false;
+        });
+    $(document).off('keydown.kfColorPicker').on('keydown.kfColorPicker', function (event) {
+        if (event.key === 'Escape' && $('#kf-color-picker-modal').hasClass('kf-show')) closeColorPicker();
+    });
+
+    $('.kf-theme-preset').off('click.kf').on('click.kf', function () {
+        const presetKey = String($(this).data('preset') || 'default');
         const preset = THEME_PRESETS[presetKey] || THEME_PRESETS.default;
-        $('#kf-theme-bg-main').val(preset.bgMain);
-        $('#kf-theme-bg-sub').val(preset.bgSub);
-        $('#kf-theme-underline').val(preset.underline);
+        $('#kf-theme-preset').val(presetKey);
+        setThemeColorControlValue('kf-theme-underline', preset.primary);
+        setThemeColorControlValue('kf-theme-bg-main', preset.secondary);
+        $('#kf-theme-primary-hex').val(preset.primary.toUpperCase());
+        $('#kf-theme-secondary-hex').val(preset.secondary.toUpperCase());
+        $('.kf-theme-preset').removeClass('kf-active');
+        $(this).addClass('kf-active');
         previewThemeFromControls();
     });
-    $('#kf-theme-bg-main,#kf-theme-bg-sub,#kf-theme-underline').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('.kf-theme-mode').off('click.kf').on('click.kf', function () {
+        $('.kf-theme-mode').removeClass('kf-active');
+        $(this).addClass('kf-active');
+        previewThemeFromControls();
+    });
+    $('.kf-theme-quick-btn').off('click.kf').on('click.kf', function () {
+        state.theme.mode = String($(this).data('themeMode') || '') === 'dark' ? 'dark' : 'light';
+        applyTheme(state);
+        persistNow(state);
+        setStatus(state.theme.mode === 'dark' ? '已切换夜间模式' : '已切换白天模式');
+    });
+    $('#kf-theme-underline,#kf-theme-bg-main').off('input.kf change.kf').on('input.kf change.kf', function () {
+        const isPrimary = this.id === 'kf-theme-underline';
+        const color = normalizeHex($(this).val(), isPrimary ? '#1677ff' : '#ffffff');
+        setThemeColorControlValue(this.id, color);
+        $(isPrimary ? '#kf-theme-primary-hex' : '#kf-theme-secondary-hex').val(color.toUpperCase());
+        $('#kf-theme-preset').val('custom');
+        $('.kf-theme-preset').removeClass('kf-active');
+        previewThemeFromControls();
+    });
+    $('#kf-theme-primary-hex,#kf-theme-secondary-hex').off('input.kf change.kf').on('input.kf change.kf', function (event) {
+        const isPrimary = this.id === 'kf-theme-primary-hex';
+        const fallback = isPrimary ? '#1677ff' : '#ffffff';
+        const raw = String($(this).val() || '').trim();
+        if (event.type === 'input' && !/^#[0-9a-f]{6}$/i.test(raw)) return;
+        const color = normalizeHex(raw, fallback);
+        $(this).val(color.toUpperCase());
+        setThemeColorControlValue(isPrimary ? 'kf-theme-underline' : 'kf-theme-bg-main', color);
+        $('#kf-theme-preset').val('custom');
+        $('.kf-theme-preset').removeClass('kf-active');
+        previewThemeFromControls();
+    });
+    $('#kf-theme-reset').off('click.kf').on('click.kf', function () {
+        const preset = THEME_PRESETS.default;
         $('#kf-theme-preset').val('default');
+        setThemeColorControlValue('kf-theme-underline', preset.primary);
+        setThemeColorControlValue('kf-theme-bg-main', preset.secondary);
+        $('#kf-theme-primary-hex').val(preset.primary.toUpperCase());
+        $('#kf-theme-secondary-hex').val(preset.secondary.toUpperCase());
+        $('.kf-theme-preset').removeClass('kf-active').filter('[data-preset="default"]').addClass('kf-active');
+        $('.kf-theme-mode').removeClass('kf-active').filter('[data-theme-mode="light"]').addClass('kf-active');
         previewThemeFromControls();
     });
     $('#kf-failure-retry-count,#kf-failure-retry-delay,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-mode-enabled,#kf-shortcut-power-enabled,#kf-shortcut-api-enabled,#kf-compact-api-entries').off('input.kf change.kf').on('input.kf change.kf', function () {

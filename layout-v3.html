@@ -1,0 +1,328 @@
+<div id="kf-extension-root" hidden>
+    <svg class="kf-icon-sprite" aria-hidden="true">
+        <symbol id="kf-i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+        <symbol id="kf-i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="kf-i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+        <symbol id="kf-i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="10" height="10" rx="2"/><path d="M6 16H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+        <symbol id="kf-i-pen" viewBox="0 0 24 24"><path d="M4 20l4.5-1 10-10a2.2 2.2 0 0 0-3.1-3.1l-10 10L4 20z"/><path d="M13.9 7.4l3.1 3.1"/></symbol>
+        <symbol id="kf-i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
+        <symbol id="kf-i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></symbol>
+        <symbol id="kf-i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+        <symbol id="kf-i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a14.8 14.8 0 0 1-2.4 3.1M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6a9.5 9.5 0 0 0 3.1-.5M10.1 10.1a2.6 2.6 0 0 0 3.8 3.8"/></symbol>
+        <symbol id="kf-i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9L7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
+        <symbol id="kf-i-log" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></symbol>
+        <symbol id="kf-i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.4 4.1 4.1 1.4-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3zM18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></symbol>
+        <symbol id="kf-i-transfer" viewBox="0 0 24 24"><path d="M7 7h12M15 3l4 4-4 4M17 17H5M9 13l-4 4 4 4"/></symbol>
+        <symbol id="kf-i-download" viewBox="0 0 24 24"><path d="M12 3v11M8 10l4 4 4-4M5 18v2h14v-2"/></symbol>
+        <symbol id="kf-i-upload" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5 18v2h14v-2"/></symbol>
+        <symbol id="kf-i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.6-2.8 8-7 10-4.2-2-7-5.4-7-10V6l7-3zM12 8v5M12 16h.01"/></symbol>
+        <symbol id="kf-i-chevron" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
+        <symbol id="kf-i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M4.5 4.5l1.4 1.4M18.1 18.1l1.4 1.4M2.5 12h2M19.5 12h2M4.5 19.5l1.4-1.4M18.1 5.9l1.4-1.4"/></symbol>
+        <symbol id="kf-i-moon" viewBox="0 0 24 24"><path d="M20 15.2A8 8 0 0 1 8.8 4 8.1 8.1 0 1 0 20 15.2z"/></symbol>
+        <symbol id="kf-i-external" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8M17 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h5"/></symbol>
+    </svg>
+    <div class="kf-modal-overlay" id="kf-main-modal">
+        <div class="kf-modal-box kf-main-box">
+            <header class="kf-main-header">
+                <div class="kf-theme-quick-toggle" aria-label="外观模式快速切换">
+                    <button class="kf-theme-quick-btn" type="button" data-theme-mode="light" title="白天模式" aria-label="白天模式"><svg><use href="#kf-i-sun"/></svg></button>
+                    <button class="kf-theme-quick-btn" type="button" data-theme-mode="dark" title="夜间模式" aria-label="夜间模式"><svg><use href="#kf-i-moon"/></svg></button>
+                </div>
+                <div class="kf-brand"><span class="kf-brand-dot"></span><span>API随机临幸</span></div>
+                <button class="kf-icon-btn kf-close-btn" id="kf-main-close" type="button" title="关闭" aria-label="关闭主界面">
+                    <svg><use href="#kf-i-x"/></svg>
+                </button>
+            </header>
+
+            <main class="kf-plugin-container" id="kf-root" data-mode="fixed">
+                <section class="kf-block">
+                    <div class="kf-section-head">
+                        <h2 class="kf-title">组合管理</h2>
+                        <div class="kf-section-actions">
+                            <button id="kf-btn-new-pool" class="kf-icon-btn" type="button" title="添加组合" aria-label="添加组合"><svg><use href="#kf-i-plus"/></svg></button>
+                            <button id="kf-btn-copy-pool" class="kf-icon-btn" type="button" title="复制组合" aria-label="复制组合"><svg><use href="#kf-i-copy"/></svg></button>
+                            <button id="kf-btn-rename-pool" class="kf-icon-btn" type="button" title="修改组合名称" aria-label="修改组合名称"><svg><use href="#kf-i-pen"/></svg></button>
+                            <button id="kf-btn-delete-pool" class="kf-icon-btn kf-danger" type="button" title="删除组合" aria-label="删除组合"><svg><use href="#kf-i-trash"/></svg></button>
+                        </div>
+                    </div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-select-wrapper" id="kf-pool-picker">
+                        <input type="text" id="kf-pool-picker-display" class="kf-inner-select kf-dropdown-input" aria-label="当前组合">
+                        <button class="kf-dropdown-arrow" id="kf-pool-picker-arrow" type="button" title="选择组合" aria-label="选择组合"><svg><use href="#kf-i-chevron"/></svg></button>
+                    </div>
+                </section>
+
+                <section class="kf-block" id="kf-api-entries-block">
+                    <div class="kf-section-head">
+                        <h2 class="kf-title">API条目</h2>
+                        <div class="kf-section-actions">
+                            <button class="kf-icon-btn" id="kf-btn-sequence-check" type="button" title="顺序检测" aria-label="顺序检测"><svg><use href="#kf-i-search"/></svg></button>
+                            <button class="kf-icon-btn" id="kf-btn-add-entry" type="button" title="添加条目" aria-label="添加条目"><svg><use href="#kf-i-plus"/></svg></button>
+                            <button class="kf-icon-btn kf-api-entries-close" id="kf-api-entries-close" type="button" title="关闭完整编辑" aria-label="关闭完整编辑"><svg><use href="#kf-i-x"/></svg></button>
+                        </div>
+                    </div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-mode-controls">
+                        <label class="kf-toggle-chip kf-mode-control">
+                            <input type="radio" name="kf-api-mode" id="kf-mode-fixed" value="fixed">
+                            <span class="kf-check-text">固定模式</span>
+                        </label>
+                        <label class="kf-toggle-chip kf-mode-control">
+                            <input type="radio" name="kf-api-mode" id="kf-mode-random" value="random">
+                            <span class="kf-check-text">随机模式</span>
+                        </label>
+                        <label class="kf-toggle-chip kf-mode-control" title="避免连续使用同一个 API">
+                            <input type="checkbox" id="kf-no-streak">
+                            <span class="kf-check-text">避免连续选择</span>
+                        </label>
+                    </div>
+                    <div class="kf-entries-container" id="kf-entry-list"></div>
+                </section>
+
+                <section class="kf-block kf-plugin-settings-block">
+                    <div class="kf-section-head"><h2 class="kf-title">插件设置</h2></div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-plugin-actions">
+                        <button class="kf-action-btn" id="kf-btn-settings" type="button"><svg><use href="#kf-i-settings"/></svg><span>设置</span></button>
+                        <button class="kf-action-btn" id="kf-btn-logs" type="button"><svg><use href="#kf-i-log"/></svg><span>日志</span></button>
+                        <button class="kf-action-btn" id="kf-btn-theme" type="button"><svg><use href="#kf-i-sparkle"/></svg><span>美化</span></button>
+                        <button class="kf-action-btn" id="kf-btn-import-export" type="button"><svg><use href="#kf-i-transfer"/></svg><span>导入/导出</span></button>
+                    </div>
+                    <button class="kf-global-toggle" id="kf-global-toggle" type="button"><span class="kf-status-dot"></span><span class="kf-global-toggle-label">插件已关闭</span></button>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-update-notice-modal">
+        <section class="kf-modal-box kf-update-notice-box">
+            <header class="kf-modal-header"><h2>更新公告</h2><button class="kf-icon-btn kf-close-btn" id="kf-update-notice-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-update-notice-body" id="kf-update-notice-body"></div>
+            <footer class="kf-modal-footer kf-modal-actions-single"><button class="kf-action-btn kf-primary-btn" id="kf-update-notice-confirm" type="button">知道了</button></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-log-modal">
+        <section class="kf-modal-box kf-wide-dialog">
+            <header class="kf-modal-header"><h2>系统日志</h2><button class="kf-icon-btn kf-close-btn" id="kf-log-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-log-body">
+                <div class="kf-log-filter-row">
+                    <button class="kf-log-filter kf-active" data-filter="all" type="button">全部</button>
+                    <button class="kf-log-filter" data-filter="error" type="button">报错</button>
+                    <button class="kf-log-filter" data-filter="pick" type="button">抽选记录</button>
+                    <button class="kf-log-filter" data-filter="stats" type="button">次数统计</button>
+                </div>
+                <section class="kf-log-panel">
+                    <div class="kf-log-panel-head"><strong id="kf-log-panel-title">全部日志</strong><span id="kf-log-panel-meta">按时间倒序</span></div>
+                    <div class="kf-section-divider"></div>
+                    <div id="kf-logs-list" class="kf-logs-list" role="log" aria-live="polite"></div>
+                </section>
+                <p class="kf-log-note">日志信息在酒馆重启后清空，不做长期储存</p>
+            </div>
+            <footer class="kf-modal-footer"><button class="kf-action-btn kf-secondary-btn" id="kf-log-clear" type="button"><svg><use href="#kf-i-trash"/></svg><span>清空</span></button></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-dropdown-modal">
+        <section class="kf-modal-box kf-picker-dialog">
+            <header class="kf-modal-header"><h2 id="kf-dropdown-title">选择</h2><button class="kf-icon-btn kf-close-btn" id="kf-dropdown-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-mobile-options" id="kf-mobile-options"></div>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-settings-modal">
+        <section class="kf-modal-box kf-wide-dialog">
+            <header class="kf-modal-header"><h2>请求设置</h2><button class="kf-icon-btn kf-close-btn" id="kf-settings-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-settings-body">
+                <section class="kf-settings-group">
+                    <div class="kf-group-head"><strong>重试策略</strong><span>请求失败后的处理</span></div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">API失败自动重试次数</span><small>请求失败后自动重新尝试的最大次数</small></div>
+                        <div class="kf-stepper" title="单轮次数">
+                            <button type="button" class="kf-stepper-arrow kf-stepper-down" aria-label="减少"><svg><use href="#kf-i-minus"/></svg></button>
+                            <input type="number" min="1" id="kf-failure-retry-count" class="kf-stepper-input" value="3" aria-label="API失败自动重试次数">
+                            <button type="button" class="kf-stepper-arrow kf-stepper-up" aria-label="增加"><svg><use href="#kf-i-plus"/></svg></button>
+                        </div>
+                    </div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">重试间隔</span><small>每次自动重试前等待的时间，单位：秒</small></div>
+                        <div class="kf-stepper" title="失败后等待秒数">
+                            <button type="button" class="kf-stepper-arrow kf-stepper-down" data-stepper-target="kf-failure-retry-delay" aria-label="减少"><svg><use href="#kf-i-minus"/></svg></button>
+                            <input type="number" min="0" id="kf-failure-retry-delay" class="kf-stepper-input" value="3" aria-label="重试间隔">
+                            <button type="button" class="kf-stepper-arrow kf-stepper-up" data-stepper-target="kf-failure-retry-delay" aria-label="增加"><svg><use href="#kf-i-plus"/></svg></button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="kf-settings-group">
+                    <div class="kf-group-head"><strong>提醒</strong><span>异常与模型提示</span></div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">API失败提醒</span><small>API 请求最终失败时显示提醒</small></div>
+                        <label class="kf-square-check"><input type="checkbox" id="kf-failure-alert-enabled"><span class="kf-square-box"></span></label>
+                    </div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">模型提醒</span><small>每轮抽选模型后显示提示</small></div>
+                        <label class="kf-square-check"><input type="checkbox" id="kf-model-alert-enabled"><span class="kf-square-box"></span></label>
+                    </div>
+                </section>
+
+                <section class="kf-settings-group">
+                    <div class="kf-group-head"><strong>快捷方式</strong><span>快速访问常用功能</span></div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">模式切换</span><small>创建 QR 按钮切换固定或随机模式</small></div>
+                        <label class="kf-square-check"><input type="checkbox" id="kf-shortcut-mode-enabled"><span class="kf-square-box"></span></label>
+                    </div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">插件启动</span><small>创建 QR 按钮快速开关插件</small></div>
+                        <label class="kf-square-check"><input type="checkbox" id="kf-shortcut-power-enabled"><span class="kf-square-box"></span></label>
+                    </div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">指定API</span><small>创建 QR 按钮指定下一轮使用的 API</small></div>
+                        <label class="kf-square-check"><input type="checkbox" id="kf-shortcut-api-enabled"><span class="kf-square-box"></span></label>
+                    </div>
+                </section>
+
+                <section class="kf-settings-group">
+                    <div class="kf-group-head"><strong>显示</strong><span>界面布局</span></div>
+                    <div class="kf-section-divider"></div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">紧凑 API 条目模式</span><small>主界面仅保留条目摘要，通过窗口按钮完整编辑</small></div>
+                        <label class="kf-square-check"><input type="checkbox" id="kf-compact-api-entries"><span class="kf-square-box"></span></label>
+                    </div>
+                </section>
+            </div>
+            <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-settings-cancel" type="button">取消</button><button class="kf-action-btn kf-primary-btn" id="kf-settings-confirm" type="button">确认</button></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-theme-modal">
+        <section class="kf-modal-box kf-wide-dialog">
+            <header class="kf-modal-header"><h2>外观美化</h2><button class="kf-icon-btn kf-close-btn" id="kf-theme-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-theme-body">
+                <section class="kf-theme-group">
+                    <div class="kf-group-head"><strong>主题预设</strong><span>选择配色后仍可继续微调</span></div>
+                    <div class="kf-theme-presets" id="kf-theme-presets">
+                        <button class="kf-theme-preset" type="button" data-preset="default" data-primary="#1677ff" data-secondary="#ffffff"><span style="--swatch-a:#1677ff;--swatch-b:#ffffff"><i></i><i></i></span><em>经典蓝白</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="mist-purple" data-primary="#7659e8" data-secondary="#fbfaff"><span style="--swatch-a:#7659e8;--swatch-b:#fbfaff"><i></i><i></i></span><em>雾紫白</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="mint" data-primary="#119d9a" data-secondary="#f7fffd"><span style="--swatch-a:#119d9a;--swatch-b:#f7fffd"><i></i><i></i></span><em>薄荷青白</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="sakura" data-primary="#df5f91" data-secondary="#fff8fb"><span style="--swatch-a:#df5f91;--swatch-b:#fff8fb"><i></i><i></i></span><em>樱粉白</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="gray-blue" data-primary="#681414" data-secondary="#d7ccb6"><span style="--swatch-a:#681414;--swatch-b:#d7ccb6"><i></i><i></i></span><em>复古红</em></button>
+                        <button class="kf-theme-preset" type="button" data-preset="retro-red" data-primary="#3d5a80" data-secondary="##eaf2f8"><span style="--swatch-a:#3d5a80;--swatch-b:##eaf2f8"><i></i><i></i></span><em>雾色灰蓝</em></button>
+                    </div>
+                    <input type="hidden" id="kf-theme-preset" value="default">
+                </section>
+
+                <section class="kf-theme-group">
+                    <div class="kf-group-head"><strong>自定义颜色</strong><span>主色用于强调，辅色决定整体底色</span></div>
+                    <div class="kf-theme-color-list">
+                        <div class="kf-theme-color-row"><span><strong>主色调</strong><small>按钮 / 选中态 / 强调</small></span><span class="kf-color-control"><button class="kf-color-picker-trigger" type="button" data-color-target="kf-theme-underline" value="#1677ff" aria-label="选择主色调"><span></span></button><input type="hidden" id="kf-theme-underline" value="#1677ff"><input type="text" id="kf-theme-primary-hex" value="#1677FF" maxlength="7" spellcheck="false" aria-label="主色十六进制值"></span></div>
+                        <div class="kf-theme-color-row"><span><strong>辅色调</strong><small>界面底色 / 卡片表面</small></span><span class="kf-color-control"><button class="kf-color-picker-trigger" type="button" data-color-target="kf-theme-bg-main" value="#ffffff" aria-label="选择辅色调"><span></span></button><input type="hidden" id="kf-theme-bg-main" value="#ffffff"><input type="text" id="kf-theme-secondary-hex" value="#FFFFFF" maxlength="7" spellcheck="false" aria-label="辅色十六进制值"></span></div>
+                    </div>
+                    <input type="hidden" id="kf-theme-bg-sub" value="#f7f9fc">
+                </section>
+
+                <section class="kf-theme-group">
+                    <div class="kf-theme-mode-head">
+                        <div class="kf-group-head"><strong>明暗模式</strong><span>保留配色关系，只调整整体明度</span></div>
+                        <div class="kf-theme-mode-toggle">
+                            <button class="kf-theme-mode" type="button" data-theme-mode="light"><svg><use href="#kf-i-sun"/></svg><span>白天</span></button>
+                            <button class="kf-theme-mode" type="button" data-theme-mode="dark"><svg><use href="#kf-i-moon"/></svg><span>夜间</span></button>
+                        </div>
+                    </div>
+                    <div class="kf-theme-preview"><span class="kf-brand-dot"></span><strong>API 条目</strong><span>实时预览</span><button type="button" tabindex="-1">示例按钮</button></div>
+                </section>
+            </div>
+            <footer class="kf-modal-footer kf-theme-footer"><button class="kf-action-btn kf-secondary-btn" id="kf-theme-reset" type="button">恢复默认</button><div><button class="kf-action-btn kf-secondary-btn" id="kf-theme-cancel" type="button">取消</button><button class="kf-action-btn kf-primary-btn" id="kf-theme-confirm" type="button">确认</button></div></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-color-picker-modal">
+        <section class="kf-modal-box kf-color-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="kf-color-picker-title">
+            <header class="kf-modal-header"><h2 id="kf-color-picker-title">选择颜色</h2><button class="kf-icon-btn kf-close-btn" id="kf-color-picker-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-color-picker-body">
+                <div class="kf-color-field" id="kf-color-field" role="slider" tabindex="0" aria-label="颜色饱和度与明度"><span class="kf-color-field-pointer"></span></div>
+                <div class="kf-color-hue-row">
+                    <span class="kf-color-preview" id="kf-color-preview" aria-hidden="true"></span>
+                    <input class="kf-color-hue" id="kf-color-hue" type="range" min="0" max="360" step="1" value="0" aria-label="色相">
+                    <output class="kf-color-picker-hex" id="kf-color-picker-hex">#FF0000</output>
+                </div>
+                <div class="kf-color-rgb-grid">
+                    <label><span>R</span><input id="kf-color-r" type="number" min="0" max="255" inputmode="numeric" value="255"></label>
+                    <label><span>G</span><input id="kf-color-g" type="number" min="0" max="255" inputmode="numeric" value="0"></label>
+                    <label><span>B</span><input id="kf-color-b" type="number" min="0" max="255" inputmode="numeric" value="0"></label>
+                </div>
+            </div>
+            <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-color-picker-cancel" type="button">取消</button><button class="kf-action-btn kf-primary-btn" id="kf-color-picker-confirm" type="button">确认</button></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-api-override-modal">
+        <section class="kf-modal-box kf-api-override-box">
+            <header class="kf-modal-header"><h2>指定下个请求API</h2><button class="kf-icon-btn kf-close-btn" id="kf-api-override-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body"><div class="kf-modal-message" id="kf-api-override-message"></div><div class="kf-api-override-list" id="kf-api-override-list"></div></div>
+            <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-api-override-restore" type="button">恢复自动选择</button><button class="kf-action-btn kf-primary-btn" id="kf-api-override-start" type="button">启动插件</button></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-failure-modal">
+        <section class="kf-modal-box"><header class="kf-modal-header"><h2>API请求失败</h2></header><div class="kf-modal-body"><div class="kf-modal-message" id="kf-failure-message"></div></div><footer class="kf-modal-footer kf-failure-actions" id="kf-failure-actions"></footer></section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-sequence-modal">
+        <section class="kf-modal-box"><header class="kf-modal-header"><h2>顺序检测</h2></header><div class="kf-modal-body"><div class="kf-sequence-summary" id="kf-sequence-summary"></div><div class="kf-sequence-list" id="kf-sequence-list"></div></div><footer class="kf-modal-footer kf-modal-actions-single"><button class="kf-action-btn kf-primary-btn" id="kf-sequence-confirm" type="button">确定</button></footer></section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-rename-pool-modal">
+        <section class="kf-modal-box"><header class="kf-modal-header"><h2>修改组合名称</h2><button class="kf-icon-btn kf-close-btn" id="kf-rename-pool-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header><div class="kf-modal-body"><label class="kf-input-wrapper"><span class="kf-label">名称</span><input type="text" class="kf-inner-input" id="kf-rename-pool-input"></label></div><footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-rename-pool-cancel" type="button">取消</button><button class="kf-action-btn kf-primary-btn" id="kf-rename-pool-confirm" type="button">确认</button></footer></section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-import-export-modal">
+        <section class="kf-modal-box kf-io-dialog">
+            <header class="kf-io-head">
+                <div class="kf-io-title-wrap">
+                    <h2 class="kf-io-title">导入 / 导出</h2>
+                    <div class="kf-io-subtitle">选择需要导出的配置范围，或从本地文件恢复配置。</div>
+                </div>
+                <button class="kf-icon-btn" id="kf-import-export-close" type="button" title="关闭" aria-label="关闭导入导出弹窗"><svg><use href="#kf-i-x"/></svg></button>
+            </header>
+            <div class="kf-modal-body kf-io-body">
+                <div class="kf-io-section-label">导出</div>
+                <div class="kf-io-export-grid">
+                    <button class="kf-io-option" id="kf-export-current-pool" type="button">
+                        <span class="kf-io-option-icon"><svg><use href="#kf-i-download"/></svg></span>
+                        <span class="kf-io-option-title">当前组合</span>
+                        <span class="kf-io-option-desc">仅导出当前正在使用的组合</span>
+                    </button>
+                    <button class="kf-io-option" id="kf-export-all-pools" type="button">
+                        <span class="kf-io-option-icon"><svg><use href="#kf-i-download"/></svg></span>
+                        <span class="kf-io-option-title">全部组合</span>
+                        <span class="kf-io-option-desc">导出所有组合与对应配置</span>
+                    </button>
+                    <button class="kf-io-option" id="kf-export-api-presets" type="button">
+                        <span class="kf-io-option-icon"><svg><use href="#kf-i-download"/></svg></span>
+                        <span class="kf-io-option-title">API 条目</span>
+                        <span class="kf-io-option-desc">仅导出已保存的 API 条目</span>
+                    </button>
+                </div>
+                <div class="kf-io-split"></div>
+                <div class="kf-io-section-label">导入</div>
+                <div class="kf-io-import-card">
+                    <span class="kf-io-import-icon"><svg><use href="#kf-i-upload"/></svg></span>
+                    <div class="kf-io-import-copy">
+                        <div class="kf-io-import-title">导入配置文件</div>
+                        <div class="kf-io-import-desc">选择此前导出的配置文件进行恢复</div>
+                    </div>
+                    <button class="kf-io-import-btn" id="kf-import-config" type="button">选择文件</button>
+                    <input type="file" id="kf-import-file" accept="application/json,text/plain,.json,.txt" hidden>
+                </div>
+            </div>
+            <footer class="kf-io-security-note"><svg><use href="#kf-i-shield"/></svg><span>导出文件含API密钥，注意信息安全</span></footer>
+        </section>
+    </div>
+
+    <div id="kf-status" class="kf-sr-only" role="status" aria-live="polite"></div>
+    <div id="kf-toast-layer" class="kf-toast-layer"></div>
+</div>

@@ -43,9 +43,9 @@ export function getDefaultState() {
         apiPresets: [],
         theme: {
             bgMain: '#ffffff',
-            bgSub: '#f7f9fc',
-            underline: '#617b9b',
-            brush: 'simple',
+            bgSub: '#fbfdff',
+            underline: '#1677ff',
+            mode: 'light',
             preset: 'default',
         },
         failure: {
@@ -140,6 +140,24 @@ function normalizePool(pool) {
     return p;
 }
 
+function normalizeTheme(theme) {
+    const defaults = getDefaultState().theme;
+    const normalized = {
+        ...defaults,
+        ...(theme || {}),
+        mode: theme?.mode === 'dark' ? 'dark' : 'light',
+        preset: String(theme?.preset || 'default'),
+    };
+    delete normalized.blur;
+    delete normalized.brush;
+    if (normalized.preset === 'default') {
+        normalized.bgMain = defaults.bgMain;
+        normalized.bgSub = defaults.bgSub;
+        normalized.underline = defaults.underline;
+    }
+    return normalized;
+}
+
 function findPoolEntry(source, poolId, entryId) {
     const pools = Array.isArray(source?.pools) ? source.pools : [];
     const activePool = pools.find(pool => pool.id === poolId) || pools[0];
@@ -169,10 +187,7 @@ function normalizeState(raw) {
     const activePool = s.pools.find(p => p.id === s.activePoolId) || s.pools[0];
     s.enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : activePool?.enabled !== false;
     s.runtime = {};
-    s.theme = { ...getDefaultState().theme, ...(s.theme || {}) };
-    delete s.theme.blur;
-    s.theme.brush = ['simple', 'native'].includes(s.theme.brush) ? s.theme.brush : 'simple';
-    s.theme.preset = String(s.theme.preset || 'default');
+    s.theme = normalizeTheme(s.theme);
     s.failure = {
         ...getDefaultState().failure,
         ...(s.failure || {}),
@@ -322,12 +337,7 @@ function createPersistedState(source) {
             entries: Array.isArray(pool?.entries) ? pool.entries.map(buildPersistedEntry) : [],
         })),
         apiPresets: Array.isArray(base.apiPresets) ? base.apiPresets.map(buildPersistedPreset) : [],
-        theme: {
-            ...getDefaultState().theme,
-            ...(base.theme || {}),
-            brush: ['simple', 'native'].includes(base?.theme?.brush) ? base.theme.brush : 'simple',
-            preset: String(base?.theme?.preset || 'default'),
-        },
+        theme: normalizeTheme(base.theme),
         failure: {
             ...getDefaultState().failure,
             ...(base.failure || {}),
@@ -487,21 +497,6 @@ function bindPersistHooks() {
     });
 }
 
-function queuePersistBackground(source, delay = DEFAULT_PERSIST_DELAY) {
-    bindPersistHooks();
-    pendingState = source;
-    pendingPersist = true;
-    if (!persistenceEnabled) return;
-    const safeDelay = Math.max(0, Number(delay) || 0);
-    const nextDueAt = Date.now() + safeDelay;
-    if (persistTimer && persistDueAt && persistDueAt <= nextDueAt) return;
-    clearPersistTimer();
-    persistDueAt = nextDueAt;
-    persistTimer = setTimeout(() => {
-        flushScheduledPersist();
-    }, safeDelay);
-}
-
 function queuePersistDebounced(source, delay = DEFAULT_PERSIST_DELAY) {
     bindPersistHooks();
     pendingState = source;
@@ -538,14 +533,6 @@ export function saveState(state, options = {}) {
         return;
     }
     persistSnapshot(source);
-}
-
-export function saveStateAsync(state, delay = 0) {
-    const source = state && typeof state === 'object' ? state : loadState();
-    cachedState = source;
-    clearEnabledPersistDirty();
-    clearLightPersistDirty();
-    queuePersistBackground(source, delay);
 }
 
 export function saveStateDebounced(state, delay = 400) {

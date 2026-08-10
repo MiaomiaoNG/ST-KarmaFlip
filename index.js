@@ -13,27 +13,34 @@ const KarmaFlip = (() => {
         window.setTimeout(task, 500);
     }
 
-    function ensureStylesheet(id, href) {
-        if (document.getElementById(id)) return;
-        const link = document.createElement('link');
-        link.id = id;
-        link.rel = 'stylesheet';
-        link.href = href;
-        document.head.appendChild(link);
+    async function revealLayoutWhenStyled(root, guardedNodes) {
+        const mainModal = document.getElementById('kf-main-modal');
+        if (!root || !mainModal) throw new Error('V3 layout root is missing');
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+            if (getComputedStyle(mainModal).position === 'fixed') {
+                root.hidden = false;
+                guardedNodes.forEach(node => { node.hidden = false; });
+                return;
+            }
+            await new Promise(resolve => window.setTimeout(resolve, 25));
+        }
+        throw new Error('V3 layout stylesheet did not load');
     }
 
     async function init() {
         console.log(`[${moduleName}] Initializing...`);
 
-        ensureStylesheet('st-karmaflip-theme-simple', `${extensionFolderPath}styles/theme-simple.css`);
-        ensureStylesheet('st-karmaflip-theme-native', `${extensionFolderPath}styles/theme-native.css`);
-
-        const html = await $.get(`${extensionFolderPath}index.html`);
+        const html = await $.get(`${extensionFolderPath}layout-v3.html`);
         $('.kf-inline-drawer').remove();
         $('#kf-extension-root').remove();
         document.body.insertAdjacentHTML('beforeend', html);
 
+        const root = document.getElementById('kf-extension-root');
+        const guardedNodes = [...(root?.querySelectorAll?.('.kf-modal-overlay') || [])];
+        guardedNodes.forEach(node => { node.hidden = true; });
         await initUI(setStatus);
+        await revealLayoutWhenStyled(root, guardedNodes);
         runAfterStartup(() => installRuntimeHook(setStatus));
 
         console.log(`[${moduleName}] Loaded.`);

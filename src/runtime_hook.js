@@ -322,19 +322,18 @@ function businessErrorMessage(payload) {
 async function responseBusinessFailure(response) {
     const startedAt = nowMs();
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
-    if (contentType.includes('text/event-stream')) return { failed: false, detail: '', reason: 'sse-pass' };
-
     if (!response.ok) {
         const result = { failed: true, detail: await responseText(response), reason: 'http' };
         warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
         return result;
     }
+    if (contentType.includes('text/event-stream')) return { failed: false, detail: '', reason: 'sse-pass' };
     if (!contentType.includes('application/json')) return { failed: false, detail: '', reason: 'non-json' };
     const text = await responseText(response);
     const payload = parseJson(text);
     const message = businessErrorMessage(payload);
     const result = message
-        ? { failed: true, detail: message || text, reason: 'business-json' }
+        ? { failed: true, detail: text || message, reason: 'business-json' }
         : { failed: false, detail: '', reason: 'json-ok' };
     warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
     return result;
@@ -446,12 +445,12 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         if (pending.forced) {
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
         }
-        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, messageId: pending.messageId, success: true, status: response.status });
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: response.status });
         return { ok: true, response };
     }
     const count = markRequestFailure(pending.state, member);
     const detail = businessFailure.detail;
-    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, model: member.model, messageId: pending.messageId, success: false, status: response.status, detail });
+    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: response.status, responseBody: detail });
     return { ok: false, response, count };
 }
 
@@ -492,7 +491,7 @@ async function runForcedRetryPlan(input, init, pending) {
                 count,
                 error: String(error?.message || error),
             });
-            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: member.name, model: member.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
         }
     }
 
@@ -544,7 +543,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                 apiName: currentMember?.name || '',
                 model: currentMember?.model || '',
             });
-            queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, messageId: pending.messageId, success: true });
+            queueLog(state, { event: 'pick', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, apiUrl: currentMember.apiUrl, model: currentMember.model, messageId: pending.messageId, success: true });
             showModelAlert(state, currentMember);
             if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(currentMember)} | ${pending.type}`);
         }
@@ -567,7 +566,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                     count,
                     error: String(error?.message || error),
                 });
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, apiUrl: currentMember.apiUrl, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
             }
         }
 
@@ -609,7 +608,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
             } catch (error) {
                 if (isUserAbortError(error, init)) throw error;
                 lastError = error;
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error) });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, apiUrl: currentMember.apiUrl, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error) });
             }
             const nextDecision = await askFailureDecision(
                 secondFailureMessage(currentMember),
@@ -703,7 +702,7 @@ function bindChatCompletionSettings(onStatus) {
             patchGenerateData(generateData, member);
 
             generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type, messageId, !!override);
-            queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, model: member.model, messageId, success: true });
+            queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true });
             showModelAlert(state, member);
             if (typeof onStatus === 'function') onStatus(`${override ? '指定' : '命中'}: ${memberLabel(member)} | ${type} | #${messageId}`);
         } catch (error) {
