@@ -407,7 +407,9 @@
     align-items: center;
     border: 1px solid var(--line) !important;
     border-radius: var(--radius-md);
-    background: linear-gradient(180deg, rgba(var(--surface-rgb), 0.91), rgba(var(--surface-rgb), 0.82));
+    background: var(--surface-strong) !important;
+    background-color: var(--surface-strong) !important;
+    background-image: none !important;
     transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
 }
 
@@ -416,7 +418,7 @@
 .kf-select-wrapper:focus-within,
 .kf-input-wrapper:focus-within {
     border-color: var(--line-strong) !important;
-    background: var(--surface);
+    background: var(--surface-strong) !important;
 }
 
 .kf-select-wrapper:focus-within,
@@ -448,6 +450,48 @@ input[type="number"].kf-inner-input::-webkit-inner-spin-button,
 input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     margin: 0;
     -webkit-appearance: none !important;
+}
+
+#kf-root .kf-select-wrapper,
+#kf-root .kf-input-wrapper,
+#kf-root .kf-stepper,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) .kf-select-wrapper,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) .kf-input-wrapper,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) .kf-stepper {
+    background: var(--surface-strong) !important;
+    background-color: var(--surface-strong) !important;
+    background-image: none !important;
+}
+
+#kf-root :is(input, select, textarea).kf-inner-input,
+#kf-root :is(input, select).kf-inner-select,
+#kf-root input.kf-stepper-input,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) :is(input, select, textarea).kf-inner-input,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) :is(input, select).kf-inner-select,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) input.kf-stepper-input {
+    border: 0 !important;
+    outline: 0 !important;
+    border-radius: inherit !important;
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    -webkit-box-shadow: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+}
+
+#kf-root input.kf-inner-input:-webkit-autofill,
+#kf-root input.kf-inner-select:-webkit-autofill,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) input.kf-inner-input:-webkit-autofill,
+:is(#kf-main-modal, #kf-update-notice-modal, #kf-log-modal, #kf-dropdown-modal, #kf-theme-modal, #kf-color-picker-modal, #kf-settings-modal, #kf-reset-data-modal, #kf-failure-modal, #kf-sequence-modal, #kf-rename-pool-modal, #kf-import-export-modal, #kf-api-override-modal) input.kf-inner-select:-webkit-autofill {
+    -webkit-text-fill-color: var(--ink) !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--surface-strong) inset !important;
+    transition: background-color 999999s ease-out;
 }
 
 .kf-select-wrapper .kf-inner-select {
