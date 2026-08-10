@@ -8,6 +8,10 @@ let bindRetryTimer = null;
 let originalFetch = null;
 const pendingRequests = new Map();
 
+export function clearRuntimeHookState() {
+    pendingRequests.clear();
+}
+
 const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
@@ -98,8 +102,34 @@ function validRuntimeEntries(pool) {
 
 function findApiOverride(state, pool, messageId) {
     const override = getApiOverrideState(state);
-    let ref = override.pending;
-    let source = 'pending';
+    let ref = override.lock;
+    let source = 'lock';
+    let targetPool = pool;
+
+    if (ref) {
+        targetPool = (state.pools || []).find(item => item?.id === ref.poolId) || null;
+        const lockedMember = (targetPool?.entries || []).find(entry => entry?.id === ref.entryId) || null;
+        if (!targetPool || !lockedMember) {
+            showRuntimeToast('当前聊天锁定的 API 已不存在，请在指定 API 窗口中取消锁定', 'error', 4200);
+            return { invalid: true, source };
+        }
+        if (!String(lockedMember.apiUrl || '').trim() || !String(lockedMember.model || '').trim()) {
+            showRuntimeToast('当前聊天锁定的 API 无URL或未选择模型，本次请求无法由插件接管', 'error', 4200);
+            return { invalid: true, member: lockedMember, source };
+        }
+        return {
+            member: lockedMember,
+            pool: targetPool,
+            source,
+            picked: {
+                member: lockedMember,
+                detail: { mode: 'locked', cooldownBlocked: [], forced: true },
+            },
+        };
+    }
+
+    ref = override.pending;
+    source = 'pending';
 
     if (ref && ref.poolId !== pool.id) {
         clearPendingApiOverride(state);
@@ -129,6 +159,7 @@ function findApiOverride(state, pool, messageId) {
     }
     return {
         member,
+        pool: targetPool,
         source,
         picked: {
             member,
@@ -366,7 +397,7 @@ function makeTraceId() {
     return makeId('kf');
 }
 
-function startPendingRequest(state, pool, picked, member, type, messageId, forced = false) {
+function startPendingRequest(state, pool, picked, member, type, messageId, forced = false, locked = false) {
     const id = makeTraceId();
     pendingRequests.set(id, {
         id,
@@ -377,6 +408,7 @@ function startPendingRequest(state, pool, picked, member, type, messageId, force
         type,
         messageId,
         forced,
+        locked,
         expiresAt: Date.now() + PENDING_TTL,
     });
     return id;
@@ -442,7 +474,7 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
     });
     if (!businessFailure.failed) {
         markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`, { forced: pending.forced });
-        if (pending.forced) {
+        if (pending.forced && !pending.locked) {
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
         }
         queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: response.status });
@@ -495,8 +527,10 @@ async function runForcedRetryPlan(input, init, pending) {
         }
     }
 
+    const forcedLabel = pending.locked ? '锁定 API' : '指定 API';
+    const retainedLabel = pending.locked ? '锁定' : '指定';
     await askFailureDecision(
-        `指定 API [${memberLabel(member)}] 已达到 ${maxFailures} 次重试上限，未切换其他 API；当前指定仍保留。`,
+        `${forcedLabel} [${memberLabel(member)}] 已达到 ${maxFailures} 次重试上限，未切换其他 API；当前${retainedLabel}仍保留。`,
         [{ value: 'close', label: '关闭' }],
         'close',
     );
@@ -686,12 +720,11 @@ function bindChatCompletionSettings(onStatus) {
             if (isMvuAnalysisRequest(generateData)) return;
 
             const pool = getActivePool(state);
-            if (!Array.isArray(pool.entries) || !pool.entries.length) return;
             const type = generationType(generateData);
             const messageId = targetMessageId(type);
             const override = findApiOverride(state, pool, messageId);
             if (override?.invalid) return;
-            if (!override && !validRuntimeEntries(pool).length) return;
+            if (!override && (!Array.isArray(pool?.entries) || !validRuntimeEntries(pool).length)) return;
 
             const pickStartedAt = nowMs();
             const picked = override?.picked || pickMember(state, pool);
@@ -699,12 +732,14 @@ function bindChatCompletionSettings(onStatus) {
             if (!picked?.member) return;
 
             const member = picked.member;
+            const requestPool = override?.pool || pool;
             patchGenerateData(generateData, member);
 
-            generateData[TRACE_FIELD] = startPendingRequest(state, pool, picked, member, type, messageId, !!override);
+            generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock');
             queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true });
             showModelAlert(state, member);
-            if (typeof onStatus === 'function') onStatus(`${override ? '指定' : '命中'}: ${memberLabel(member)} | ${type} | #${messageId}`);
+            const pickLabel = override?.source === 'lock' ? '锁定' : (override ? '指定' : '命中');
+            if (typeof onStatus === 'function') onStatus(`${pickLabel}: ${memberLabel(member)} | ${type} | #${messageId}`);
         } catch (error) {
             reportRuntimeError('CHAT_COMPLETION_SETTINGS_READY 处理失败', error);
         } finally {

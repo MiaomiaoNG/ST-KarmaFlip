@@ -1,16 +1,20 @@
-import { clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, saveState, saveStateDebounced, setPendingApiOverride, toInt } from './plugin_state_store.js';
+import { clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
+import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.5';
+const UPDATE_NOTICE_VERSION = '1.2.6';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 1. 重做插件美化；
+2. 新增“导出全部”；
+3. “快捷方式-指定API”功能可以锁定为一个API，对应窗口才会生效，且重启酒馆不会取消；
+4. 新增悬浮图标，可设置指定悬浮图标的快捷功能；
 
-2026年8月10日`;
+2026年8月11日`;
 
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
@@ -20,6 +24,10 @@ const CHAT_API_WRAPPER_ID = 'kf-chat-api-wrapper';
 const CHAT_POWER_BUTTON_ID = 'kf-chat-power-btn';
 const CHAT_MODE_BUTTON_ID = 'kf-chat-mode-btn';
 const CHAT_API_BUTTON_ID = 'kf-chat-api-btn';
+const FLOATING_ROOT_ID = 'kf-floating-root';
+const FLOATING_BUTTON_ID = 'kf-floating-button';
+const FLOATING_EDGE_GAP = 8;
+const FLOATING_DRAG_THRESHOLD = 8;
 const QR_ASSISTANT_LEGACY_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID];
 const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID, CHAT_API_WRAPPER_ID];
 const QR_ASSISTANT_MANAGED_DOM_IDS = [...QR_ASSISTANT_LEGACY_DOM_IDS, ...QR_ASSISTANT_CURRENT_DOM_IDS];
@@ -38,6 +46,7 @@ let apiEntriesForcedExpandedIds = new Set();
 let colorPickerTargetId = '';
 let colorPickerDragging = false;
 let colorPickerDraft = { h: 0, s: 1, v: 1 };
+let floatingViewportController = null;
 const THEME_PRESETS = {
     default: { primary: '#1677ff', secondary: '#ffffff' },
     'mist-purple': { primary: '#7659e8', secondary: '#fbfaff' },
@@ -1013,6 +1022,7 @@ function toggleGlobalEnabled(state, setStatus) {
     patchEnabledState(state, state.enabled === false);
     updateGlobalToggleState(state);
     updateChatShortcut(state);
+    updateFloatingButton(state);
     showToast(state.enabled !== false ? '[已开启插件] 陛下，该翻牌子了~' : '[已关闭插件] 传令！陛下今日不翻牌。', 'info', 2200);
     setStatus(state.enabled !== false ? '插件已开启' : '插件已关闭');
 }
@@ -1021,23 +1031,45 @@ function renderApiOverrideModal(state) {
     const pool = getActivePool(state);
     const list = $('#kf-api-override-list').empty();
     const message = $('#kf-api-override-message');
+    const lockButton = $('#kf-api-override-lock');
     const restoreButton = $('#kf-api-override-restore');
     const startButton = $('#kf-api-override-start');
 
     if (state.enabled === false) {
         message.text('插件未开启').show();
+        lockButton.hide();
         restoreButton.hide();
         startButton.show();
         return;
     }
 
     message.hide().empty();
+    lockButton.show();
     restoreButton.show();
     startButton.hide();
     const override = getApiOverrideState(state);
-    const selected = override.pending?.poolId === pool.id
-        ? override.pending
-        : (override.floorApiBinding?.poolId === pool.id ? override.floorApiBinding : null);
+    const lockPool = override.lock
+        ? (state.pools || []).find(item => item?.id === override.lock.poolId) || null
+        : null;
+    const lockedEntry = override.lock
+        ? (lockPool?.entries || []).find(item => item?.id === override.lock.entryId) || null
+        : null;
+    if (override.lock) {
+        const lockedLabel = lockedEntry
+            ? `${lockedEntry.name || '未命名 API'} / ${lockedEntry.model || '未选择模型'}`
+            : 'API 已不存在';
+        message.text(`当前聊天已锁定：${lockedLabel}`).show();
+    }
+    const selected = override.lock?.poolId === pool.id
+        ? override.lock
+        : (override.pending?.poolId === pool.id
+            ? override.pending
+            : (override.floorBinding?.poolId === pool.id ? override.floorBinding : null));
+    lockButton
+        .text(override.lock ? '取消锁定' : '锁定该API')
+        .toggleClass('kf-primary-btn', !!override.lock)
+        .toggleClass('kf-secondary-btn', !override.lock)
+        .prop('disabled', !override.lock && !selected);
     const entries = Array.isArray(pool.entries) ? pool.entries : [];
     if (!entries.length) {
         message.text('当前组合没有 API 条目').show();
@@ -1070,12 +1102,14 @@ function setPoolMode(state, nextMode, rerender, setStatus) {
     if (pool.mode === mode) {
         updateModeState(state);
         updateChatShortcut(state);
+        updateFloatingButton(state);
         return;
     }
     patchPoolMode(state, mode);
     const equalized = maybeEqualizeWeights(state);
     updateModeState(state);
     updateChatShortcut(state);
+    updateFloatingButton(state);
     showToast(`切换成[${mode === 'random' ? '随机模式' : '固定模式'}] 太后让朕这个！`, 'info', 2200);
     setStatus(mode === 'random' ? '已切换到随机模式' : '已切换到固定模式');
     if (equalized) rerender();
@@ -1097,10 +1131,242 @@ function bindChatShortcut(state, rerender, setStatus) {
     });
 }
 
+function floatingEmperorSvg() {
+    const geometry = `
+        <line x1="7" y1="3" x2="17" y2="3" />
+        <line x1="12" y1="3" x2="12" y2="21" />
+        <line x1="9.5" y1="7" x2="14.5" y2="7" />
+        <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
+        <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
+        <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
+    `;
+    return `
+        <svg class="kf-floating-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <defs>
+                <linearGradient id="kf-floating-emperor-gold" x1="0" y1="2" x2="0" y2="22" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#7b4b00" />
+                    <stop offset="0.18" stop-color="#d79a24" />
+                    <stop offset="0.36" stop-color="#fff1a6" />
+                    <stop offset="0.5" stop-color="#b67408" />
+                    <stop offset="0.68" stop-color="#f4c954" />
+                    <stop offset="0.84" stop-color="#fff4b5" />
+                    <stop offset="1" stop-color="#8b5703" />
+                </linearGradient>
+            </defs>
+            <g stroke="#684005" stroke-width="3.2">${geometry}</g>
+            <g stroke="url(#kf-floating-emperor-gold)" stroke-width="1.9">${geometry}</g>
+        </svg>
+    `;
+}
+
+function normalizeFloatingAction(action) {
+    const value = String(action || 'none').trim().toLowerCase();
+    return ['mode', 'power', 'api'].includes(value) ? value : 'none';
+}
+
+function floatingActionLabel(action) {
+    return {
+        mode: '切换固定或随机模式',
+        power: '开启或关闭插件',
+        api: '指定下个请求 API',
+    }[normalizeFloatingAction(action)] || 'KarmaFlip 悬浮按钮';
+}
+
+function floatingViewportBounds() {
+    const viewport = window.visualViewport;
+    return {
+        left: Number(viewport?.offsetLeft || 0),
+        top: Number(viewport?.offsetTop || 0),
+        width: Math.max(0, Number(viewport?.width || window.innerWidth || 0)),
+        height: Math.max(0, Number(viewport?.height || window.innerHeight || 0)),
+    };
+}
+
+function clampFloatingPosition(left, top, button) {
+    const viewport = floatingViewportBounds();
+    const width = Math.max(1, button?.offsetWidth || 46);
+    const height = Math.max(1, button?.offsetHeight || 46);
+    const minLeft = viewport.left + FLOATING_EDGE_GAP;
+    const minTop = viewport.top + FLOATING_EDGE_GAP;
+    const maxLeft = Math.max(minLeft, viewport.left + viewport.width - width - FLOATING_EDGE_GAP);
+    const maxTop = Math.max(minTop, viewport.top + viewport.height - height - FLOATING_EDGE_GAP);
+    return {
+        left: Math.min(maxLeft, Math.max(minLeft, Number(left) || 0)),
+        top: Math.min(maxTop, Math.max(minTop, Number(top) || 0)),
+    };
+}
+
+function defaultFloatingPosition(button) {
+    const viewport = floatingViewportBounds();
+    const width = Math.max(1, button?.offsetWidth || 46);
+    const height = Math.max(1, button?.offsetHeight || 46);
+    return clampFloatingPosition(
+        viewport.left + viewport.width - width - 18,
+        viewport.top + (viewport.height * 0.72) - (height / 2),
+        button,
+    );
+}
+
+function applyFloatingPosition(state, options = {}) {
+    const button = document.getElementById(FLOATING_BUTTON_ID);
+    if (!button) return null;
+    const saved = state.shortcuts?.floatingPosition;
+    const requested = options.position || (
+        Number.isFinite(Number(saved?.left)) && Number.isFinite(Number(saved?.top))
+            ? { left: Number(saved.left), top: Number(saved.top) }
+            : defaultFloatingPosition(button)
+    );
+    const next = clampFloatingPosition(requested.left, requested.top, button);
+    button.style.left = `${Math.round(next.left)}px`;
+    button.style.top = `${Math.round(next.top)}px`;
+    if (options.persist) {
+        state.shortcuts = state.shortcuts || {};
+        state.shortcuts.floatingPosition = {
+            left: Math.round(next.left),
+            top: Math.round(next.top),
+        };
+        persistHot(state);
+    }
+    return next;
+}
+
+function updateFloatingButton(state) {
+    const button = document.getElementById(FLOATING_BUTTON_ID);
+    if (!button) return;
+    const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
+    const label = floatingActionLabel(action);
+    button.dataset.action = action;
+    button.dataset.enabled = state.enabled === false ? 'false' : 'true';
+    button.dataset.mode = getActivePool(state)?.mode === 'random' ? 'random' : 'fixed';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    setThemeVars(button, state.theme || {});
+}
+
+function activateFloatingButton(state, rerender, setStatus) {
+    const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
+    if (action === 'mode') {
+        const pool = getActivePool(state);
+        setPoolMode(state, pool.mode === 'random' ? 'fixed' : 'random', rerender, setStatus);
+    } else if (action === 'power') {
+        toggleGlobalEnabled(state, setStatus);
+    } else if (action === 'api') {
+        openApiOverrideModal(state);
+    }
+    updateFloatingButton(state);
+}
+
+function bindFloatingButton(button, state, rerender, setStatus) {
+    if (!button || button.dataset.kfFloatingBound === 'true') return;
+    button.dataset.kfFloatingBound = 'true';
+    let drag = null;
+    let suppressClick = false;
+
+    button.addEventListener('pointerdown', event => {
+        if (event.button !== undefined && event.button !== 0) return;
+        const rect = button.getBoundingClientRect();
+        drag = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            startLeft: rect.left,
+            startTop: rect.top,
+            moved: false,
+        };
+        button.setPointerCapture?.(event.pointerId);
+    });
+    button.addEventListener('pointermove', event => {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const deltaX = event.clientX - drag.startX;
+        const deltaY = event.clientY - drag.startY;
+        if (!drag.moved && Math.hypot(deltaX, deltaY) < FLOATING_DRAG_THRESHOLD) return;
+        drag.moved = true;
+        button.classList.add('kf-dragging');
+        applyFloatingPosition(state, {
+            position: { left: drag.startLeft + deltaX, top: drag.startTop + deltaY },
+        });
+        event.preventDefault();
+    });
+    const finishDrag = (event, persist) => {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const moved = drag.moved;
+        drag = null;
+        button.classList.remove('kf-dragging');
+        button.releasePointerCapture?.(event.pointerId);
+        if (moved && persist) {
+            suppressClick = true;
+            const rect = button.getBoundingClientRect();
+            applyFloatingPosition(state, { position: { left: rect.left, top: rect.top }, persist: true });
+        }
+    };
+    button.addEventListener('pointerup', event => finishDrag(event, true));
+    button.addEventListener('pointercancel', event => finishDrag(event, false));
+    button.addEventListener('dragstart', event => event.preventDefault());
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (suppressClick) {
+            suppressClick = false;
+            return;
+        }
+        activateFloatingButton(state, rerender, setStatus);
+    });
+}
+
+function teardownFloatingViewportListeners() {
+    floatingViewportController?.abort?.();
+    floatingViewportController = null;
+    if (window.STKarmaFlip?.floatingCleanup === teardownFloatingViewportListeners) {
+        delete window.STKarmaFlip.floatingCleanup;
+    }
+}
+
+function bindFloatingViewportListeners(state) {
+    if (floatingViewportController) return;
+    window.STKarmaFlip?.floatingCleanup?.();
+    floatingViewportController = new AbortController();
+    const options = { passive: true, signal: floatingViewportController.signal };
+    const reposition = () => applyFloatingPosition(state);
+    window.addEventListener('resize', reposition, options);
+    window.visualViewport?.addEventListener?.('resize', reposition, options);
+    window.visualViewport?.addEventListener?.('scroll', reposition, options);
+    window.STKarmaFlip = window.STKarmaFlip || {};
+    window.STKarmaFlip.floatingCleanup = teardownFloatingViewportListeners;
+}
+
+function ensureFloatingButton(state, rerender, setStatus) {
+    const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
+    if (action === 'none') {
+        document.getElementById(FLOATING_ROOT_ID)?.remove();
+        teardownFloatingViewportListeners();
+        return;
+    }
+    let root = document.getElementById(FLOATING_ROOT_ID);
+    if (!root) {
+        root = document.createElement('div');
+        root.id = FLOATING_ROOT_ID;
+        root.className = 'kf-floating-root';
+        document.body.appendChild(root);
+    }
+    let button = document.getElementById(FLOATING_BUTTON_ID);
+    if (!button) {
+        button = document.createElement('button');
+        button.id = FLOATING_BUTTON_ID;
+        button.className = 'kf-floating-button';
+        button.type = 'button';
+        button.innerHTML = floatingEmperorSvg();
+        root.appendChild(button);
+    }
+    bindFloatingButton(button, state, rerender, setStatus);
+    bindFloatingViewportListeners(state);
+    updateFloatingButton(state);
+    applyFloatingPosition(state);
+}
+
 function applyThemeVisual(theme = {}) {
     const root = document.getElementById('kf-root');
     if (!root) return;
-    const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer')].filter(Boolean);
+    const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer'), document.getElementById(FLOATING_BUTTON_ID)].filter(Boolean);
     for (const target of targets) setThemeVars(target, theme);
 }
 
@@ -1174,6 +1440,7 @@ function populateSettingsControls(state) {
     $('#kf-shortcut-mode-enabled').prop('checked', state.shortcuts?.modeEnabled !== false);
     $('#kf-shortcut-power-enabled').prop('checked', state.shortcuts?.powerEnabled !== false);
     $('#kf-shortcut-api-enabled').prop('checked', state.shortcuts?.apiEnabled === true);
+    $('#kf-floating-action').val(normalizeFloatingAction(state.shortcuts?.floatingAction));
     $('#kf-compact-api-entries').prop('checked', state.ui?.compactApiEntries === true);
 }
 
@@ -1927,6 +2194,7 @@ function readFailureSettingsDraft() {
             modeEnabled: $('#kf-shortcut-mode-enabled').prop('checked'),
             powerEnabled: $('#kf-shortcut-power-enabled').prop('checked'),
             apiEnabled: $('#kf-shortcut-api-enabled').prop('checked'),
+            floatingAction: normalizeFloatingAction($('#kf-floating-action').val()),
         },
     };
 }
@@ -1939,7 +2207,8 @@ function sameFailureSettings(state, draft) {
         && (state.ui?.compactApiEntries === true) === draft.compactApiEntries
         && (state.shortcuts?.modeEnabled !== false) === draft.shortcuts.modeEnabled
         && (state.shortcuts?.powerEnabled !== false) === draft.shortcuts.powerEnabled
-        && (state.shortcuts?.apiEnabled === true) === draft.shortcuts.apiEnabled;
+        && (state.shortcuts?.apiEnabled === true) === draft.shortcuts.apiEnabled
+        && normalizeFloatingAction(state.shortcuts?.floatingAction) === draft.shortcuts.floatingAction;
 }
 
 function applyFailureSettingsDraft(state, draft) {
@@ -1953,6 +2222,7 @@ function applyFailureSettingsDraft(state, draft) {
     state.shortcuts.modeEnabled = draft.shortcuts.modeEnabled;
     state.shortcuts.powerEnabled = draft.shortcuts.powerEnabled;
     state.shortcuts.apiEnabled = draft.shortcuts.apiEnabled;
+    state.shortcuts.floatingAction = draft.shortcuts.floatingAction;
 }
 
 function syncAllFromControls(state) {
@@ -1988,6 +2258,7 @@ function saveFailureSettingsFromModal(state, rerender, setStatus) {
     } else {
         scheduleShortcutArtifactCleanup();
     }
+    ensureFloatingButton(state, rerender, setStatus);
     if (compactChanged) rerender();
     closeModal('kf-settings-modal');
     setStatus(unchanged ? '请求设置未变更' : '请求设置已保存');
@@ -3045,6 +3316,10 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-api-override-close').off('click.kf').on('click.kf', () => closeModal('kf-api-override-modal'));
     $('#kf-api-override-list').off('click.kf').on('click.kf', '.kf-api-override-option', function () {
+        if (getApiOverrideState(state).lock) {
+            showToast('请先取消当前聊天的 API 锁定', 'warning', 2600);
+            return;
+        }
         const pool = getActivePool(state);
         const entryId = String($(this).attr('data-entry-id') || '');
         const entry = (pool.entries || []).find(item => item.id === entryId);
@@ -3054,8 +3329,38 @@ function bind(state, rerender, setStatus) {
         showToast(`已指定下个请求 API：${entry.name || '未命名 API'} / ${entry.model}`, 'info', 2600);
         setStatus(`已指定 API：${entry.name || entry.model}`);
     });
+    $('#kf-api-override-lock').off('click.kf').on('click.kf', () => {
+        const override = getApiOverrideState(state);
+        if (override.lock) {
+            clearApiLock(state);
+            persistHot(state);
+            renderApiOverrideModal(state);
+            showToast('已取消当前聊天的 API 锁定', 'info', 2200);
+            setStatus('已取消 API 锁定');
+            return;
+        }
+        const pool = getActivePool(state);
+        const selected = override.pending?.poolId === pool.id
+            ? override.pending
+            : (override.floorBinding?.poolId === pool.id ? override.floorBinding : null);
+        const entry = (pool.entries || []).find(item => item.id === selected?.entryId);
+        if (!entry) {
+            showToast('请先选择需要锁定的 API', 'warning', 2400);
+            return;
+        }
+        const lock = setApiLock(state, pool.id, entry.id);
+        if (!lock) {
+            showToast('当前没有可绑定的聊天，请先进入一个聊天窗口', 'warning', 3200);
+            return;
+        }
+        persistHot(state);
+        renderApiOverrideModal(state);
+        showToast(`当前聊天已锁定 API：${entry.name || '未命名 API'} / ${entry.model}`, 'info', 2800);
+        setStatus(`已锁定 API：${entry.name || entry.model}`);
+    });
     $('#kf-api-override-restore').off('click.kf').on('click.kf', () => {
         clearApiOverride(state);
+        persistHot(state);
         renderApiOverrideModal(state);
         showToast('已恢复自动选择 API', 'info', 2200);
         setStatus('已恢复自动选择 API');
@@ -3066,6 +3371,22 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
     $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, rerender, setStatus));
+    $('#kf-clear-all-data').off('click.kf').on('click.kf', () => $('#kf-reset-data-modal').addClass('kf-show'));
+    $('#kf-reset-data-cancel').off('click.kf').on('click.kf', () => closeModal('kf-reset-data-modal'));
+    $('#kf-reset-data-confirm').off('click.kf').on('click.kf', () => {
+        clearRuntimeHookState();
+        resetAllPluginData(state);
+        const pool = getActivePool(state);
+        if (pool && !pool.entries.length) addEntry(pool);
+        persistNow(state);
+        closeModal('kf-reset-data-modal');
+        closeModal('kf-settings-modal');
+        rerender();
+        ensureChatShortcut(state, rerender, setStatus);
+        ensureFloatingButton(state, rerender, setStatus);
+        showToast('插件全部数据已清除，已恢复默认设置', 'info', 3200);
+        setStatus('全部数据已清除');
+    });
     $('#kf-update-notice-close,#kf-update-notice-confirm').off('click.kf').on('click.kf', () => confirmUpdateNotice(state));
     $('#kf-sequence-confirm').off('click.kf').on('click.kf', () => closeModal('kf-sequence-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
@@ -3206,6 +3527,14 @@ function bind(state, rerender, setStatus) {
             showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
         }
     });
+    $('#kf-floating-action').off('change.kf').on('change.kf', function () {
+        const matchingQrToggle = {
+            mode: '#kf-shortcut-mode-enabled',
+            power: '#kf-shortcut-power-enabled',
+            api: '#kf-shortcut-api-enabled',
+        }[normalizeFloatingAction($(this).val())];
+        if (matchingQrToggle) $(matchingQrToggle).prop('checked', false);
+    });
     $('.kf-stepper-up,.kf-stepper-down').off('click.kf').on('click.kf', function () {
         const targetId = String($(this).data('stepperTarget') || 'kf-failure-retry-count');
         const input = $(`#${targetId}`);
@@ -3222,6 +3551,8 @@ function bind(state, rerender, setStatus) {
 
 export async function initUI(setStatus) {
     hoistModals();
+    window.STKarmaFlip?.floatingCleanup?.();
+    document.getElementById(FLOATING_ROOT_ID)?.remove();
     const state = loadState();
     const pool = getActivePool(state);
     let changed = false;
@@ -3238,6 +3569,7 @@ export async function initUI(setStatus) {
         renderEntries(state);
         if (options.renderLogs) renderLogs(state);
         bind(state, rerender, setStatus);
+        ensureFloatingButton(state, rerender, setStatus);
     };
 
     rerender();

@@ -184,6 +184,18 @@
                         <div class="kf-settings-copy"><span class="kf-settings-label">指定API</span><small>创建 QR 按钮指定下一轮使用的 API</small></div>
                         <label class="kf-square-check"><input type="checkbox" id="kf-shortcut-api-enabled"><span class="kf-square-box"></span></label>
                     </div>
+                    <div class="kf-settings-row">
+                        <div class="kf-settings-copy"><span class="kf-settings-label">使用悬浮按钮</span><small>在页面上显示可拖动的“帝”字快捷入口</small></div>
+                        <div class="kf-select-wrapper kf-floating-action-select">
+                            <select class="kf-inner-select" id="kf-floating-action" aria-label="选择悬浮按钮功能">
+                                <option value="none">不使用</option>
+                                <option value="mode">模式切换</option>
+                                <option value="power">插件启动</option>
+                                <option value="api">指定API</option>
+                            </select>
+                            <span class="kf-select-arrow" aria-hidden="true"><svg><use href="#kf-i-chevron"/></svg></span>
+                        </div>
+                    </div>
                 </section>
 
                 <section class="kf-settings-group">
@@ -194,8 +206,22 @@
                         <label class="kf-square-check"><input type="checkbox" id="kf-compact-api-entries"><span class="kf-square-box"></span></label>
                     </div>
                 </section>
+
+                <section class="kf-settings-group kf-danger-zone">
+                    <div class="kf-group-head"><strong>数据</strong><span>恢复插件初始状态</span></div>
+                    <div class="kf-section-divider"></div>
+                    <button class="kf-action-btn kf-clear-data-btn" id="kf-clear-all-data" type="button"><svg><use href="#kf-i-trash"/></svg><span>清除全部数据</span></button>
+                </section>
             </div>
             <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-settings-cancel" type="button">取消</button><button class="kf-action-btn kf-primary-btn" id="kf-settings-confirm" type="button">确认</button></footer>
+        </section>
+    </div>
+
+    <div class="kf-modal-overlay" id="kf-reset-data-modal">
+        <section class="kf-modal-box">
+            <header class="kf-modal-header"><h2>确认清除全部数据</h2></header>
+            <div class="kf-modal-body"><div class="kf-modal-message">此操作会删除全部组合、API 条目、插件设置、美化偏好、聊天 API 锁定、日志与运行记录，并恢复默认状态。该操作无法撤销。</div></div>
+            <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-reset-data-cancel" type="button">取消</button><button class="kf-action-btn kf-danger-fill-btn" id="kf-reset-data-confirm" type="button">确认清除</button></footer>
         </section>
     </div>
 
@@ -264,7 +290,7 @@
         <section class="kf-modal-box kf-api-override-box">
             <header class="kf-modal-header"><h2>指定下个请求API</h2><button class="kf-icon-btn kf-close-btn" id="kf-api-override-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
             <div class="kf-modal-body"><div class="kf-modal-message" id="kf-api-override-message"></div><div class="kf-api-override-list" id="kf-api-override-list"></div></div>
-            <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-api-override-restore" type="button">恢复自动选择</button><button class="kf-action-btn kf-primary-btn" id="kf-api-override-start" type="button">启动插件</button></footer>
+            <footer class="kf-modal-footer kf-modal-actions-two kf-api-override-actions"><button class="kf-action-btn kf-secondary-btn" id="kf-api-override-lock" type="button">锁定该API</button><button class="kf-action-btn kf-secondary-btn" id="kf-api-override-restore" type="button">恢复自动选择</button><button class="kf-action-btn kf-primary-btn" id="kf-api-override-start" type="button">启动插件</button></footer>
         </section>
     </div>
 

@@ -36,11 +36,12 @@ function defaultPool() {
 
 export function getDefaultState() {
     return {
-        version: 5,
+        version: 6,
         enabled: true,
         activePoolId: 'pool_default',
         pools: [defaultPool()],
         apiPresets: [],
+        apiLocks: {},
         theme: {
             bgMain: '#ffffff',
             bgSub: '#fbfdff',
@@ -58,6 +59,8 @@ export function getDefaultState() {
             modeEnabled: true,
             powerEnabled: true,
             apiEnabled: false,
+            floatingAction: 'none',
+            floatingPosition: null,
         },
         ui: {
             updateNoticeSeenVersion: '',
@@ -140,6 +143,31 @@ function normalizePool(pool) {
     return p;
 }
 
+function normalizeApiLocks(raw) {
+    const locks = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return locks;
+    for (const [rawChatId, rawRef] of Object.entries(raw)) {
+        const chatId = String(rawChatId || '').trim();
+        const poolId = String(rawRef?.poolId || '').trim();
+        const entryId = String(rawRef?.entryId || '').trim();
+        if (!chatId || !poolId || !entryId || ['__proto__', 'prototype', 'constructor'].includes(chatId)) continue;
+        locks[chatId] = { poolId, entryId };
+    }
+    return locks;
+}
+
+function normalizeFloatingAction(action) {
+    const value = String(action || 'none').trim().toLowerCase();
+    return ['mode', 'power', 'api'].includes(value) ? value : 'none';
+}
+
+function normalizeFloatingPosition(position) {
+    const left = Number(position?.left);
+    const top = Number(position?.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { left: Math.round(left), top: Math.round(top) };
+}
+
 function normalizeTheme(theme) {
     const defaults = getDefaultState().theme;
     const normalized = {
@@ -180,9 +208,10 @@ function findPresetByEntry(source, entry) {
 
 function normalizeState(raw) {
     const s = { ...getDefaultState(), ...(raw || {}) };
-    s.version = 5;
+    s.version = 6;
     s.pools = Array.isArray(s.pools) && s.pools.length ? s.pools.map(normalizePool) : [defaultPool()];
     s.apiPresets = Array.isArray(s.apiPresets) ? s.apiPresets.map(normalizePreset) : [];
+    s.apiLocks = normalizeApiLocks(s.apiLocks);
     if (!s.pools.find(p => p.id === s.activePoolId)) s.activePoolId = s.pools[0].id;
     const activePool = s.pools.find(p => p.id === s.activePoolId) || s.pools[0];
     s.enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : activePool?.enabled !== false;
@@ -202,6 +231,8 @@ function normalizeState(raw) {
         modeEnabled: s.shortcuts?.modeEnabled ?? s.shortcuts?.enabled ?? true,
         powerEnabled: s.shortcuts?.powerEnabled ?? s.shortcuts?.enabled ?? true,
         apiEnabled: s.shortcuts?.apiEnabled ?? false,
+        floatingAction: normalizeFloatingAction(s.shortcuts?.floatingAction),
+        floatingPosition: normalizeFloatingPosition(s.shortcuts?.floatingPosition),
     };
     s.shortcuts.modeEnabled = s.shortcuts.modeEnabled !== false;
     s.shortcuts.powerEnabled = s.shortcuts.powerEnabled !== false;
@@ -326,7 +357,7 @@ function createPersistedState(source) {
     const pools = Array.isArray(base.pools) && base.pools.length ? base.pools : [defaultPool()];
     const activePoolId = pools.find(pool => pool.id === base.activePoolId)?.id || pools[0].id;
     const snapshot = {
-        version: 5,
+        version: 6,
         enabled: base.enabled !== false,
         activePoolId,
         pools: pools.map(pool => ({
@@ -337,6 +368,7 @@ function createPersistedState(source) {
             entries: Array.isArray(pool?.entries) ? pool.entries.map(buildPersistedEntry) : [],
         })),
         apiPresets: Array.isArray(base.apiPresets) ? base.apiPresets.map(buildPersistedPreset) : [],
+        apiLocks: normalizeApiLocks(base.apiLocks),
         theme: normalizeTheme(base.theme),
         failure: {
             ...getDefaultState().failure,
@@ -352,6 +384,8 @@ function createPersistedState(source) {
             modeEnabled: base?.shortcuts?.modeEnabled ?? base?.shortcuts?.enabled ?? true,
             powerEnabled: base?.shortcuts?.powerEnabled ?? base?.shortcuts?.enabled ?? true,
             apiEnabled: base?.shortcuts?.apiEnabled ?? false,
+            floatingAction: normalizeFloatingAction(base?.shortcuts?.floatingAction),
+            floatingPosition: normalizeFloatingPosition(base?.shortcuts?.floatingPosition),
         },
         ui: {
             ...getDefaultState().ui,
@@ -367,7 +401,9 @@ function createPersistedState(source) {
 }
 
 export function createExportSnapshot(state) {
-    return createPersistedState(state);
+    const snapshot = createPersistedState(state);
+    delete snapshot.apiLocks;
+    return snapshot;
 }
 
 export function loadState() {
@@ -717,6 +753,25 @@ export function clearLogs(state) {
     window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
 }
 
+export function resetAllPluginData(state) {
+    const target = state && typeof state === 'object' ? state : loadState();
+    const defaults = normalizeState(getDefaultState());
+    for (const key of Object.keys(target)) delete target[key];
+    Object.assign(target, defaults);
+    for (const key of Object.keys(runtimeScopes)) delete runtimeScopes[key];
+    usageStats.clear();
+    try { localStorage.removeItem(OLD_STORAGE_KEY); } catch {}
+    cachedState = target;
+    pendingState = null;
+    pendingPersist = false;
+    enabledPersistDirty = false;
+    modePersistDirty = false;
+    lightPersistDirty = false;
+    clearPersistTimer();
+    window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
+    return target;
+}
+
 export function getRuntimeScope(state) {
     const chatId = context()?.chatId || 'global';
     const key = `chat:${chatId}`;
@@ -753,12 +808,37 @@ function apiOverrideRef(poolId, entryId, messageId) {
     return ref;
 }
 
+function currentChatId() {
+    return String(context()?.chatId ?? '').trim();
+}
+
 export function getApiOverrideState(state) {
     const runtime = getRuntimeScope(state);
+    const chatId = currentChatId();
     return {
+        lock: chatId ? state?.apiLocks?.[chatId] || null : null,
         pending: runtime.pendingApiOverride || null,
         floorBinding: runtime.floorApiBinding || null,
     };
+}
+
+export function setApiLock(state, poolId, entryId) {
+    const chatId = currentChatId();
+    if (!chatId) return null;
+    if (!state.apiLocks || typeof state.apiLocks !== 'object') state.apiLocks = {};
+    const lock = apiOverrideRef(poolId, entryId);
+    state.apiLocks[chatId] = lock;
+    const runtime = getRuntimeScope(state);
+    runtime.pendingApiOverride = null;
+    runtime.floorApiBinding = null;
+    return lock;
+}
+
+export function clearApiLock(state) {
+    const chatId = currentChatId();
+    if (!chatId || !state?.apiLocks?.[chatId]) return false;
+    delete state.apiLocks[chatId];
+    return true;
 }
 
 export function setPendingApiOverride(state, poolId, entryId) {
@@ -788,6 +868,7 @@ export function clearApiOverride(state) {
     const runtime = getRuntimeScope(state);
     runtime.pendingApiOverride = null;
     runtime.floorApiBinding = null;
+    clearApiLock(state);
 }
 
 export function pushLog(state, entry) {
