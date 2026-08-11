@@ -57,6 +57,8 @@ let colorPickerTargetId = '';
 let colorPickerDragging = false;
 let colorPickerDraft = { h: 0, s: 1, v: 1 };
 let floatingViewportController = null;
+let floatingVisibilityTimer = null;
+let floatingModalObserver = null;
 const THEME_PRESETS = {
     default: { primary: '#1677ff', secondary: '#ffffff' },
     'mist-purple': { primary: '#7659e8', secondary: '#fbfaff' },
@@ -1135,7 +1137,7 @@ function bindChatShortcut(state, rerender, setStatus) {
 
 function normalizeFloatingAction(action) {
     const value = String(action || 'none').trim().toLowerCase();
-    return ['mode', 'power', 'api'].includes(value) ? value : 'none';
+    return ['mode', 'power', 'api', 'panel'].includes(value) ? value : 'none';
 }
 
 function normalizeFloatingSkin(skin) {
@@ -1147,9 +1149,9 @@ function floatingSkinVisual(skinId, preview = false) {
     const skin = FLOATING_SKINS.find(item => item.id === normalizeFloatingSkin(skinId)) || FLOATING_SKINS[0];
     const sizeClass = preview ? ' kf-floating-skin-preview-visual' : '';
     if (skin.kind === 'metal' || skin.kind === 'primary') {
-        return `<span class="kf-floating-skin-visual kf-floating-skin-mask kf-floating-skin-${skin.kind}${sizeClass}" style="--kf-floating-skin-url:url(&quot;${esc(skin.url)}&quot;)" aria-hidden="true"></span>`;
+        return `<span class="kf-floating-skin-visual kf-floating-skin-mask kf-floating-skin-${skin.kind}${sizeClass}" style="--kf-floating-skin-url:url(&quot;${esc(skin.url)}&quot;)" aria-hidden="true"><img class="kf-floating-skin-fallback" src="${esc(skin.url)}" alt="" draggable="false"></span>`;
     }
-    return `<img class="kf-floating-skin-visual kf-floating-skin-image kf-floating-skin-${esc(skin.id)}${sizeClass}" src="${esc(skin.url)}" alt="">`;
+    return `<img class="kf-floating-skin-visual kf-floating-skin-image kf-floating-skin-${esc(skin.id)}${sizeClass}" src="${esc(skin.url)}" alt="" draggable="false" aria-hidden="true">`;
 }
 
 function renderFloatingSkinChoices(selectedSkin) {
@@ -1178,6 +1180,7 @@ function floatingActionLabel(action) {
         mode: '切换固定或随机模式',
         power: '开启或关闭插件',
         api: '指定下个请求 API',
+        panel: '打开插件主界面',
     }[normalizeFloatingAction(action)] || 'KarmaFlip 悬浮按钮';
 }
 
@@ -1228,15 +1231,44 @@ function applyFloatingPosition(state, options = {}) {
     const next = clampFloatingPosition(requested.left, requested.top, button);
     button.style.left = `${Math.round(next.left)}px`;
     button.style.top = `${Math.round(next.top)}px`;
+    button.style.right = 'auto';
+    button.style.bottom = 'auto';
     if (options.persist) {
+        const persistedLeft = Math.round(next.left);
+        const persistedTop = Math.round(next.top);
+        const unchanged = Number(saved?.left) === persistedLeft && Number(saved?.top) === persistedTop;
         state.shortcuts = state.shortcuts || {};
         state.shortcuts.floatingPosition = {
-            left: Math.round(next.left),
-            top: Math.round(next.top),
+            left: persistedLeft,
+            top: persistedTop,
         };
-        persistHot(state);
+        if (!unchanged) persistHot(state);
     }
     return next;
+}
+
+function isFloatingButtonSuppressed() {
+    return MODAL_IDS.some(id => document.getElementById(id)?.classList.contains('kf-show'));
+}
+
+function ensureFloatingButtonVisible(state, button = document.getElementById(FLOATING_BUTTON_ID)) {
+    if (!button?.isConnected || isFloatingButtonSuppressed()) return null;
+    const rect = button.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return null;
+    const viewport = floatingViewportBounds();
+    const viewportRight = viewport.left + viewport.width;
+    const viewportBottom = viewport.top + viewport.height;
+    const outside = rect.right <= viewport.left
+        || rect.left >= viewportRight
+        || rect.bottom <= viewport.top
+        || rect.top >= viewportBottom;
+    const saved = state.shortcuts?.floatingPosition;
+    const requested = outside && Number.isFinite(Number(saved?.left)) && Number.isFinite(Number(saved?.top))
+        ? { left: Number(saved.left), top: Number(saved.top) }
+        : (outside ? defaultFloatingPosition(button) : { left: rect.left, top: rect.top });
+    const next = clampFloatingPosition(requested.left, requested.top, button);
+    const corrected = Math.abs(rect.left - next.left) > 0.5 || Math.abs(rect.top - next.top) > 0.5;
+    return applyFloatingPosition(state, { position: next, persist: corrected });
 }
 
 function updateFloatingButton(state) {
@@ -1266,6 +1298,8 @@ function activateFloatingButton(state, rerender, setStatus) {
         toggleGlobalEnabled(state, setStatus);
     } else if (action === 'api') {
         openApiOverrideModal(state);
+    } else if (action === 'panel') {
+        openMainPanel(state);
     }
     updateFloatingButton(state);
 }
@@ -1274,10 +1308,12 @@ function bindFloatingButton(button, state, rerender, setStatus) {
     if (!button || button.dataset.kfFloatingBound === 'true') return;
     button.dataset.kfFloatingBound = 'true';
     let drag = null;
-    let suppressClick = false;
+    let lastTapAt = 0;
 
     button.addEventListener('pointerdown', event => {
         if (event.button !== undefined && event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
         const rect = button.getBoundingClientRect();
         drag = {
             pointerId: event.pointerId,
@@ -1300,6 +1336,7 @@ function bindFloatingButton(button, state, rerender, setStatus) {
             position: { left: drag.startLeft + deltaX, top: drag.startTop + deltaY },
         });
         event.preventDefault();
+        event.stopPropagation();
     });
     const finishDrag = (event, persist) => {
         if (!drag || drag.pointerId !== event.pointerId) return;
@@ -1308,9 +1345,16 @@ function bindFloatingButton(button, state, rerender, setStatus) {
         button.classList.remove('kf-dragging');
         button.releasePointerCapture?.(event.pointerId);
         if (moved && persist) {
-            suppressClick = true;
             const rect = button.getBoundingClientRect();
             applyFloatingPosition(state, { position: { left: rect.left, top: rect.top }, persist: true });
+        } else if (!moved && persist) {
+            event.preventDefault();
+            event.stopPropagation();
+            const now = Date.now();
+            if (now - lastTapAt > 500) {
+                lastTapAt = now;
+                activateFloatingButton(state, rerender, setStatus);
+            }
         }
     };
     button.addEventListener('pointerup', event => finishDrag(event, true));
@@ -1318,32 +1362,49 @@ function bindFloatingButton(button, state, rerender, setStatus) {
     button.addEventListener('dragstart', event => event.preventDefault());
     button.addEventListener('click', event => {
         event.preventDefault();
-        event.stopPropagation();
-        if (suppressClick) {
-            suppressClick = false;
-            return;
-        }
-        activateFloatingButton(state, rerender, setStatus);
+        event.stopImmediatePropagation();
+        if (event.detail === 0) activateFloatingButton(state, rerender, setStatus);
     });
 }
 
 function teardownFloatingViewportListeners() {
     floatingViewportController?.abort?.();
     floatingViewportController = null;
+    window.clearInterval(floatingVisibilityTimer);
+    floatingVisibilityTimer = null;
+    floatingModalObserver?.disconnect?.();
+    floatingModalObserver = null;
     if (window.STKarmaFlip?.floatingCleanup === teardownFloatingViewportListeners) {
         delete window.STKarmaFlip.floatingCleanup;
     }
 }
 
 function bindFloatingViewportListeners(state) {
-    if (floatingViewportController) return;
-    window.STKarmaFlip?.floatingCleanup?.();
-    floatingViewportController = new AbortController();
-    const options = { passive: true, signal: floatingViewportController.signal };
-    const reposition = () => applyFloatingPosition(state);
-    window.addEventListener('resize', reposition, options);
-    window.visualViewport?.addEventListener?.('resize', reposition, options);
-    window.visualViewport?.addEventListener?.('scroll', reposition, options);
+    if (!floatingViewportController) {
+        window.STKarmaFlip?.floatingCleanup?.();
+        floatingViewportController = new AbortController();
+        const options = { passive: true, signal: floatingViewportController.signal };
+        const reposition = () => ensureFloatingButtonVisible(state);
+        window.addEventListener('resize', reposition, options);
+        window.visualViewport?.addEventListener?.('resize', reposition, options);
+        window.visualViewport?.addEventListener?.('scroll', reposition, options);
+    }
+    if (!floatingModalObserver) {
+        floatingModalObserver = new MutationObserver(() => {
+            const root = document.getElementById(FLOATING_ROOT_ID);
+            if (!root) return;
+            const suppressed = isFloatingButtonSuppressed();
+            root.hidden = suppressed;
+            root.setAttribute('aria-hidden', String(suppressed));
+            if (!suppressed) window.requestAnimationFrame(() => ensureFloatingButtonVisible(state));
+        });
+        for (const id of MODAL_IDS) {
+            const modal = document.getElementById(id);
+            if (modal) floatingModalObserver.observe(modal, { attributes: true, attributeFilter: ['class'] });
+        }
+    }
+    window.clearInterval(floatingVisibilityTimer);
+    floatingVisibilityTimer = window.setInterval(() => ensureFloatingButtonVisible(state), 3000);
     window.STKarmaFlip = window.STKarmaFlip || {};
     window.STKarmaFlip.floatingCleanup = teardownFloatingViewportListeners;
 }
@@ -1368,12 +1429,17 @@ function ensureFloatingButton(state, rerender, setStatus) {
         button.id = FLOATING_BUTTON_ID;
         button.className = 'kf-floating-button';
         button.type = 'button';
+        button.draggable = false;
         root.appendChild(button);
     }
     bindFloatingButton(button, state, rerender, setStatus);
     bindFloatingViewportListeners(state);
     updateFloatingButton(state);
     applyFloatingPosition(state);
+    const suppressed = isFloatingButtonSuppressed();
+    root.hidden = suppressed;
+    root.setAttribute('aria-hidden', String(suppressed));
+    if (!suppressed) ensureFloatingButtonVisible(state, button);
 }
 
 function applyThemeVisual(theme = {}) {
@@ -1901,8 +1967,6 @@ function createLogSummary(log, kind) {
     badge.className = `kf-log-badge kf-${kind}`;
     badge.textContent = kind === 'pick' ? '抽选' : (kind === 'error' ? '报错' : '成功');
 
-    const center = document.createElement('div');
-    center.className = 'kf-log-center';
     const api = document.createElement('span');
     api.className = 'kf-log-api-name';
     const model = document.createElement('span');
@@ -1913,10 +1977,7 @@ function createLogSummary(log, kind) {
     api.title = api.textContent;
     model.textContent = modelName || '未填模型';
     model.title = model.textContent;
-    center.append(api, model);
 
-    const meta = document.createElement('div');
-    meta.className = 'kf-log-meta';
     const time = document.createElement('span');
     time.className = 'kf-log-time';
     const timeParts = logTimeParts(log.time);
@@ -1927,8 +1988,7 @@ function createLogSummary(log, kind) {
     floor.textContent = log.messageId !== undefined && Number.isInteger(Number(log.messageId))
         ? `#${Number(log.messageId)}`
         : (log.status ? `HTTP ${log.status}` : '');
-    meta.append(time, floor);
-    summary.append(badge, center, meta);
+    summary.append(badge, api, model, time, floor);
     return summary;
 }
 
@@ -1963,11 +2023,7 @@ function createUsageStatRow(stat) {
     const name = document.createElement('div');
     name.className = 'kf-log-stat-api-name';
     name.textContent = stat.apiName || '未命名';
-    const url = document.createElement('div');
-    url.className = 'kf-log-stat-api-url';
-    url.textContent = stat.apiUrl || '未填写 URL';
-    url.title = url.textContent;
-    main.append(name, url);
+    main.append(name);
     const total = document.createElement('div');
     total.className = 'kf-log-api-total';
     total.textContent = `共 ${stat.count || 0} 次`;

@@ -159,7 +159,7 @@ function normalizeApiLocks(raw) {
 
 function normalizeFloatingAction(action) {
     const value = String(action || 'none').trim().toLowerCase();
-    return ['mode', 'power', 'api'].includes(value) ? value : 'none';
+    return ['mode', 'power', 'api', 'panel'].includes(value) ? value : 'none';
 }
 
 function normalizeFloatingSkin(skin) {
