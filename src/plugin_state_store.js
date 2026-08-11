@@ -60,6 +60,7 @@ export function getDefaultState() {
             powerEnabled: true,
             apiEnabled: false,
             floatingAction: 'none',
+            floatingSkin: 'emperor-metal',
             floatingPosition: null,
         },
         ui: {
@@ -161,6 +162,13 @@ function normalizeFloatingAction(action) {
     return ['mode', 'power', 'api'].includes(value) ? value : 'none';
 }
 
+function normalizeFloatingSkin(skin) {
+    const value = String(skin || 'emperor-metal').trim().toLowerCase();
+    return ['emperor-metal', 'emperor-primary', 'q-scepter', 'crown', 'emperor-cat', 'elsa'].includes(value)
+        ? value
+        : 'emperor-metal';
+}
+
 function normalizeFloatingPosition(position) {
     const left = Number(position?.left);
     const top = Number(position?.top);
@@ -232,6 +240,7 @@ function normalizeState(raw) {
         powerEnabled: s.shortcuts?.powerEnabled ?? s.shortcuts?.enabled ?? true,
         apiEnabled: s.shortcuts?.apiEnabled ?? false,
         floatingAction: normalizeFloatingAction(s.shortcuts?.floatingAction),
+        floatingSkin: normalizeFloatingSkin(s.shortcuts?.floatingSkin),
         floatingPosition: normalizeFloatingPosition(s.shortcuts?.floatingPosition),
     };
     s.shortcuts.modeEnabled = s.shortcuts.modeEnabled !== false;
@@ -385,6 +394,7 @@ function createPersistedState(source) {
             powerEnabled: base?.shortcuts?.powerEnabled ?? base?.shortcuts?.enabled ?? true,
             apiEnabled: base?.shortcuts?.apiEnabled ?? false,
             floatingAction: normalizeFloatingAction(base?.shortcuts?.floatingAction),
+            floatingSkin: normalizeFloatingSkin(base?.shortcuts?.floatingSkin),
             floatingPosition: normalizeFloatingPosition(base?.shortcuts?.floatingPosition),
         },
         ui: {

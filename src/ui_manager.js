@@ -3,7 +3,7 @@ import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './r
 import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const UPDATE_NOTICE_VERSION = '1.2.6';
@@ -29,6 +29,15 @@ const FLOATING_ROOT_ID = 'kf-floating-root';
 const FLOATING_BUTTON_ID = 'kf-floating-button';
 const FLOATING_EDGE_GAP = 8;
 const FLOATING_DRAG_THRESHOLD = 8;
+const FLOATING_SKIN_DEFAULT = 'emperor-metal';
+const FLOATING_SKINS = Object.freeze([
+    { id: 'emperor-metal', name: '帝王之气', kind: 'metal', url: new URL('../assets/floating-icons/emperor.png', import.meta.url).href },
+    { id: 'emperor-primary', name: '天威难料', kind: 'primary', url: new URL('../assets/floating-icons/emperor.png', import.meta.url).href },
+    { id: 'q-scepter', name: 'Q版权杖', kind: 'image', url: new URL('../assets/floating-icons/q-scepter.png', import.meta.url).href },
+    { id: 'crown', name: '皇冠', kind: 'image', url: new URL('../assets/floating-icons/crown.png', import.meta.url).href },
+    { id: 'emperor-cat', name: '吾皇猫', kind: 'image', url: new URL('../assets/floating-icons/emperor-cat.png', import.meta.url).href },
+    { id: 'elsa', name: '艾莎', kind: 'image', url: new URL('../assets/floating-icons/elsa.png', import.meta.url).href },
+]);
 const QR_ASSISTANT_LEGACY_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID];
 const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID, CHAT_API_WRAPPER_ID];
 const QR_ASSISTANT_MANAGED_DOM_IDS = [...QR_ASSISTANT_LEGACY_DOM_IDS, ...QR_ASSISTANT_CURRENT_DOM_IDS];
@@ -1123,28 +1132,45 @@ function bindChatShortcut(state, rerender, setStatus) {
     });
 }
 
-function floatingEmperorSvg() {
-    return `
-        <svg class="kf-floating-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="50 20 300 360" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-            <defs>
-                <linearGradient id="kf-floating-emperor-gold" x1="0" y1="26" x2="0" y2="374" gradientUnits="userSpaceOnUse">
-                    <stop offset="0" stop-color="#7b4b00" />
-                    <stop offset="0.18" stop-color="#d79a24" />
-                    <stop offset="0.36" stop-color="#fff1a6" />
-                    <stop offset="0.5" stop-color="#b67408" />
-                    <stop offset="0.68" stop-color="#f4c954" />
-                    <stop offset="0.84" stop-color="#fff4b5" />
-                    <stop offset="1" stop-color="#8b5703" />
-                </linearGradient>
-            </defs>
-            <path d="M 75 65 L 72 69 L 72 73 L 74 75 L 81 77 L 82 78 L 139 78 L 141 79 L 144 84 L 147 101 L 151 110 L 157 116 L 164 120 L 166 120 L 167 121 L 169 121 L 176 124 L 179 124 L 186 127 L 186 143 L 184 145 L 120 145 L 119 144 L 118 145 L 115 142 L 115 136 L 114 135 L 114 130 L 113 129 L 112 119 L 111 118 L 110 111 L 108 108 L 108 106 L 106 102 L 101 96 L 95 96 L 93 97 L 93 113 L 94 114 L 94 118 L 95 119 L 95 122 L 96 123 L 96 126 L 97 127 L 97 130 L 98 131 L 98 135 L 99 136 L 99 141 L 100 142 L 100 221 L 99 222 L 99 227 L 98 228 L 98 232 L 97 233 L 97 237 L 96 238 L 96 241 L 95 242 L 93 253 L 92 254 L 91 260 L 90 261 L 90 263 L 89 264 L 89 266 L 86 273 L 86 276 L 84 279 L 83 284 L 81 287 L 81 289 L 79 292 L 79 294 L 77 298 L 76 306 L 79 309 L 82 309 L 83 308 L 87 307 L 91 303 L 97 291 L 97 289 L 99 286 L 99 284 L 100 283 L 100 281 L 101 280 L 101 278 L 104 271 L 104 268 L 105 267 L 105 264 L 106 263 L 106 260 L 107 259 L 107 256 L 108 255 L 108 251 L 109 250 L 109 247 L 110 246 L 110 242 L 111 241 L 111 237 L 112 236 L 112 231 L 113 230 L 113 225 L 114 224 L 114 218 L 115 217 L 115 209 L 116 208 L 116 192 L 117 191 L 117 168 L 118 167 L 118 161 L 119 160 L 159 160 L 160 161 L 185 161 L 186 162 L 186 176 L 184 178 L 166 180 L 158 184 L 142 199 L 140 203 L 140 205 L 138 208 L 138 210 L 136 213 L 136 216 L 134 220 L 134 223 L 133 224 L 133 227 L 132 228 L 132 231 L 131 232 L 131 236 L 130 237 L 129 249 L 128 250 L 128 258 L 127 259 L 127 268 L 126 269 L 126 287 L 125 288 L 125 321 L 126 322 L 126 325 L 128 328 L 128 330 L 131 332 L 135 331 L 139 327 L 139 325 L 140 324 L 140 306 L 141 305 L 141 282 L 142 281 L 142 253 L 143 252 L 143 238 L 144 237 L 144 232 L 145 231 L 145 228 L 146 227 L 148 219 L 155 206 L 163 197 L 165 197 L 170 194 L 172 194 L 176 192 L 184 191 L 186 193 L 186 359 L 187 360 L 187 365 L 188 366 L 190 373 L 191 374 L 195 374 L 197 373 L 199 371 L 201 367 L 201 362 L 202 361 L 202 193 L 203 192 L 210 192 L 211 193 L 217 194 L 223 197 L 233 206 L 239 216 L 240 222 L 241 223 L 241 227 L 242 228 L 242 234 L 243 235 L 243 242 L 244 243 L 244 250 L 245 251 L 245 259 L 246 260 L 246 268 L 247 269 L 247 279 L 248 280 L 248 317 L 249 318 L 249 323 L 250 324 L 250 328 L 251 329 L 251 331 L 252 332 L 258 332 L 260 330 L 260 325 L 261 324 L 261 312 L 262 311 L 262 275 L 261 274 L 261 257 L 260 256 L 260 244 L 259 243 L 259 236 L 258 235 L 258 230 L 257 229 L 257 226 L 256 225 L 256 222 L 255 221 L 254 216 L 246 199 L 237 189 L 236 189 L 231 185 L 229 185 L 226 183 L 215 181 L 214 180 L 208 179 L 207 178 L 203 177 L 202 176 L 202 172 L 201 171 L 201 163 L 203 160 L 271 160 L 272 161 L 272 175 L 273 176 L 273 200 L 274 201 L 274 213 L 275 214 L 275 222 L 276 223 L 276 229 L 277 230 L 278 241 L 279 242 L 279 246 L 280 247 L 280 251 L 281 252 L 281 256 L 282 257 L 282 260 L 283 261 L 283 265 L 284 266 L 285 273 L 292 290 L 294 292 L 295 295 L 297 297 L 300 303 L 303 306 L 305 310 L 307 311 L 312 311 L 314 310 L 314 305 L 313 304 L 313 302 L 312 301 L 312 299 L 311 298 L 307 284 L 305 281 L 305 279 L 303 276 L 303 274 L 299 266 L 299 263 L 298 262 L 297 256 L 296 255 L 296 250 L 295 249 L 295 246 L 294 245 L 294 240 L 293 239 L 293 235 L 292 234 L 292 229 L 291 228 L 291 224 L 290 223 L 289 215 L 288 214 L 288 210 L 287 209 L 287 203 L 286 202 L 286 193 L 285 192 L 285 184 L 286 183 L 286 166 L 287 165 L 287 156 L 288 155 L 289 140 L 290 139 L 290 134 L 291 133 L 291 130 L 292 129 L 292 125 L 293 124 L 294 117 L 295 116 L 296 110 L 297 109 L 297 106 L 298 105 L 296 96 L 294 94 L 292 94 L 288 96 L 285 99 L 283 103 L 282 109 L 280 113 L 280 116 L 278 120 L 278 123 L 277 124 L 277 127 L 276 128 L 276 132 L 275 133 L 275 136 L 274 137 L 274 141 L 272 144 L 207 144 L 206 145 L 204 144 L 203 145 L 201 143 L 201 128 L 203 126 L 205 126 L 206 125 L 210 125 L 211 124 L 213 124 L 220 121 L 226 116 L 237 109 L 237 108 L 239 106 L 239 104 L 241 100 L 241 97 L 242 96 L 242 93 L 243 92 L 245 81 L 248 78 L 258 78 L 259 79 L 283 79 L 284 80 L 298 80 L 299 79 L 305 79 L 306 78 L 309 78 L 310 77 L 312 77 L 315 75 L 319 74 L 320 73 L 320 71 L 319 70 L 318 66 L 316 65 L 301 65 L 300 64 L 276 64 L 275 63 L 87 63 L 86 64 Z M 159 79 L 160 78 L 226 78 L 228 79 L 230 82 L 230 90 L 229 91 L 228 96 L 223 102 L 223 103 L 215 109 L 213 109 L 209 111 L 205 111 L 204 112 L 191 112 L 190 111 L 185 111 L 184 110 L 180 110 L 176 108 L 170 107 L 164 102 L 160 93 L 160 88 L 159 87 Z M 128 31 L 128 35 L 129 37 L 132 39 L 189 39 L 190 40 L 204 40 L 205 41 L 237 41 L 238 42 L 245 42 L 246 41 L 252 41 L 253 40 L 255 40 L 259 38 L 262 35 L 262 32 L 258 28 L 256 27 L 253 27 L 252 26 L 139 26 L 138 27 L 131 28 L 129 29 Z" fill="url(#kf-floating-emperor-gold)" stroke="#684005" stroke-width="10" paint-order="stroke fill" stroke-linejoin="round" fill-rule="evenodd" clip-rule="evenodd" />
-        </svg>
-    `;
-}
 
 function normalizeFloatingAction(action) {
     const value = String(action || 'none').trim().toLowerCase();
     return ['mode', 'power', 'api'].includes(value) ? value : 'none';
+}
+
+function normalizeFloatingSkin(skin) {
+    const value = String(skin || FLOATING_SKIN_DEFAULT).trim().toLowerCase();
+    return FLOATING_SKINS.some(item => item.id === value) ? value : FLOATING_SKIN_DEFAULT;
+}
+
+function floatingSkinVisual(skinId, preview = false) {
+    const skin = FLOATING_SKINS.find(item => item.id === normalizeFloatingSkin(skinId)) || FLOATING_SKINS[0];
+    const sizeClass = preview ? ' kf-floating-skin-preview-visual' : '';
+    if (skin.kind === 'metal' || skin.kind === 'primary') {
+        return `<span class="kf-floating-skin-visual kf-floating-skin-mask kf-floating-skin-${skin.kind}${sizeClass}" style="--kf-floating-skin-url:url(&quot;${esc(skin.url)}&quot;)" aria-hidden="true"></span>`;
+    }
+    return `<img class="kf-floating-skin-visual kf-floating-skin-image kf-floating-skin-${esc(skin.id)}${sizeClass}" src="${esc(skin.url)}" alt="">`;
+}
+
+function renderFloatingSkinChoices(selectedSkin) {
+    const selected = normalizeFloatingSkin(selectedSkin);
+    const grid = $('#kf-floating-skin-grid').empty();
+    for (const skin of FLOATING_SKINS) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `kf-floating-skin-card${skin.id === selected ? ' kf-selected' : ''}`;
+        button.dataset.skin = skin.id;
+        button.setAttribute('role', 'radio');
+        button.setAttribute('aria-checked', skin.id === selected ? 'true' : 'false');
+        button.innerHTML = `<span class="kf-floating-skin-preview">${floatingSkinVisual(skin.id, true)}</span><span class="kf-floating-skin-name">${esc(skin.name)}</span>`;
+        grid.append(button);
+    }
+    $('#kf-floating-skin-modal').attr('data-selected-skin', selected);
+}
+
+function openFloatingSkinModal() {
+    renderFloatingSkinChoices($('#kf-floating-skin').val());
+    $('#kf-floating-skin-modal').addClass('kf-show');
 }
 
 function floatingActionLabel(action) {
@@ -1217,7 +1243,12 @@ function updateFloatingButton(state) {
     const button = document.getElementById(FLOATING_BUTTON_ID);
     if (!button) return;
     const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
+    const skin = normalizeFloatingSkin(state.shortcuts?.floatingSkin);
     const label = floatingActionLabel(action);
+    if (button.dataset.skin !== skin) {
+        button.dataset.skin = skin;
+        button.innerHTML = floatingSkinVisual(skin);
+    }
     button.dataset.action = action;
     button.dataset.enabled = state.enabled === false ? 'false' : 'true';
     button.dataset.mode = getActivePool(state)?.mode === 'random' ? 'random' : 'fixed';
@@ -1337,7 +1368,6 @@ function ensureFloatingButton(state, rerender, setStatus) {
         button.id = FLOATING_BUTTON_ID;
         button.className = 'kf-floating-button';
         button.type = 'button';
-        button.innerHTML = floatingEmperorSvg();
         root.appendChild(button);
     }
     bindFloatingButton(button, state, rerender, setStatus);
@@ -1424,6 +1454,7 @@ function populateSettingsControls(state) {
     $('#kf-shortcut-power-enabled').prop('checked', state.shortcuts?.powerEnabled !== false);
     $('#kf-shortcut-api-enabled').prop('checked', state.shortcuts?.apiEnabled === true);
     $('#kf-floating-action').val(normalizeFloatingAction(state.shortcuts?.floatingAction));
+    $('#kf-floating-skin').val(normalizeFloatingSkin(state.shortcuts?.floatingSkin));
     $('#kf-compact-api-entries').prop('checked', state.ui?.compactApiEntries === true);
 }
 
@@ -2060,7 +2091,7 @@ function renderLogs(state, filter = currentLogFilter()) {
         all: ['全部日志', '按时间倒序'],
         error: ['报错', 'API 返回的原始信息'],
         pick: ['抽选记录', '按时间倒序'],
-        stats: ['次数统计', '成功请求累计'],
+        stats: ['次数统计', '记录API与模型的成功请求次数'],
     };
     const resolvedFilter = ['all', 'error', 'pick', 'stats'].includes(filter) ? filter : 'all';
     const [title, meta] = titles[resolvedFilter];
@@ -2222,6 +2253,7 @@ function readFailureSettingsDraft() {
             powerEnabled: $('#kf-shortcut-power-enabled').prop('checked'),
             apiEnabled: $('#kf-shortcut-api-enabled').prop('checked'),
             floatingAction: normalizeFloatingAction($('#kf-floating-action').val()),
+            floatingSkin: normalizeFloatingSkin($('#kf-floating-skin').val()),
         },
     };
 }
@@ -2235,7 +2267,8 @@ function sameFailureSettings(state, draft) {
         && (state.shortcuts?.modeEnabled !== false) === draft.shortcuts.modeEnabled
         && (state.shortcuts?.powerEnabled !== false) === draft.shortcuts.powerEnabled
         && (state.shortcuts?.apiEnabled === true) === draft.shortcuts.apiEnabled
-        && normalizeFloatingAction(state.shortcuts?.floatingAction) === draft.shortcuts.floatingAction;
+        && normalizeFloatingAction(state.shortcuts?.floatingAction) === draft.shortcuts.floatingAction
+        && normalizeFloatingSkin(state.shortcuts?.floatingSkin) === draft.shortcuts.floatingSkin;
 }
 
 function applyFailureSettingsDraft(state, draft) {
@@ -2250,6 +2283,7 @@ function applyFailureSettingsDraft(state, draft) {
     state.shortcuts.powerEnabled = draft.shortcuts.powerEnabled;
     state.shortcuts.apiEnabled = draft.shortcuts.apiEnabled;
     state.shortcuts.floatingAction = draft.shortcuts.floatingAction;
+    state.shortcuts.floatingSkin = draft.shortcuts.floatingSkin;
 }
 
 function syncAllFromControls(state) {
@@ -3336,7 +3370,22 @@ function bind(state, rerender, setStatus) {
         $('#kf-theme-modal').addClass('kf-show');
     });
     $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeThemeModal(state));
-    $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => closeModal('kf-settings-modal'));
+    $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => {
+        closeModal('kf-floating-skin-modal');
+        closeModal('kf-settings-modal');
+    });
+    $('#kf-floating-skin-open').off('click.kf').on('click.kf', openFloatingSkinModal);
+    $('#kf-floating-skin-close,#kf-floating-skin-cancel').off('click.kf').on('click.kf', () => closeModal('kf-floating-skin-modal'));
+    $('#kf-floating-skin-grid').off('click.kf').on('click.kf', '.kf-floating-skin-card', function () {
+        const skin = normalizeFloatingSkin($(this).attr('data-skin'));
+        $('#kf-floating-skin-modal').attr('data-selected-skin', skin);
+        $('.kf-floating-skin-card').removeClass('kf-selected').attr('aria-checked', 'false');
+        $(this).addClass('kf-selected').attr('aria-checked', 'true');
+    });
+    $('#kf-floating-skin-confirm').off('click.kf').on('click.kf', () => {
+        $('#kf-floating-skin').val(normalizeFloatingSkin($('#kf-floating-skin-modal').attr('data-selected-skin')));
+        closeModal('kf-floating-skin-modal');
+    });
     $('#kf-main-modal').off('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop').on('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop', function (event) {
         event.stopPropagation();
         closeApiEntriesEditor(state, rerender, setStatus);
