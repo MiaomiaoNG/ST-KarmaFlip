@@ -722,18 +722,20 @@ export function getActivePool(state) {
     return state.pools.find(p => p.id === state.activePoolId) || state.pools[0];
 }
 
-function usageStatKey(apiName, model) {
-    return `${String(apiName || '').trim()}||${String(model || '').trim()}`;
+function usageStatKey(apiName, apiUrl, model) {
+    return `${String(apiName || '').trim()}||${String(apiUrl || '').trim()}||${String(model || '').trim()}`;
 }
 
 function updateUsageStats(log) {
     if (String(log?.event || '') !== 'pick') return;
     const apiName = String(log?.apiName || '').trim() || '未命名';
+    const apiUrl = String(log?.apiUrl || '').trim();
     const model = String(log?.model || '').trim() || '未填模型';
-    const key = usageStatKey(apiName, model);
+    const key = usageStatKey(apiName, apiUrl, model);
     const previous = usageStats.get(key);
     usageStats.set(key, {
         apiName,
+        apiUrl,
         model,
         count: (previous?.count || 0) + 1,
         lastTime: String(log?.time || new Date().toISOString()),

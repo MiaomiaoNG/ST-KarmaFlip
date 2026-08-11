@@ -11,8 +11,9 @@ const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 1. 重做插件美化；
 2. 新增“导出全部”；
-3. “快捷方式-指定API”功能可以锁定为一个API，对应窗口才会生效，且重启酒馆不会取消；
+3. 新增“快捷方式-指定API”功能，可以快速指定下轮请求API；
 4. 新增悬浮图标，可设置指定悬浮图标的快捷功能（图标制作中……）；
+5. 修改`快捷方式-插件启动`的图标；
 
 2026年8月11日`;
 
@@ -405,14 +406,13 @@ function unregisterQrAssistantShortcuts() {
     applyQrAssistantRefresh();
 }
 
-function syncQrAssistantWhitelistSession(state) {
+function migrateQrAssistantWhitelistSession(state) {
     const qrSettings = getQrAssistantSettings();
     if (!Array.isArray(qrSettings?.whitelist)) return false;
     const whitelist = qrSettings.whitelist;
     const hadLegacy = QR_ASSISTANT_LEGACY_DOM_IDS.some(domId => whitelist.includes(domId));
+    if (!hadLegacy) return false;
     const replacements = enabledQrAssistantButtons(state).map(entry => entry.dom_id);
-    const hasAllEnabled = replacements.every(domId => whitelist.includes(domId));
-    if (!hadLegacy && hasAllEnabled) return false;
     const nextWhitelist = whitelist.filter(domId => !QR_ASSISTANT_LEGACY_DOM_IDS.includes(domId));
     for (const domId of replacements) {
         if (!nextWhitelist.includes(domId)) nextWhitelist.push(domId);
@@ -426,9 +426,6 @@ function syncQrAssistantWhitelistSession(state) {
 function isQrAssistantWhitelisted(domId) {
     const qrSettings = getQrAssistantSettings();
     if (!qrSettings || !Array.isArray(qrSettings.whitelist)) return true;
-    const whitelist = qrSettings.whitelist;
-    const hasAnyManaged = QR_ASSISTANT_MANAGED_DOM_IDS.some(id => whitelist.includes(id));
-    if (!hasAnyManaged) return true;
     return qrSettings.whitelist.includes(domId);
 }
 
@@ -696,15 +693,10 @@ function emperorIcon() {
 }
 
 function emperorSvg(options = {}) {
-    const stroke = options.imageSafe ? '#111111' : 'currentColor';
+    const fill = options.imageSafe ? '#111111' : 'currentColor';
     return `
-        <svg class="kf-chat-shortcut-icon kf-chat-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="${stroke}" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="7" y1="3" x2="17" y2="3" />
-            <line x1="12" y1="3" x2="12" y2="21" />
-            <line x1="9.5" y1="7" x2="14.5" y2="7" />
-            <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
-            <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
-            <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
+        <svg class="kf-chat-shortcut-icon kf-chat-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="50 20 300 360" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <path d="M 75 65 L 72 69 L 72 73 L 74 75 L 81 77 L 82 78 L 139 78 L 141 79 L 144 84 L 147 101 L 151 110 L 157 116 L 164 120 L 166 120 L 167 121 L 169 121 L 176 124 L 179 124 L 186 127 L 186 143 L 184 145 L 120 145 L 119 144 L 118 145 L 115 142 L 115 136 L 114 135 L 114 130 L 113 129 L 112 119 L 111 118 L 110 111 L 108 108 L 108 106 L 106 102 L 101 96 L 95 96 L 93 97 L 93 113 L 94 114 L 94 118 L 95 119 L 95 122 L 96 123 L 96 126 L 97 127 L 97 130 L 98 131 L 98 135 L 99 136 L 99 141 L 100 142 L 100 221 L 99 222 L 99 227 L 98 228 L 98 232 L 97 233 L 97 237 L 96 238 L 96 241 L 95 242 L 93 253 L 92 254 L 91 260 L 90 261 L 90 263 L 89 264 L 89 266 L 86 273 L 86 276 L 84 279 L 83 284 L 81 287 L 81 289 L 79 292 L 79 294 L 77 298 L 76 306 L 79 309 L 82 309 L 83 308 L 87 307 L 91 303 L 97 291 L 97 289 L 99 286 L 99 284 L 100 283 L 100 281 L 101 280 L 101 278 L 104 271 L 104 268 L 105 267 L 105 264 L 106 263 L 106 260 L 107 259 L 107 256 L 108 255 L 108 251 L 109 250 L 109 247 L 110 246 L 110 242 L 111 241 L 111 237 L 112 236 L 112 231 L 113 230 L 113 225 L 114 224 L 114 218 L 115 217 L 115 209 L 116 208 L 116 192 L 117 191 L 117 168 L 118 167 L 118 161 L 119 160 L 159 160 L 160 161 L 185 161 L 186 162 L 186 176 L 184 178 L 166 180 L 158 184 L 142 199 L 140 203 L 140 205 L 138 208 L 138 210 L 136 213 L 136 216 L 134 220 L 134 223 L 133 224 L 133 227 L 132 228 L 132 231 L 131 232 L 131 236 L 130 237 L 129 249 L 128 250 L 128 258 L 127 259 L 127 268 L 126 269 L 126 287 L 125 288 L 125 321 L 126 322 L 126 325 L 128 328 L 128 330 L 131 332 L 135 331 L 139 327 L 139 325 L 140 324 L 140 306 L 141 305 L 141 282 L 142 281 L 142 253 L 143 252 L 143 238 L 144 237 L 144 232 L 145 231 L 145 228 L 146 227 L 148 219 L 155 206 L 163 197 L 165 197 L 170 194 L 172 194 L 176 192 L 184 191 L 186 193 L 186 359 L 187 360 L 187 365 L 188 366 L 190 373 L 191 374 L 195 374 L 197 373 L 199 371 L 201 367 L 201 362 L 202 361 L 202 193 L 203 192 L 210 192 L 211 193 L 217 194 L 223 197 L 233 206 L 239 216 L 240 222 L 241 223 L 241 227 L 242 228 L 242 234 L 243 235 L 243 242 L 244 243 L 244 250 L 245 251 L 245 259 L 246 260 L 246 268 L 247 269 L 247 279 L 248 280 L 248 317 L 249 318 L 249 323 L 250 324 L 250 328 L 251 329 L 251 331 L 252 332 L 258 332 L 260 330 L 260 325 L 261 324 L 261 312 L 262 311 L 262 275 L 261 274 L 261 257 L 260 256 L 260 244 L 259 243 L 259 236 L 258 235 L 258 230 L 257 229 L 257 226 L 256 225 L 256 222 L 255 221 L 254 216 L 246 199 L 237 189 L 236 189 L 231 185 L 229 185 L 226 183 L 215 181 L 214 180 L 208 179 L 207 178 L 203 177 L 202 176 L 202 172 L 201 171 L 201 163 L 203 160 L 271 160 L 272 161 L 272 175 L 273 176 L 273 200 L 274 201 L 274 213 L 275 214 L 275 222 L 276 223 L 276 229 L 277 230 L 278 241 L 279 242 L 279 246 L 280 247 L 280 251 L 281 252 L 281 256 L 282 257 L 282 260 L 283 261 L 283 265 L 284 266 L 285 273 L 292 290 L 294 292 L 295 295 L 297 297 L 300 303 L 303 306 L 305 310 L 307 311 L 312 311 L 314 310 L 314 305 L 313 304 L 313 302 L 312 301 L 312 299 L 311 298 L 307 284 L 305 281 L 305 279 L 303 276 L 303 274 L 299 266 L 299 263 L 298 262 L 297 256 L 296 255 L 296 250 L 295 249 L 295 246 L 294 245 L 294 240 L 293 239 L 293 235 L 292 234 L 292 229 L 291 228 L 291 224 L 290 223 L 289 215 L 288 214 L 288 210 L 287 209 L 287 203 L 286 202 L 286 193 L 285 192 L 285 184 L 286 183 L 286 166 L 287 165 L 287 156 L 288 155 L 289 140 L 290 139 L 290 134 L 291 133 L 291 130 L 292 129 L 292 125 L 293 124 L 294 117 L 295 116 L 296 110 L 297 109 L 297 106 L 298 105 L 296 96 L 294 94 L 292 94 L 288 96 L 285 99 L 283 103 L 282 109 L 280 113 L 280 116 L 278 120 L 278 123 L 277 124 L 277 127 L 276 128 L 276 132 L 275 133 L 275 136 L 274 137 L 274 141 L 272 144 L 207 144 L 206 145 L 204 144 L 203 145 L 201 143 L 201 128 L 203 126 L 205 126 L 206 125 L 210 125 L 211 124 L 213 124 L 220 121 L 226 116 L 237 109 L 237 108 L 239 106 L 239 104 L 241 100 L 241 97 L 242 96 L 242 93 L 243 92 L 245 81 L 248 78 L 258 78 L 259 79 L 283 79 L 284 80 L 298 80 L 299 79 L 305 79 L 306 78 L 309 78 L 310 77 L 312 77 L 315 75 L 319 74 L 320 73 L 320 71 L 319 70 L 318 66 L 316 65 L 301 65 L 300 64 L 276 64 L 275 63 L 87 63 L 86 64 Z M 159 79 L 160 78 L 226 78 L 228 79 L 230 82 L 230 90 L 229 91 L 228 96 L 223 102 L 223 103 L 215 109 L 213 109 L 209 111 L 205 111 L 204 112 L 191 112 L 190 111 L 185 111 L 184 110 L 180 110 L 176 108 L 170 107 L 164 102 L 160 93 L 160 88 L 159 87 Z M 128 31 L 128 35 L 129 37 L 132 39 L 189 39 L 190 40 L 204 40 L 205 41 L 237 41 L 238 42 L 245 42 L 246 41 L 252 41 L 253 40 L 255 40 L 259 38 L 262 35 L 262 32 L 258 28 L 256 27 L 253 27 L 252 26 L 139 26 L 138 27 L 131 28 L 129 29 Z" fill="${fill}" stroke="${fill}" stroke-width="10" paint-order="stroke fill" stroke-linejoin="round" fill-rule="evenodd" clip-rule="evenodd" />
         </svg>
     `;
 }
@@ -760,7 +752,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
     }
     const qrAssistantRegistered = registerQrAssistantShortcuts(state);
     const qrAssistantEnabled = isQrAssistantEnabled();
-    if (qrAssistantEnabled) syncQrAssistantWhitelistSession(state);
+    if (qrAssistantEnabled) migrateQrAssistantWhitelistSession(state);
     const host = getInlineReplyHost();
     if (!host) {
         observeChatShortcutHost(state, rerender, setStatus);
@@ -1132,18 +1124,10 @@ function bindChatShortcut(state, rerender, setStatus) {
 }
 
 function floatingEmperorSvg() {
-    const geometry = `
-        <line x1="7" y1="3" x2="17" y2="3" />
-        <line x1="12" y1="3" x2="12" y2="21" />
-        <line x1="9.5" y1="7" x2="14.5" y2="7" />
-        <path d="M 6.5 17 V 12.5 Q 6.5 11 8.5 11 H 15.5 Q 17.5 11 17.5 12.5 V 17" />
-        <path d="M 12 13.5 Q 9.5 13.5 9.5 17 V 19.5" />
-        <path d="M 12 13.5 Q 14.5 13.5 14.5 17 V 19.5" />
-    `;
     return `
-        <svg class="kf-floating-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg class="kf-floating-emperor-icon" xmlns="http://www.w3.org/2000/svg" viewBox="50 20 300 360" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
             <defs>
-                <linearGradient id="kf-floating-emperor-gold" x1="0" y1="2" x2="0" y2="22" gradientUnits="userSpaceOnUse">
+                <linearGradient id="kf-floating-emperor-gold" x1="0" y1="26" x2="0" y2="374" gradientUnits="userSpaceOnUse">
                     <stop offset="0" stop-color="#7b4b00" />
                     <stop offset="0.18" stop-color="#d79a24" />
                     <stop offset="0.36" stop-color="#fff1a6" />
@@ -1153,8 +1137,7 @@ function floatingEmperorSvg() {
                     <stop offset="1" stop-color="#8b5703" />
                 </linearGradient>
             </defs>
-            <g stroke="#684005" stroke-width="3.2">${geometry}</g>
-            <g stroke="url(#kf-floating-emperor-gold)" stroke-width="1.9">${geometry}</g>
+            <path d="M 75 65 L 72 69 L 72 73 L 74 75 L 81 77 L 82 78 L 139 78 L 141 79 L 144 84 L 147 101 L 151 110 L 157 116 L 164 120 L 166 120 L 167 121 L 169 121 L 176 124 L 179 124 L 186 127 L 186 143 L 184 145 L 120 145 L 119 144 L 118 145 L 115 142 L 115 136 L 114 135 L 114 130 L 113 129 L 112 119 L 111 118 L 110 111 L 108 108 L 108 106 L 106 102 L 101 96 L 95 96 L 93 97 L 93 113 L 94 114 L 94 118 L 95 119 L 95 122 L 96 123 L 96 126 L 97 127 L 97 130 L 98 131 L 98 135 L 99 136 L 99 141 L 100 142 L 100 221 L 99 222 L 99 227 L 98 228 L 98 232 L 97 233 L 97 237 L 96 238 L 96 241 L 95 242 L 93 253 L 92 254 L 91 260 L 90 261 L 90 263 L 89 264 L 89 266 L 86 273 L 86 276 L 84 279 L 83 284 L 81 287 L 81 289 L 79 292 L 79 294 L 77 298 L 76 306 L 79 309 L 82 309 L 83 308 L 87 307 L 91 303 L 97 291 L 97 289 L 99 286 L 99 284 L 100 283 L 100 281 L 101 280 L 101 278 L 104 271 L 104 268 L 105 267 L 105 264 L 106 263 L 106 260 L 107 259 L 107 256 L 108 255 L 108 251 L 109 250 L 109 247 L 110 246 L 110 242 L 111 241 L 111 237 L 112 236 L 112 231 L 113 230 L 113 225 L 114 224 L 114 218 L 115 217 L 115 209 L 116 208 L 116 192 L 117 191 L 117 168 L 118 167 L 118 161 L 119 160 L 159 160 L 160 161 L 185 161 L 186 162 L 186 176 L 184 178 L 166 180 L 158 184 L 142 199 L 140 203 L 140 205 L 138 208 L 138 210 L 136 213 L 136 216 L 134 220 L 134 223 L 133 224 L 133 227 L 132 228 L 132 231 L 131 232 L 131 236 L 130 237 L 129 249 L 128 250 L 128 258 L 127 259 L 127 268 L 126 269 L 126 287 L 125 288 L 125 321 L 126 322 L 126 325 L 128 328 L 128 330 L 131 332 L 135 331 L 139 327 L 139 325 L 140 324 L 140 306 L 141 305 L 141 282 L 142 281 L 142 253 L 143 252 L 143 238 L 144 237 L 144 232 L 145 231 L 145 228 L 146 227 L 148 219 L 155 206 L 163 197 L 165 197 L 170 194 L 172 194 L 176 192 L 184 191 L 186 193 L 186 359 L 187 360 L 187 365 L 188 366 L 190 373 L 191 374 L 195 374 L 197 373 L 199 371 L 201 367 L 201 362 L 202 361 L 202 193 L 203 192 L 210 192 L 211 193 L 217 194 L 223 197 L 233 206 L 239 216 L 240 222 L 241 223 L 241 227 L 242 228 L 242 234 L 243 235 L 243 242 L 244 243 L 244 250 L 245 251 L 245 259 L 246 260 L 246 268 L 247 269 L 247 279 L 248 280 L 248 317 L 249 318 L 249 323 L 250 324 L 250 328 L 251 329 L 251 331 L 252 332 L 258 332 L 260 330 L 260 325 L 261 324 L 261 312 L 262 311 L 262 275 L 261 274 L 261 257 L 260 256 L 260 244 L 259 243 L 259 236 L 258 235 L 258 230 L 257 229 L 257 226 L 256 225 L 256 222 L 255 221 L 254 216 L 246 199 L 237 189 L 236 189 L 231 185 L 229 185 L 226 183 L 215 181 L 214 180 L 208 179 L 207 178 L 203 177 L 202 176 L 202 172 L 201 171 L 201 163 L 203 160 L 271 160 L 272 161 L 272 175 L 273 176 L 273 200 L 274 201 L 274 213 L 275 214 L 275 222 L 276 223 L 276 229 L 277 230 L 278 241 L 279 242 L 279 246 L 280 247 L 280 251 L 281 252 L 281 256 L 282 257 L 282 260 L 283 261 L 283 265 L 284 266 L 285 273 L 292 290 L 294 292 L 295 295 L 297 297 L 300 303 L 303 306 L 305 310 L 307 311 L 312 311 L 314 310 L 314 305 L 313 304 L 313 302 L 312 301 L 312 299 L 311 298 L 307 284 L 305 281 L 305 279 L 303 276 L 303 274 L 299 266 L 299 263 L 298 262 L 297 256 L 296 255 L 296 250 L 295 249 L 295 246 L 294 245 L 294 240 L 293 239 L 293 235 L 292 234 L 292 229 L 291 228 L 291 224 L 290 223 L 289 215 L 288 214 L 288 210 L 287 209 L 287 203 L 286 202 L 286 193 L 285 192 L 285 184 L 286 183 L 286 166 L 287 165 L 287 156 L 288 155 L 289 140 L 290 139 L 290 134 L 291 133 L 291 130 L 292 129 L 292 125 L 293 124 L 294 117 L 295 116 L 296 110 L 297 109 L 297 106 L 298 105 L 296 96 L 294 94 L 292 94 L 288 96 L 285 99 L 283 103 L 282 109 L 280 113 L 280 116 L 278 120 L 278 123 L 277 124 L 277 127 L 276 128 L 276 132 L 275 133 L 275 136 L 274 137 L 274 141 L 272 144 L 207 144 L 206 145 L 204 144 L 203 145 L 201 143 L 201 128 L 203 126 L 205 126 L 206 125 L 210 125 L 211 124 L 213 124 L 220 121 L 226 116 L 237 109 L 237 108 L 239 106 L 239 104 L 241 100 L 241 97 L 242 96 L 242 93 L 243 92 L 245 81 L 248 78 L 258 78 L 259 79 L 283 79 L 284 80 L 298 80 L 299 79 L 305 79 L 306 78 L 309 78 L 310 77 L 312 77 L 315 75 L 319 74 L 320 73 L 320 71 L 319 70 L 318 66 L 316 65 L 301 65 L 300 64 L 276 64 L 275 63 L 87 63 L 86 64 Z M 159 79 L 160 78 L 226 78 L 228 79 L 230 82 L 230 90 L 229 91 L 228 96 L 223 102 L 223 103 L 215 109 L 213 109 L 209 111 L 205 111 L 204 112 L 191 112 L 190 111 L 185 111 L 184 110 L 180 110 L 176 108 L 170 107 L 164 102 L 160 93 L 160 88 L 159 87 Z M 128 31 L 128 35 L 129 37 L 132 39 L 189 39 L 190 40 L 204 40 L 205 41 L 237 41 L 238 42 L 245 42 L 246 41 L 252 41 L 253 40 L 255 40 L 259 38 L 262 35 L 262 32 L 258 28 L 256 27 L 253 27 L 252 26 L 139 26 L 138 27 L 131 28 L 129 29 Z" fill="url(#kf-floating-emperor-gold)" stroke="#684005" stroke-width="10" paint-order="stroke fill" stroke-linejoin="round" fill-rule="evenodd" clip-rule="evenodd" />
         </svg>
     `;
 }
@@ -1871,7 +1854,7 @@ function logTimeParts(value) {
         pad(date.getMonth() + 1),
         pad(date.getDate()),
     ].join('-');
-    const clock = [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(':');
+    const clock = [pad(date.getHours()), pad(date.getMinutes())].join(':');
     return { full: `${day} ${clock}`, clock };
 }
 
@@ -1889,25 +1872,32 @@ function createLogSummary(log, kind) {
 
     const center = document.createElement('div');
     center.className = 'kf-log-center';
+    const api = document.createElement('span');
+    api.className = 'kf-log-api-name';
     const model = document.createElement('span');
     model.className = 'kf-log-model';
     const apiName = String(log.apiName || '').trim();
     const modelName = String(log.model || '').trim();
-    model.textContent = [apiName, modelName].filter(Boolean).join(' / ') || '未命名请求';
+    api.textContent = apiName || '未命名 API';
+    api.title = api.textContent;
+    model.textContent = modelName || '未填模型';
     model.title = model.textContent;
+    center.append(api, model);
+
+    const meta = document.createElement('div');
+    meta.className = 'kf-log-meta';
     const time = document.createElement('span');
     time.className = 'kf-log-time';
     const timeParts = logTimeParts(log.time);
-    time.textContent = timeParts.clock;
-    time.title = timeParts.full;
-    center.append(model, time);
+    time.textContent = timeParts.full;
 
     const floor = document.createElement('span');
     floor.className = 'kf-log-floor';
     floor.textContent = log.messageId !== undefined && Number.isInteger(Number(log.messageId))
         ? `#${Number(log.messageId)}`
         : (log.status ? `HTTP ${log.status}` : '');
-    summary.append(badge, center, floor);
+    meta.append(time, floor);
+    summary.append(badge, center, meta);
     return summary;
 }
 
@@ -1934,24 +1924,61 @@ function createLogRow(log) {
 
 function createUsageStatRow(stat) {
     const row = document.createElement('article');
-    row.className = 'kf-log-stat-row';
-    const summary = document.createElement('div');
-    summary.className = 'kf-log-summary';
-    const badge = document.createElement('span');
-    badge.className = 'kf-log-badge';
-    badge.textContent = `${stat.count || 0} 次`;
-    const center = document.createElement('div');
-    center.className = 'kf-log-center';
-    const model = document.createElement('span');
-    model.className = 'kf-log-model';
-    model.textContent = `${stat.apiName || '未命名'} / ${stat.model || '未填模型'}`;
-    center.appendChild(model);
-    const time = document.createElement('span');
-    time.className = 'kf-log-floor';
-    time.textContent = logTimeParts(stat.lastTime).clock;
-    summary.append(badge, center, time);
-    row.appendChild(summary);
+    row.className = 'kf-log-api-stat';
+    const head = document.createElement('div');
+    head.className = 'kf-log-api-stat-head';
+    const main = document.createElement('div');
+    main.className = 'kf-log-api-stat-main';
+    const name = document.createElement('div');
+    name.className = 'kf-log-stat-api-name';
+    name.textContent = stat.apiName || '未命名';
+    const url = document.createElement('div');
+    url.className = 'kf-log-stat-api-url';
+    url.textContent = stat.apiUrl || '未填写 URL';
+    url.title = url.textContent;
+    main.append(name, url);
+    const total = document.createElement('div');
+    total.className = 'kf-log-api-total';
+    total.textContent = `共 ${stat.count || 0} 次`;
+    head.append(main, total);
+
+    const models = document.createElement('div');
+    models.className = 'kf-log-model-stats';
+    for (const item of stat.models || []) {
+        const modelRow = document.createElement('div');
+        modelRow.className = 'kf-log-model-stat-row';
+        const model = document.createElement('span');
+        model.className = 'kf-log-stat-model';
+        model.textContent = item.model || '未填模型';
+        model.title = model.textContent;
+        const count = document.createElement('span');
+        count.className = 'kf-log-stat-count';
+        count.textContent = `${item.count || 0} 次`;
+        modelRow.append(model, count);
+        models.appendChild(modelRow);
+    }
+    row.append(head, models);
     return row;
+}
+
+function groupUsageStats(stats) {
+    const groups = new Map();
+    for (const stat of stats || []) {
+        const apiName = stat.apiName || '未命名';
+        const apiUrl = stat.apiUrl || '';
+        const key = `${apiName}||${apiUrl}`;
+        if (!groups.has(key)) groups.set(key, { apiName, apiUrl, count: 0, lastTime: '', models: [] });
+        const group = groups.get(key);
+        group.count += Number(stat.count || 0);
+        if (String(stat.lastTime || '') > group.lastTime) group.lastTime = String(stat.lastTime || '');
+        group.models.push({ model: stat.model, count: Number(stat.count || 0), lastTime: stat.lastTime });
+    }
+    return [...groups.values()]
+        .map(group => ({
+            ...group,
+            models: group.models.sort((a, b) => b.count - a.count || String(b.lastTime || '').localeCompare(String(a.lastTime || ''))),
+        }))
+        .sort((a, b) => b.count - a.count || String(b.lastTime || '').localeCompare(String(a.lastTime || '')));
 }
 
 function splitLogUrl(rawUrl) {
@@ -2045,7 +2072,7 @@ function renderLogs(state, filter = currentLogFilter()) {
     const fragment = document.createDocumentFragment();
 
     if (resolvedFilter === 'stats') {
-        getUsageStats().slice(0, 50).forEach(stat => fragment.appendChild(createUsageStatRow(stat)));
+        groupUsageStats(getUsageStats()).slice(0, 50).forEach(stat => fragment.appendChild(createUsageStatRow(stat)));
     } else {
         const logs = [...(source.logs || [])].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
         const filtered = logs.filter(log => {
@@ -3316,14 +3343,22 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-api-override-close').off('click.kf').on('click.kf', () => closeModal('kf-api-override-modal'));
     $('#kf-api-override-list').off('click.kf').on('click.kf', '.kf-api-override-option', function () {
-        if (getApiOverrideState(state).lock) {
-            showToast('请先取消当前聊天的 API 锁定', 'warning', 2600);
-            return;
-        }
         const pool = getActivePool(state);
         const entryId = String($(this).attr('data-entry-id') || '');
         const entry = (pool.entries || []).find(item => item.id === entryId);
         if (!entry || !String(entry.apiUrl || '').trim() || !String(entry.model || '').trim()) return;
+        if (getApiOverrideState(state).lock) {
+            const lock = setApiLock(state, pool.id, entry.id);
+            if (!lock) {
+                showToast('当前没有可绑定的聊天，请先进入一个聊天窗口', 'warning', 3200);
+                return;
+            }
+            persistHot(state);
+            renderApiOverrideModal(state);
+            showToast(`已更换锁定 API：${entry.name || '未命名 API'} / ${entry.model}`, 'info', 2600);
+            setStatus(`已更换锁定 API：${entry.name || entry.model}`);
+            return;
+        }
         setPendingApiOverride(state, pool.id, entry.id);
         renderApiOverrideModal(state);
         showToast(`已指定下个请求 API：${entry.name || '未命名 API'} / ${entry.model}`, 'info', 2600);
