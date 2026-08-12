@@ -2752,7 +2752,7 @@ body:has(.kf-modal-overlay.kf-show) .kf-floating-root {
 
 .kf-floating-skin-q-scepter {
     transform-origin: center;
-    transform: scale(3);
+    transform: scale(2.1);
 }
 
 .kf-floating-skin-crown {
@@ -2768,7 +2768,7 @@ body:has(.kf-modal-overlay.kf-show) .kf-floating-root {
 
 .kf-floating-skin-elsa {
     transform-origin: center;
-    transform: rotate(45deg) scale(3);
+    transform: rotate(45deg) scale(2.1);
 }
 
 .kf-floating-skin-preview-visual.kf-floating-skin-q-scepter,
@@ -2826,12 +2826,30 @@ body:has(.kf-modal-overlay.kf-show) .kf-floating-root {
     }
 
     .kf-floating-skin-preview-visual {
-        width: 58px;
-        height: 58px;
+        width: 48px;
+        height: 48px;
     }
 
     .kf-floating-skin-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+    }
+
+    .kf-floating-skin-card {
+        min-height: 92px;
+        gap: 5px;
+        padding: 7px 4px !important;
+        border-radius: 11px !important;
+    }
+
+    .kf-floating-skin-preview {
+        width: 56px;
+        height: 56px;
+        border-radius: 9px;
+    }
+
+    .kf-floating-skin-name {
+        font-size: 10.5px;
     }
 
     .kf-theme-quick-toggle {
