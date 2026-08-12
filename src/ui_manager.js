@@ -29,6 +29,8 @@ const FLOATING_ROOT_ID = 'kf-floating-root';
 const FLOATING_BUTTON_ID = 'kf-floating-button';
 const FLOATING_EDGE_GAP = 8;
 const FLOATING_DRAG_THRESHOLD = 8;
+const SHORTCUT_LONG_PRESS_MS = 560;
+const SHORTCUT_PRESS_MOVE_THRESHOLD = 8;
 const FLOATING_SKIN_DEFAULT = 'emperor-metal';
 const FLOATING_SKINS = Object.freeze([
     { id: 'emperor-metal', name: '帝王之气', kind: 'metal', url: new URL('../assets/floating-icons/emperor.png', import.meta.url).href },
@@ -492,8 +494,8 @@ function updateChatShortcut(state) {
     if (apiButton.length) {
         apiButton.attr('role', 'button');
         apiButton.attr('tabindex', '0');
-        apiButton.attr('title', '指定下个请求 API');
-        apiButton.attr('aria-label', '打开指定下个请求 API');
+        apiButton.attr('title', '点击指定下个请求 API；长按顺序切换当前锁定 API');
+        apiButton.attr('aria-label', '指定下个请求 API，长按顺序切换当前锁定 API');
         apiButton.html('<i class="fa-regular fa-circle-stop"></i>');
     }
 }
@@ -1120,6 +1122,48 @@ function setPoolMode(state, nextMode, rerender, setStatus) {
     if (equalized) rerender();
 }
 
+function cycleLockedApi(state, setStatus) {
+    const lock = getApiOverrideState(state).lock;
+    if (!lock) {
+        showToast('当前聊天尚未锁定 API，请先在指定 API 窗口中选择并锁定', 'warning', 3200);
+        setStatus('当前聊天尚未锁定 API');
+        return false;
+    }
+    const pool = (state.pools || []).find(item => String(item?.id) === String(lock.poolId));
+    const entries = Array.isArray(pool?.entries) ? pool.entries : [];
+    const currentIndex = entries.findIndex(entry => String(entry?.id) === String(lock.entryId));
+    if (!pool || currentIndex < 0) {
+        showToast('当前锁定的 API 已不存在，请重新选择锁定 API', 'error', 3600);
+        setStatus('当前锁定的 API 已不存在');
+        return false;
+    }
+
+    let nextEntry = null;
+    for (let offset = 1; offset < entries.length; offset += 1) {
+        const candidate = entries[(currentIndex + offset) % entries.length];
+        if (!String(candidate?.apiUrl || '').trim() || !String(candidate?.model || '').trim()) continue;
+        nextEntry = candidate;
+        break;
+    }
+    if (!nextEntry) {
+        showToast('当前锁定组合中没有其他 URL 和模型完整的 API', 'warning', 3200);
+        setStatus('没有其他可顺序切换的 API');
+        return false;
+    }
+
+    const nextLock = setApiLock(state, pool.id, nextEntry.id);
+    if (!nextLock) {
+        showToast('当前没有可绑定的聊天，无法切换锁定 API', 'warning', 3200);
+        return false;
+    }
+    persistHot(state);
+    if ($('#kf-api-override-modal').hasClass('kf-show')) renderApiOverrideModal(state);
+    const label = `${nextEntry.name || '未命名 API'} / ${nextEntry.model}`;
+    showToast(`已顺序切换锁定 API：${label}`, 'info', 2600);
+    setStatus(`已顺序切换锁定 API：${nextEntry.name || nextEntry.model}`);
+    return true;
+}
+
 function bindChatShortcut(state, rerender, setStatus) {
     const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
     const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
@@ -1131,9 +1175,11 @@ function bindChatShortcut(state, rerender, setStatus) {
         const pool = getActivePool(state);
         setPoolMode(state, pool.mode === 'random' ? 'fixed' : 'random', rerender, setStatus);
     });
-    bindShortcutActivation(apiButton, () => {
-        openApiOverrideModal(state);
-    });
+    bindShortcutLongPress(
+        apiButton,
+        () => openApiOverrideModal(state),
+        () => cycleLockedApi(state, setStatus),
+    );
 }
 
 
@@ -1175,6 +1221,67 @@ function renderFloatingSkinChoices(selectedSkin) {
 function openFloatingSkinModal() {
     renderFloatingSkinChoices($('#kf-floating-skin').val());
     $('#kf-floating-skin-modal').addClass('kf-show');
+}
+
+function bindShortcutLongPress(target, clickAction, longPressAction) {
+    let press = null;
+    let suppressClick = false;
+    const clearPress = () => {
+        if (press?.timer) window.clearTimeout(press.timer);
+        press = null;
+    };
+    target.off('.kfShortcut')
+        .on('pointerdown.kfShortcut', function (event) {
+            if (event.button !== undefined && event.button !== 0) return;
+            clearPress();
+            suppressClick = false;
+            const pointerId = event.pointerId;
+            press = {
+                pointerId,
+                startX: Number(event.clientX || 0),
+                startY: Number(event.clientY || 0),
+                timer: window.setTimeout(() => {
+                    if (!press || press.pointerId !== pointerId) return;
+                    suppressClick = true;
+                    press.timer = null;
+                    longPressAction(event);
+                }, SHORTCUT_LONG_PRESS_MS),
+            };
+            try {
+                this.setPointerCapture?.(pointerId);
+            } catch {
+                // Pointer capture is optional on older mobile WebViews.
+            }
+        })
+        .on('pointermove.kfShortcut', function (event) {
+            if (!press || press.pointerId !== event.pointerId || !press.timer) return;
+            const distance = Math.hypot(
+                Number(event.clientX || 0) - press.startX,
+                Number(event.clientY || 0) - press.startY,
+            );
+            if (distance > SHORTCUT_PRESS_MOVE_THRESHOLD) clearPress();
+        })
+        .on('pointerup.kfShortcut pointercancel.kfShortcut lostpointercapture.kfShortcut', clearPress)
+        .on('contextmenu.kfShortcut', function (event) {
+            if (!press && !suppressClick) return;
+            event.preventDefault();
+            event.stopPropagation();
+        })
+        .on('click.kfShortcut', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (suppressClick) {
+                suppressClick = false;
+                return;
+            }
+            clickAction(event);
+        })
+        .on('keydown.kfShortcut', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.stopPropagation();
+            clickAction(event);
+        });
 }
 
 function cloneBooleanRecord(raw) {
