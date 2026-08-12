@@ -6,16 +6,13 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.6';
+const UPDATE_NOTICE_VERSION = '1.2.7';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-1. 重做插件美化；
-2. 新增“导出全部”；
-3. 新增“快捷方式-指定API”功能，可以快速指定下轮请求API；
-4. 新增悬浮图标，可设置指定悬浮图标的快捷功能（图标制作中……）；
-5. 修改“快捷方式-插件启动”的图标；
+1. API条目可以绑定预设，请求对应API条目时自动切换；
+2. 长按“指定下个API”的快捷方式或悬浮图标可以快速切换API
 
-2026年8月11日`;
+2026年8月12日`;
 
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
@@ -1546,7 +1543,9 @@ function updateFloatingButton(state) {
     if (!button) return;
     const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
     const skin = normalizeFloatingSkin(state.shortcuts?.floatingSkin);
-    const label = floatingActionLabel(action);
+    const label = action === 'api'
+        ? '点击指定下个请求 API；长按顺序切换当前锁定 API'
+        : floatingActionLabel(action);
     if (button.dataset.skin !== skin) {
         button.dataset.skin = skin;
         button.innerHTML = floatingSkinVisual(skin);
@@ -1580,6 +1579,11 @@ function bindFloatingButton(button, state, rerender, setStatus) {
     let drag = null;
     let lastTapAt = 0;
 
+    const clearLongPress = () => {
+        if (drag?.longPressTimer) window.clearTimeout(drag.longPressTimer);
+        if (drag) drag.longPressTimer = null;
+    };
+
     button.addEventListener('pointerdown', event => {
         if (event.button !== undefined && event.button !== 0) return;
         event.preventDefault();
@@ -1592,14 +1596,32 @@ function bindFloatingButton(button, state, rerender, setStatus) {
             startLeft: rect.left,
             startTop: rect.top,
             moved: false,
+            longPressed: false,
+            longPressTimer: null,
         };
+        if (normalizeFloatingAction(state.shortcuts?.floatingAction) === 'api') {
+            const pointerId = event.pointerId;
+            drag.longPressTimer = window.setTimeout(() => {
+                if (!drag || drag.pointerId !== pointerId || drag.moved) return;
+                drag.longPressTimer = null;
+                drag.longPressed = true;
+                cycleLockedApi(state, setStatus);
+                updateFloatingButton(state);
+            }, SHORTCUT_LONG_PRESS_MS);
+        }
         button.setPointerCapture?.(event.pointerId);
     });
     button.addEventListener('pointermove', event => {
         if (!drag || drag.pointerId !== event.pointerId) return;
+        if (drag.longPressed) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
         const deltaX = event.clientX - drag.startX;
         const deltaY = event.clientY - drag.startY;
         if (!drag.moved && Math.hypot(deltaX, deltaY) < FLOATING_DRAG_THRESHOLD) return;
+        clearLongPress();
         drag.moved = true;
         button.classList.add('kf-dragging');
         applyFloatingPosition(state, {
@@ -1611,13 +1633,15 @@ function bindFloatingButton(button, state, rerender, setStatus) {
     const finishDrag = (event, persist) => {
         if (!drag || drag.pointerId !== event.pointerId) return;
         const moved = drag.moved;
+        const longPressed = drag.longPressed;
+        clearLongPress();
         drag = null;
         button.classList.remove('kf-dragging');
         button.releasePointerCapture?.(event.pointerId);
         if (moved && persist) {
             const rect = button.getBoundingClientRect();
             applyFloatingPosition(state, { position: { left: rect.left, top: rect.top }, persist: true });
-        } else if (!moved && persist) {
+        } else if (!moved && !longPressed && persist) {
             event.preventDefault();
             event.stopPropagation();
             const now = Date.now();
@@ -1629,6 +1653,11 @@ function bindFloatingButton(button, state, rerender, setStatus) {
     };
     button.addEventListener('pointerup', event => finishDrag(event, true));
     button.addEventListener('pointercancel', event => finishDrag(event, false));
+    button.addEventListener('contextmenu', event => {
+        if (normalizeFloatingAction(state.shortcuts?.floatingAction) !== 'api') return;
+        event.preventDefault();
+        event.stopPropagation();
+    });
     button.addEventListener('dragstart', event => event.preventDefault());
     button.addEventListener('click', event => {
         event.preventDefault();
