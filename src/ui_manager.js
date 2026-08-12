@@ -9,8 +9,11 @@ const STRUCTURE_SAVE_DELAY = 5000;
 const UPDATE_NOTICE_VERSION = '1.2.7';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-1. API条目可以绑定预设，请求对应API条目时自动切换；
-2. 长按“指定下个API”的快捷方式或悬浮图标可以快速切换API
+1. 重做插件美化，具体操作可以看帖子说明；
+2. 新增“导出全部”；
+3. 新增“快捷方式-指定API”功能，可以快速指定下轮请求API，长按“指定下个API”的快捷方式或悬浮图标可以快速切换API；
+4. 新增悬浮图标，可设置指定悬浮图标的快捷功能；
+5. API条目可以绑定预设，请求对应API条目时自动切换；
 
 2026年8月12日`;
 
@@ -340,7 +343,17 @@ function isQrAssistantRuntimePresent() {
     );
 }
 
+function isQrAssistantRuntimeLoaded() {
+    return !!(
+        window.quickReplyMenu ||
+        document.getElementById('qr-assistant') ||
+        document.body?.classList?.contains('qra-enabled') ||
+        document.body?.classList?.contains('qra-disabled')
+    );
+}
+
 function isQrAssistantEnabled() {
+    if (!isQrAssistantRuntimeLoaded()) return false;
     const settings = getQrAssistantSettings();
     if (!settings || typeof settings !== 'object') return false;
     return settings.enabled !== false;
