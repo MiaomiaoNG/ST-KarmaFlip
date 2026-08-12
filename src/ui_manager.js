@@ -3,7 +3,7 @@ import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './r
 import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 
-const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const UPDATE_NOTICE_VERSION = '1.2.6';
@@ -59,6 +59,8 @@ let colorPickerDraft = { h: 0, s: 1, v: 1 };
 let floatingViewportController = null;
 let floatingVisibilityTimer = null;
 let floatingModalObserver = null;
+let presetBindingDraft = null;
+let presetBindingCatalog = null;
 const THEME_PRESETS = {
     default: { primary: '#1677ff', secondary: '#ffffff' },
     'mist-purple': { primary: '#7659e8', secondary: '#fbfaff' },
@@ -1175,6 +1177,167 @@ function openFloatingSkinModal() {
     $('#kf-floating-skin-modal').addClass('kf-show');
 }
 
+function cloneBooleanRecord(raw) {
+    const result = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
+    for (const [key, value] of Object.entries(raw)) {
+        if (typeof value === 'boolean' && String(key || '').trim()) result[String(key)] = value;
+    }
+    return result;
+}
+
+function promptOrderForPreset(preset) {
+    const lists = Array.isArray(preset?.prompt_order) ? preset.prompt_order : [];
+    return lists.find(item => String(item?.character_id) === '100001')?.order
+        || lists.find(item => Array.isArray(item?.order))?.order
+        || [];
+}
+
+async function readNativePresetBindingCatalog(presetName) {
+    const [{ getPresetManager }] = await Promise.all([
+        import('/scripts/preset-manager.js'),
+    ]);
+    const manager = getPresetManager?.('openai') || getPresetManager?.();
+    if (!manager) throw new Error('当前酒馆未提供聊天补全预设管理器');
+    const presets = [...new Set((manager.getAllPresets?.() || []).map(name => String(name || '').trim()).filter(Boolean))];
+    const currentName = String(manager.getSelectedPresetName?.() || '').trim();
+    const selectedName = String(presetName || currentName || presets[0] || '').trim();
+    const ctx = window.SillyTavern?.getContext?.() || {};
+    const preset = selectedName === currentName && ctx.chatCompletionSettings
+        ? ctx.chatCompletionSettings
+        : (selectedName ? manager.getCompletionPresetByName?.(selectedName) : null);
+    const promptMap = new Map((Array.isArray(preset?.prompts) ? preset.prompts : [])
+        .filter(Boolean)
+        .map(prompt => [String(prompt.identifier || ''), prompt]));
+    const prompts = promptOrderForPreset(preset)
+        .filter(item => item?.identifier)
+        .map(item => {
+            const id = String(item.identifier);
+            const prompt = promptMap.get(id);
+            return {
+                key: id,
+                name: String(prompt?.name || id),
+                meta: String(prompt?.role || (prompt?.system_prompt ? 'system' : 'prompt')),
+                scope: 'Prompt',
+                enabled: item.enabled !== false,
+            };
+        });
+
+    const globalScripts = Array.isArray(ctx.extensionSettings?.regex) ? ctx.extensionSettings.regex : [];
+    const scopedScripts = Array.isArray(ctx.characters?.[ctx.characterId]?.data?.extensions?.regex_scripts)
+        ? ctx.characters[ctx.characterId].data.extensions.regex_scripts
+        : [];
+    const presetScripts = selectedName
+        ? manager.readPresetExtensionField?.({ name: selectedName, path: 'regex_scripts' })
+        : [];
+    const regex = [];
+    for (const [scope, label, scripts] of [
+        ['global', '全局', globalScripts],
+        ['scoped', '角色', scopedScripts],
+        ['preset', '预设', Array.isArray(presetScripts) ? presetScripts : []],
+    ]) {
+        for (const script of scripts) {
+            const id = String(script?.id || '').trim();
+            if (!id) continue;
+            regex.push({
+                key: `${scope}:${id}`,
+                name: String(script?.scriptName || id),
+                meta: String(script?.findRegex || ''),
+                scope: label,
+                enabled: script?.disabled !== true,
+            });
+        }
+    }
+    return { manager, presets, selectedName, presetExists: !!preset, prompts, regex };
+}
+
+function presetBindingRows() {
+    if (!presetBindingDraft || !presetBindingCatalog) return [];
+    return presetBindingDraft.tab === 'regex' ? presetBindingCatalog.regex : presetBindingCatalog.prompts;
+}
+
+function presetBindingStateMap() {
+    return presetBindingDraft?.tab === 'regex' ? presetBindingDraft.regexStates : presetBindingDraft?.promptStates;
+}
+
+function renderPresetBindingList() {
+    const list = $('#kf-preset-binding-list').empty();
+    if (!presetBindingDraft || !presetBindingCatalog) return;
+    const query = String($('#kf-preset-binding-search').val() || '').trim().toLowerCase();
+    const states = presetBindingStateMap();
+    const rows = presetBindingRows().filter(row => !query
+        || row.name.toLowerCase().includes(query)
+        || row.meta.toLowerCase().includes(query)
+        || row.scope.toLowerCase().includes(query));
+    for (const row of rows) {
+        const enabled = Object.prototype.hasOwnProperty.call(states, row.key) ? states[row.key] : row.enabled;
+        const item = document.createElement('div');
+        item.className = 'kf-preset-binding-item';
+        item.dataset.key = row.key;
+        item.innerHTML = `<span class="kf-preset-binding-grip" aria-hidden="true">⠿</span><button class="kf-preset-binding-toggle" type="button" aria-label="${enabled ? '关闭' : '开启'} ${esc(row.name)}" aria-pressed="${enabled ? 'true' : 'false'}"></button><span class="kf-preset-binding-item-copy"><span class="kf-preset-binding-item-name" title="${esc(row.name)}">${esc(row.name)}</span><span class="kf-preset-binding-item-meta">${esc(row.meta)}</span></span><span class="kf-preset-binding-scope">${esc(row.scope)}</span>`;
+        list.append(item);
+    }
+    const overrideCount = Object.keys(presetBindingDraft.promptStates).length + Object.keys(presetBindingDraft.regexStates).length;
+    const availability = presetBindingCatalog.presetExists ? '' : ' · 绑定预设当前不存在';
+    $('#kf-preset-binding-status').text(`${rows.length} 个条目 · ${overrideCount} 项自定义开关${availability}`);
+}
+
+async function refreshPresetBindingCatalog({ resetStates = false } = {}) {
+    if (!presetBindingDraft) return;
+    $('#kf-preset-binding-status').text('正在读取酒馆预设…');
+    $('#kf-preset-binding-list').empty();
+    try {
+        presetBindingCatalog = await readNativePresetBindingCatalog(presetBindingDraft.presetName);
+        presetBindingDraft.presetName = presetBindingCatalog.selectedName;
+        if (resetStates) {
+            presetBindingDraft.promptStates = {};
+            presetBindingDraft.regexStates = {};
+        }
+        const select = $('#kf-preset-binding-select').empty();
+        const names = [...presetBindingCatalog.presets];
+        if (presetBindingDraft.presetName && !names.includes(presetBindingDraft.presetName)) names.unshift(presetBindingDraft.presetName);
+        for (const name of names) {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name === presetBindingDraft.presetName && !presetBindingCatalog.presets.includes(name)
+                ? `${name}（已不存在）`
+                : name;
+            option.selected = name === presetBindingDraft.presetName;
+            select.append(option);
+        }
+        $('.kf-preset-binding-select-wrap').toggleClass('kf-bound', !!presetBindingDraft.presetName);
+        renderPresetBindingList();
+    } catch (error) {
+        presetBindingCatalog = null;
+        $('#kf-preset-binding-status').text(error?.message || '读取酒馆预设失败');
+    }
+}
+
+async function openPresetBindingModal(state, entry) {
+    const pool = getActivePool(state);
+    const binding = entry?.presetBinding || {};
+    presetBindingDraft = {
+        poolId: String(pool?.id || ''),
+        entryId: String(entry?.id || ''),
+        presetName: String(binding.presetName || ''),
+        promptStates: cloneBooleanRecord(binding.promptStates),
+        regexStates: cloneBooleanRecord(binding.regexStates),
+        tab: 'prompts',
+    };
+    presetBindingCatalog = null;
+    $('#kf-preset-binding-search').val('');
+    $('.kf-preset-binding-tab').removeClass('kf-active').attr('aria-selected', 'false')
+        .filter('[data-binding-tab="prompts"]').addClass('kf-active').attr('aria-selected', 'true');
+    $('#kf-preset-binding-modal').addClass('kf-show');
+    await refreshPresetBindingCatalog();
+}
+
+function closePresetBindingModal() {
+    presetBindingDraft = null;
+    presetBindingCatalog = null;
+    closeModal('kf-preset-binding-modal');
+}
+
 function floatingActionLabel(action) {
     return {
         mode: '切换固定或随机模式',
@@ -1559,6 +1722,7 @@ function cloneEntry(entry) {
         cooldownTurns: toInt(entry?.cooldownTurns || 0),
         collapsed: !!entry?.collapsed,
         modelOptions: Array.isArray(entry?.modelOptions) ? entry.modelOptions.map(x => String(x)).filter(Boolean) : [],
+        presetBinding: entry?.presetBinding ? JSON.parse(JSON.stringify(entry.presetBinding)) : null,
     };
 }
 
@@ -1590,6 +1754,7 @@ function addEntry(pool) {
         cooldownTurns: 0,
         collapsed: false,
         modelOptions: [],
+        presetBinding: null,
     });
 }
 
@@ -1920,7 +2085,10 @@ function renderEntries(state) {
                 </div>
                 <div class="kf-row kf-entry-details kf-entry-side-row">
                     <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">模型</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-model" value="${esc(entry.model)}">${modelArrow}</div>
-                    <button class="kf-action-btn kf-accent-fill kf-fetch-models kf-entry-side-control">拉取模型</button>
+                    <div class="kf-entry-model-actions kf-entry-side-control">
+                        <button class="kf-icon-btn kf-fetch-models" type="button" aria-label="拉取模型" title="拉取模型"><svg><use href="#kf-i-refresh"/></svg></button>
+                        <button class="kf-icon-btn kf-entry-preset-settings${entry.presetBinding?.presetName ? ' kf-bound' : ''}" type="button" aria-label="预设设置" title="${entry.presetBinding?.presetName ? `已绑定：${esc(entry.presetBinding.presetName)}` : '预设设置'}"><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
+                    </div>
                 </div>
                 <div class="kf-row kf-fixed-only kf-entry-details">
                     <div class="kf-input-wrapper kf-flex-1"><span class="kf-label">运行次数</span><input type="number" min="1" class="kf-inner-input kf-entry-fixed-runs" value="${esc(entry.fixedRuns || 1)}"></div>
@@ -3352,6 +3520,15 @@ function bind(state, rerender, setStatus) {
             showToast(message, 'error');
         }
     });
+    $('#kf-entry-list').on('click.kf', '.kf-entry-preset-settings', async function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = $(this).closest('.kf-entry-block');
+        const entry = getActivePool(state).entries.find(item => item.id === row.data('id'));
+        if (!entry) return;
+        syncEntryFromRow(entry, row, state);
+        await openPresetBindingModal(state, entry);
+    });
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => {
         populateSettingsControls(state);
         $('#kf-settings-modal').addClass('kf-show');
@@ -3441,6 +3618,63 @@ function bind(state, rerender, setStatus) {
     $('#kf-floating-skin-confirm').off('click.kf').on('click.kf', () => {
         $('#kf-floating-skin').val(normalizeFloatingSkin($('#kf-floating-skin-modal').attr('data-selected-skin')));
         closeModal('kf-floating-skin-modal');
+    });
+    $('#kf-preset-binding-close').off('click.kf').on('click.kf', closePresetBindingModal);
+    $('#kf-preset-binding-select').off('change.kf').on('change.kf', async function () {
+        if (!presetBindingDraft) return;
+        presetBindingDraft.presetName = String($(this).val() || '').trim();
+        await refreshPresetBindingCatalog({ resetStates: true });
+    });
+    $('.kf-preset-binding-tab').off('click.kf').on('click.kf', function () {
+        if (!presetBindingDraft) return;
+        presetBindingDraft.tab = $(this).attr('data-binding-tab') === 'regex' ? 'regex' : 'prompts';
+        $('.kf-preset-binding-tab').removeClass('kf-active').attr('aria-selected', 'false');
+        $(this).addClass('kf-active').attr('aria-selected', 'true');
+        renderPresetBindingList();
+    });
+    $('#kf-preset-binding-search').off('input.kf').on('input.kf', renderPresetBindingList);
+    $('#kf-preset-binding-list').off('click.kf').on('click.kf', '.kf-preset-binding-toggle', function () {
+        if (!presetBindingDraft || !presetBindingCatalog) return;
+        const key = String($(this).closest('.kf-preset-binding-item').attr('data-key') || '');
+        const row = presetBindingRows().find(item => item.key === key);
+        const states = presetBindingStateMap();
+        if (!row || !states) return;
+        const current = Object.prototype.hasOwnProperty.call(states, key) ? states[key] : row.enabled;
+        const next = !current;
+        if (next === row.enabled) delete states[key];
+        else states[key] = next;
+        renderPresetBindingList();
+    });
+    $('#kf-preset-binding-clear').off('click.kf').on('click.kf', () => {
+        if (!presetBindingDraft) return closePresetBindingModal();
+        const pool = (state.pools || []).find(item => String(item?.id) === presetBindingDraft.poolId);
+        const entry = (pool?.entries || []).find(item => String(item?.id) === presetBindingDraft.entryId);
+        if (entry) {
+            entry.presetBinding = null;
+            persistStructure(state);
+        }
+        closePresetBindingModal();
+        rerender();
+        setStatus('已取消该 API 条目的预设绑定');
+    });
+    $('#kf-preset-binding-confirm').off('click.kf').on('click.kf', () => {
+        if (!presetBindingDraft?.presetName || !presetBindingCatalog?.presetExists) {
+            showToast('请选择一个当前存在的酒馆预设', 'warning', 2800);
+            return;
+        }
+        const pool = (state.pools || []).find(item => String(item?.id) === presetBindingDraft.poolId);
+        const entry = (pool?.entries || []).find(item => String(item?.id) === presetBindingDraft.entryId);
+        if (!entry) return closePresetBindingModal();
+        entry.presetBinding = {
+            presetName: presetBindingDraft.presetName,
+            promptStates: cloneBooleanRecord(presetBindingDraft.promptStates),
+            regexStates: cloneBooleanRecord(presetBindingDraft.regexStates),
+        };
+        persistStructure(state);
+        const presetName = presetBindingDraft.presetName;
+        closePresetBindingModal();
+        rerender();
+        setStatus(`已绑定酒馆预设：${presetName}`);
     });
     $('#kf-main-modal').off('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop').on('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop', function (event) {
         event.stopPropagation();
@@ -3547,6 +3781,7 @@ function bind(state, rerender, setStatus) {
             else if (this.id === 'kf-color-picker-modal') closeColorPicker();
             else if (this.id === 'kf-update-notice-modal') confirmUpdateNotice(state);
             else if (this.id === 'kf-main-modal' && apiEntriesEditorOpen) closeApiEntriesEditor(state, rerender, setStatus);
+            else if (this.id === 'kf-preset-binding-modal') closePresetBindingModal();
             else $(this).removeClass('kf-show');
         });
     $('.kf-modal-overlay .kf-modal-box').not('#kf-failure-modal .kf-modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')

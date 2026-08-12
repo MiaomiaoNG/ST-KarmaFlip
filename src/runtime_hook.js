@@ -4,17 +4,23 @@ import { makeId } from './compat.js';
 
 let chatSettingsBound = false;
 let fetchRetryBound = false;
+let generationLifecycleBound = false;
 let bindRetryTimer = null;
 let originalFetch = null;
+let preparedSelection = null;
+let activePresetTransaction = null;
+let nativePresetModulesPromise = null;
 const pendingRequests = new Map();
 
 export function clearRuntimeHookState() {
     pendingRequests.clear();
+    discardPreparedSelection();
 }
 
 const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
+const PRESET_TRANSACTION_TTL = 120000;
 const PERF_WARN_MS = {
     chatSettings: 12,
     mvuScan: 8,
@@ -65,6 +71,222 @@ function retryDebug(stage, detail = {}) {
 
 function context() {
     return window.SillyTavern?.getContext?.() || {};
+}
+
+function cloneData(value) {
+    if (value == null) return value;
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch {
+            // Fall through for older/custom SillyTavern data objects.
+        }
+    }
+    return JSON.parse(JSON.stringify(value));
+}
+
+function booleanRecord(raw) {
+    const result = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
+    for (const [key, value] of Object.entries(raw)) {
+        if (String(key || '').trim() && typeof value === 'boolean') result[String(key)] = value;
+    }
+    return result;
+}
+
+function normalizedPresetBinding(member) {
+    const presetName = String(member?.presetBinding?.presetName || '').trim();
+    if (!presetName) return null;
+    return {
+        presetName,
+        promptStates: booleanRecord(member.presetBinding?.promptStates),
+        regexStates: booleanRecord(member.presetBinding?.regexStates),
+    };
+}
+
+function presetBindingSignature(member) {
+    const binding = normalizedPresetBinding(member);
+    if (!binding) return '';
+    const sorted = record => Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)));
+    return JSON.stringify({
+        presetName: binding.presetName,
+        promptStates: sorted(binding.promptStates),
+        regexStates: sorted(binding.regexStates),
+    });
+}
+
+function matchingBinding(a, b) {
+    return presetBindingSignature(a) === presetBindingSignature(b);
+}
+
+function replaceObject(target, snapshot) {
+    if (!target || typeof target !== 'object') return;
+    for (const key of Object.keys(target)) delete target[key];
+    Object.assign(target, cloneData(snapshot) || {});
+}
+
+function findPromptOrder(settings) {
+    const lists = Array.isArray(settings?.prompt_order) ? settings.prompt_order : [];
+    return lists.find(item => String(item?.character_id) === '100001')?.order
+        || lists.find(item => Array.isArray(item?.order))?.order
+        || [];
+}
+
+function updateScriptStates(scripts, states, scope) {
+    if (!Array.isArray(scripts)) return;
+    for (const script of scripts) {
+        const key = `${scope}:${String(script?.id || '')}`;
+        if (!Object.prototype.hasOwnProperty.call(states, key)) continue;
+        script.disabled = states[key] !== true;
+    }
+}
+
+function snapshotScriptStates(scripts) {
+    return (Array.isArray(scripts) ? scripts : []).map(script => ({ script, disabled: script?.disabled === true }));
+}
+
+function restoreScriptStates(snapshot) {
+    for (const item of snapshot || []) {
+        if (item?.script) item.script.disabled = item.disabled === true;
+    }
+}
+
+async function nativePresetModules() {
+    if (!nativePresetModulesPromise) {
+        nativePresetModulesPromise = Promise.all([
+            import('/scripts/preset-manager.js'),
+            import('/scripts/openai.js'),
+        ]).then(([presetModule, openaiModule]) => ({
+            manager: presetModule.getPresetManager?.('openai') || presetModule.getPresetManager?.(),
+            oaiSettings: openaiModule.oai_settings,
+            settingsToUpdate: openaiModule.settingsToUpdate,
+        }));
+    }
+    return nativePresetModulesPromise;
+}
+
+function restorePresetTransaction() {
+    const transaction = activePresetTransaction;
+    activePresetTransaction = null;
+    if (!transaction) return;
+    if (transaction.timeoutId) clearTimeout(transaction.timeoutId);
+    try {
+        replaceObject(transaction.oaiSettings, transaction.settingsSnapshot);
+        if (transaction.select) transaction.select.value = transaction.selectedValue;
+        restoreScriptStates(transaction.globalSnapshot);
+        restoreScriptStates(transaction.scopedSnapshot);
+        const ext = transaction.extensionSettings;
+        if (ext) {
+            if (transaction.hadCharacterAllowed) ext.character_allowed_regex = cloneData(transaction.characterAllowedSnapshot);
+            else delete ext.character_allowed_regex;
+            if (transaction.hadPresetAllowed) ext.preset_allowed_regex = cloneData(transaction.presetAllowedSnapshot);
+            else delete ext.preset_allowed_regex;
+        }
+    } catch (error) {
+        console.error('[KarmaFlip] 还原酒馆预设内存状态失败:', error);
+    }
+}
+
+function restorePreparedRuntime(prepared) {
+    if (!prepared?.state?.runtime || !prepared.runtimeSnapshot) return;
+    replaceObject(prepared.state.runtime, prepared.runtimeSnapshot);
+}
+
+function discardPreparedSelection() {
+    const prepared = preparedSelection;
+    preparedSelection = null;
+    restorePreparedRuntime(prepared);
+    restorePresetTransaction();
+}
+
+async function beginPresetTransaction(member) {
+    restorePresetTransaction();
+    const binding = normalizedPresetBinding(member);
+    if (!binding) return true;
+    const { manager, oaiSettings, settingsToUpdate } = await nativePresetModules();
+    const currentName = String(manager?.getSelectedPresetName?.() || '').trim();
+    const preset = binding.presetName === currentName
+        ? cloneData(oaiSettings)
+        : manager?.getCompletionPresetByName?.(binding.presetName);
+    if (!manager || !oaiSettings || !preset) {
+        showRuntimeToast(`绑定的酒馆预设“${binding.presetName}”已不存在，本次仍使用当前预设`, 'warning', 4200);
+        return false;
+    }
+
+    const ctx = context();
+    const extensionSettings = ctx.extensionSettings || window.extension_settings || {};
+    const globalScripts = Array.isArray(extensionSettings.regex) ? extensionSettings.regex : [];
+    const scopedScripts = Array.isArray(ctx.characters?.[ctx.characterId]?.data?.extensions?.regex_scripts)
+        ? ctx.characters[ctx.characterId].data.extensions.regex_scripts
+        : [];
+    const select = document.getElementById('settings_preset_openai');
+    const transaction = {
+        oaiSettings,
+        settingsSnapshot: cloneData(oaiSettings),
+        select,
+        selectedValue: select?.value,
+        extensionSettings,
+        hadCharacterAllowed: Object.prototype.hasOwnProperty.call(extensionSettings, 'character_allowed_regex'),
+        hadPresetAllowed: Object.prototype.hasOwnProperty.call(extensionSettings, 'preset_allowed_regex'),
+        characterAllowedSnapshot: cloneData(extensionSettings.character_allowed_regex),
+        presetAllowedSnapshot: cloneData(extensionSettings.preset_allowed_regex),
+        globalSnapshot: snapshotScriptStates(globalScripts),
+        scopedSnapshot: snapshotScriptStates(scopedScripts),
+        timeoutId: null,
+    };
+    activePresetTransaction = transaction;
+
+    try {
+        for (const [presetKey, mapping] of Object.entries(settingsToUpdate || {})) {
+            const settingsKey = mapping?.[1];
+            if (!settingsKey) continue;
+            if (presetKey === 'extensions') {
+                oaiSettings[settingsKey] = cloneData(preset.extensions) || {};
+            } else if (preset[presetKey] !== undefined) {
+                oaiSettings[settingsKey] = cloneData(preset[presetKey]);
+            }
+        }
+        oaiSettings.preset_settings_openai = binding.presetName;
+        if (select) {
+            const value = manager.findPreset?.(binding.presetName);
+            if (value != null) select.value = String(value);
+        }
+
+        const promptOrder = findPromptOrder(oaiSettings);
+        for (const item of promptOrder) {
+            const identifier = String(item?.identifier || '');
+            if (Object.prototype.hasOwnProperty.call(binding.promptStates, identifier)) {
+                item.enabled = binding.promptStates[identifier];
+            }
+        }
+
+        updateScriptStates(globalScripts, binding.regexStates, 'global');
+        updateScriptStates(scopedScripts, binding.regexStates, 'scoped');
+        const presetScripts = oaiSettings?.extensions?.regex_scripts;
+        updateScriptStates(presetScripts, binding.regexStates, 'preset');
+
+        const avatar = ctx.characters?.[ctx.characterId]?.avatar;
+        const needsScoped = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('scoped:') && enabled);
+        if (needsScoped && avatar) {
+            if (!Array.isArray(extensionSettings.character_allowed_regex)) extensionSettings.character_allowed_regex = [];
+            if (!extensionSettings.character_allowed_regex.includes(avatar)) extensionSettings.character_allowed_regex.push(avatar);
+        }
+        const needsPreset = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('preset:') && enabled);
+        if (needsPreset) {
+            if (!extensionSettings.preset_allowed_regex || typeof extensionSettings.preset_allowed_regex !== 'object') {
+                extensionSettings.preset_allowed_regex = {};
+            }
+            if (!Array.isArray(extensionSettings.preset_allowed_regex.openai)) extensionSettings.preset_allowed_regex.openai = [];
+            if (!extensionSettings.preset_allowed_regex.openai.includes(binding.presetName)) {
+                extensionSettings.preset_allowed_regex.openai.push(binding.presetName);
+            }
+        }
+        transaction.timeoutId = setTimeout(restorePresetTransaction, PRESET_TRANSACTION_TTL);
+        return true;
+    } catch (error) {
+        restorePresetTransaction();
+        throw error;
+    }
 }
 
 function generationType(generateData) {
@@ -376,9 +598,9 @@ function queueLog(state, entry) {
     }, 0);
 }
 
-function chooseRequest(state, pool, blockedIds = new Set()) {
+function chooseRequest(state, pool, blockedIds = new Set(), bindingMember = null) {
     const originalEntries = pool.entries;
-    pool.entries = originalEntries.filter(e => !blockedIds.has(e.id));
+    pool.entries = originalEntries.filter(e => !blockedIds.has(e.id) && (!bindingMember || matchingBinding(e, bindingMember)));
     try {
         return pickMember(state, pool);
     } finally {
@@ -546,7 +768,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
     const maxFailures = retryLimit(state);
     const delayMs = retryDelayMs(state);
     const alertEnabled = !!state.failure?.alertEnabled;
-    const availableEntries = validRuntimeEntries(pool);
+    const availableEntries = validRuntimeEntries(pool).filter(entry => matchingBinding(entry, pending.member));
     const onlyOneAvailable = availableEntries.length === 1;
     const maxSwitches = Math.max(1, availableEntries.length);
     const blockedIds = new Set();
@@ -567,7 +789,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
 
     for (let switchAttempt = 0; switchAttempt < maxSwitches; switchAttempt += 1) {
         if (switchAttempt > 0) {
-            currentPicked = chooseRequest(state, pool, blockedIds);
+            currentPicked = chooseRequest(state, pool, blockedIds, pending.member);
             currentMember = currentPicked?.member;
             if (!currentMember) break;
             retryDebug('switch-member', {
@@ -694,6 +916,72 @@ function bindRetryFetch(onStatus) {
     fetchRetryBound = true;
 }
 
+async function prepareGenerationSelection(type, options, dryRun) {
+    discardPreparedSelection();
+    if (dryRun || !TEXT_GENERATION_TYPES.has(String(type || ''))) return;
+    if (options?.quietImage === true || String(options?.quiet_prompt || '').trim()) return;
+
+    const state = loadState();
+    if (state.enabled === false) return;
+    const pool = getActivePool(state);
+    const messageId = targetMessageId(String(type));
+    const override = findApiOverride(state, pool, messageId);
+    if (override?.invalid) return;
+    if (!override && (!Array.isArray(pool?.entries) || !validRuntimeEntries(pool).length)) return;
+
+    const runtimeSnapshot = cloneData(state.runtime);
+    const picked = override?.picked || pickMember(state, pool);
+    if (!picked?.member) {
+        replaceObject(state.runtime, runtimeSnapshot);
+        return;
+    }
+    preparedSelection = {
+        state,
+        runtimeSnapshot,
+        pool: override?.pool || pool,
+        picked,
+        member: picked.member,
+        override,
+        type: String(type),
+        messageId,
+        expiresAt: Date.now() + PENDING_TTL,
+    };
+    await beginPresetTransaction(picked.member);
+}
+
+function matchingPreparedSelection(type, messageId) {
+    const prepared = preparedSelection;
+    if (!prepared || prepared.expiresAt < Date.now()) {
+        if (prepared) discardPreparedSelection();
+        return null;
+    }
+    if (prepared.type !== String(type) || Number(prepared.messageId) !== Number(messageId)) return null;
+    preparedSelection = null;
+    return prepared;
+}
+
+function bindGenerationLifecycle(eventSource, eventTypes) {
+    if (generationLifecycleBound) return;
+    const startedEvent = eventTypes.GENERATION_STARTED;
+    if (!startedEvent) return;
+    eventSource.on(startedEvent, async (type, options, dryRun) => {
+        try {
+            await prepareGenerationSelection(type, options, dryRun);
+        } catch (error) {
+            discardPreparedSelection();
+            console.error('[KarmaFlip] 发送前应用绑定预设失败:', error);
+            showRuntimeToast('绑定预设应用失败，本次继续使用酒馆当前预设', 'error', 4200);
+        }
+    });
+    const finish = () => {
+        if (preparedSelection) discardPreparedSelection();
+        else restorePresetTransaction();
+    };
+    if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, finish);
+    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, finish);
+    generationLifecycleBound = true;
+}
+
 function bindChatCompletionSettings(onStatus) {
     if (chatSettingsBound) return;
     if (bindRetryTimer) {
@@ -711,28 +999,38 @@ function bindChatCompletionSettings(onStatus) {
         return;
     }
 
-    eventSource.on(eventName, (generateData) => {
+    bindGenerationLifecycle(eventSource, eventTypes);
+
+    eventSource.on(eventName, async (generateData) => {
         const startedAt = nowMs();
         try {
             const state = loadState();
             if (state.enabled === false) return;
             if (!isTextGeneration(generateData) || isBackgroundRequest(generateData)) return;
-            if (isMvuAnalysisRequest(generateData)) return;
 
             const pool = getActivePool(state);
             const type = generationType(generateData);
             const messageId = targetMessageId(type);
-            const override = findApiOverride(state, pool, messageId);
+            const prepared = matchingPreparedSelection(type, messageId);
+            if (isMvuAnalysisRequest(generateData)) {
+                if (prepared) {
+                    restorePreparedRuntime(prepared);
+                    restorePresetTransaction();
+                }
+                return;
+            }
+            const override = prepared?.override ?? findApiOverride(state, pool, messageId);
             if (override?.invalid) return;
-            if (!override && (!Array.isArray(pool?.entries) || !validRuntimeEntries(pool).length)) return;
+            if (!prepared && !override && (!Array.isArray(pool?.entries) || !validRuntimeEntries(pool).length)) return;
 
             const pickStartedAt = nowMs();
-            const picked = override?.picked || pickMember(state, pool);
+            const picked = prepared?.picked || override?.picked || pickMember(state, pool);
             warnSlowPath('pick-member', pickStartedAt, PERF_WARN_MS.pickMember);
             if (!picked?.member) return;
 
             const member = picked.member;
-            const requestPool = override?.pool || pool;
+            const requestPool = prepared?.pool || override?.pool || pool;
+            if (!prepared) await beginPresetTransaction(member);
             patchGenerateData(generateData, member);
 
             generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock');

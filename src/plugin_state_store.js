@@ -108,6 +108,27 @@ function normalizeProvider(provider) {
     return 'open';
 }
 
+function normalizeBooleanMap(raw) {
+    const result = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
+    for (const [rawKey, rawValue] of Object.entries(raw)) {
+        const key = String(rawKey || '').trim();
+        if (!key || ['__proto__', 'prototype', 'constructor'].includes(key)) continue;
+        if (typeof rawValue === 'boolean') result[key] = rawValue;
+    }
+    return result;
+}
+
+function normalizePresetBinding(raw) {
+    const presetName = String(raw?.presetName || '').trim();
+    if (!presetName) return null;
+    return {
+        presetName,
+        promptStates: normalizeBooleanMap(raw?.promptStates),
+        regexStates: normalizeBooleanMap(raw?.regexStates),
+    };
+}
+
 function normalizeEntry(entry) {
     const e = entry || {};
     return {
@@ -125,6 +146,7 @@ function normalizeEntry(entry) {
         cooldownTurns: toInt(e.cooldownTurns || 0),
         collapsed: !!e.collapsed,
         modelOptions: copyModelOptions(e.modelOptions),
+        presetBinding: normalizePresetBinding(e.presetBinding),
     };
 }
 
@@ -299,6 +321,7 @@ function buildPersistedEntry(entry) {
         pityTurns: normalized.pityTurns,
         cooldownTurns: normalized.cooldownTurns,
         collapsed: normalized.collapsed,
+        presetBinding: normalized.presetBinding,
     };
 }
 

@@ -230,6 +230,26 @@
         </section>
     </div>
 
+    <div class="kf-modal-overlay" id="kf-preset-binding-modal">
+        <section class="kf-modal-box kf-wide-dialog kf-preset-binding-dialog">
+            <header class="kf-modal-header"><h2>预设设置</h2><button class="kf-icon-btn kf-close-btn" id="kf-preset-binding-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-modal-body kf-preset-binding-body">
+                <div class="kf-select-wrapper kf-preset-binding-select-wrap">
+                    <select class="kf-inner-select" id="kf-preset-binding-select" aria-label="选择酒馆预设"></select>
+                    <span class="kf-select-arrow" aria-hidden="true"><svg><use href="#kf-i-chevron"/></svg></span>
+                </div>
+                <div class="kf-preset-binding-tabs" role="tablist" aria-label="绑定内容">
+                    <button class="kf-preset-binding-tab kf-active" type="button" data-binding-tab="prompts" role="tab" aria-selected="true">预设 Prompts</button>
+                    <button class="kf-preset-binding-tab" type="button" data-binding-tab="regex" role="tab" aria-selected="false">正则 Regex</button>
+                </div>
+                <div class="kf-input-wrapper kf-preset-binding-search-wrap"><svg><use href="#kf-i-search"/></svg><input class="kf-inner-input" id="kf-preset-binding-search" type="search" placeholder="搜索条目…" aria-label="搜索预设或正则条目"></div>
+                <div class="kf-preset-binding-status" id="kf-preset-binding-status" aria-live="polite"></div>
+                <div class="kf-preset-binding-list" id="kf-preset-binding-list"></div>
+            </div>
+            <footer class="kf-modal-footer kf-modal-actions-two"><button class="kf-action-btn kf-secondary-btn" id="kf-preset-binding-clear" type="button">取消绑定</button><button class="kf-action-btn kf-primary-btn" id="kf-preset-binding-confirm" type="button">确认绑定</button></footer>
+        </section>
+    </div>
+
     <div class="kf-modal-overlay" id="kf-reset-data-modal">
         <section class="kf-modal-box">
             <header class="kf-modal-header"><h2>确认清除全部数据</h2></header>
