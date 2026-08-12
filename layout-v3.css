@@ -633,8 +633,8 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     width: var(--kf-entry-side-width);
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
+    justify-content: center;
+    gap: 6px;
 }
 
 .kf-entry-enabled-wrap {
@@ -705,12 +705,6 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     padding-right: 38px !important;
 }
 
-.kf-fan-icon,
-.kf-trash-icon {
-    width: 18px;
-    height: 18px;
-}
-
 .kf-trash-icon {
     fill: none;
     stroke: currentColor;
@@ -748,21 +742,54 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     background: rgba(var(--primary-rgb), 0.055) !important;
 }
 
+#kf-root .kf-collapse > svg,
+#kf-root .kf-del > svg,
 #kf-root .kf-entry-window > svg,
 #kf-root .kf-fetch-models > svg,
+#kf-root .kf-eye-btn > svg,
+#kf-root .kf-entry-preset-settings > i {
+    display: block;
+    align-self: center;
+    justify-self: center;
+    line-height: 1;
+}
+
+#kf-root .kf-entry-window > svg,
 #kf-root .kf-eye-btn > svg {
     width: 17px;
     height: 17px;
 }
 
+#kf-root .kf-collapse > .kf-fan-icon {
+    width: 18.5px;
+    height: 18.5px;
+}
+
+#kf-root .kf-del > .kf-trash-icon {
+    width: 21px;
+    height: 21px;
+}
+
+#kf-root .kf-fetch-models > svg {
+    width: 21px;
+    height: 21px;
+}
+
 #kf-root .kf-entry-preset-settings > i {
+    width: 18px;
+    height: 18px;
+    display: inline-grid;
+    place-items: center;
     font-size: 16px !important;
-    line-height: 1;
 }
 
 #kf-root .kf-entry-preset-settings.kf-bound {
-    color: var(--on-primary) !important;
-    background: var(--primary) !important;
+    color: var(--muted) !important;
+    background: transparent !important;
+}
+
+#kf-root .kf-entry-preset-settings.kf-bound > i {
+    color: var(--primary) !important;
 }
 
 .kf-entry-side-row > * {
