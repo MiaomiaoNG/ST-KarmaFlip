@@ -1377,6 +1377,66 @@ function presetBindingStateMap() {
     return presetBindingDraft?.tab === 'regex' ? presetBindingDraft.regexStates : presetBindingDraft?.promptStates;
 }
 
+function presetBindingEntry(state) {
+    if (!presetBindingDraft) return null;
+    const pool = (state.pools || []).find(item => String(item?.id) === presetBindingDraft.poolId);
+    return (pool?.entries || []).find(item => String(item?.id) === presetBindingDraft.entryId) || null;
+}
+
+function renderPresetBindingAction() {
+    const button = $('#kf-preset-binding-action');
+    const bound = presetBindingDraft?.bound === true;
+    button
+        .toggleClass('kf-primary-btn', bound)
+        .toggleClass('kf-secondary-btn', !bound)
+        .prop('disabled', !bound && !presetBindingCatalog)
+        .attr('aria-pressed', bound ? 'true' : 'false')
+        .attr('title', bound ? '点击取消该 API 条目的预设绑定' : '点击绑定当前预设设置')
+        .text(bound ? '🔒已绑定' : '暂未绑定');
+}
+
+function updatePresetBindingEntryIndicator(entry) {
+    if (!entry) return;
+    const button = $('#kf-entry-list .kf-entry-block').filter(function () {
+        return String($(this).data('id') || '') === String(entry.id || '');
+    }).first().find('.kf-entry-preset-settings');
+    const presetName = String(entry.presetBinding?.presetName || '').trim();
+    button.toggleClass('kf-bound', !!presetName);
+    button.attr('title', presetName ? `已绑定：${presetName}` : '预设设置');
+}
+
+function savePresetBindingDraft(state, setStatus, notify = false) {
+    if (!presetBindingDraft?.presetName || !presetBindingCatalog?.presetExists) {
+        if (notify) showToast('请选择一个当前存在的酒馆预设', 'warning', 2800);
+        return false;
+    }
+    const entry = presetBindingEntry(state);
+    if (!entry) return false;
+    entry.presetBinding = {
+        presetName: presetBindingDraft.presetName,
+        promptStates: cloneBooleanRecord(presetBindingDraft.promptStates),
+        regexStates: cloneBooleanRecord(presetBindingDraft.regexStates),
+    };
+    presetBindingDraft.bound = true;
+    persistStructure(state);
+    renderPresetBindingAction();
+    updatePresetBindingEntryIndicator(entry);
+    if (notify) setStatus(`已绑定酒馆预设：${presetBindingDraft.presetName}`);
+    return true;
+}
+
+function clearPresetBindingDraft(state, setStatus) {
+    const entry = presetBindingEntry(state);
+    if (!entry) return false;
+    entry.presetBinding = null;
+    presetBindingDraft.bound = false;
+    persistStructure(state);
+    renderPresetBindingAction();
+    updatePresetBindingEntryIndicator(entry);
+    setStatus('已取消该 API 条目的预设绑定');
+    return true;
+}
+
 function renderPresetBindingList() {
     const list = $('#kf-preset-binding-list').empty();
     if (!presetBindingDraft || !presetBindingCatalog) return;
@@ -1401,6 +1461,8 @@ function renderPresetBindingList() {
 
 async function refreshPresetBindingCatalog({ resetStates = false } = {}) {
     if (!presetBindingDraft) return;
+    presetBindingCatalog = null;
+    renderPresetBindingAction();
     $('#kf-preset-binding-status').text('正在读取酒馆预设…');
     $('#kf-preset-binding-list').empty();
     try {
@@ -1424,9 +1486,11 @@ async function refreshPresetBindingCatalog({ resetStates = false } = {}) {
         }
         $('.kf-preset-binding-select-wrap').toggleClass('kf-bound', !!presetBindingDraft.presetName);
         renderPresetBindingList();
+        renderPresetBindingAction();
     } catch (error) {
         presetBindingCatalog = null;
         $('#kf-preset-binding-status').text(error?.message || '读取酒馆预设失败');
+        renderPresetBindingAction();
     }
 }
 
@@ -1440,8 +1504,10 @@ async function openPresetBindingModal(state, entry) {
         promptStates: cloneBooleanRecord(binding.promptStates),
         regexStates: cloneBooleanRecord(binding.regexStates),
         tab: 'prompts',
+        bound: !!binding.presetName,
     };
     presetBindingCatalog = null;
+    renderPresetBindingAction();
     $('#kf-preset-binding-search').val('');
     $('.kf-preset-binding-tab').removeClass('kf-active').attr('aria-selected', 'false')
         .filter('[data-binding-tab="prompts"]').addClass('kf-active').attr('aria-selected', 'true');
@@ -2309,6 +2375,24 @@ function createLogSummary(log, kind) {
     return summary;
 }
 
+function readableLogDetail(...values) {
+    for (const value of values) {
+        if (value === null || value === undefined) continue;
+        if (typeof value === 'string') {
+            if (value.trim()) return value;
+            continue;
+        }
+        try {
+            const serialized = JSON.stringify(value, null, 2);
+            if (serialized?.trim()) return serialized;
+        } catch {
+            const fallback = String(value);
+            if (fallback.trim()) return fallback;
+        }
+    }
+    return '';
+}
+
 function createLogRow(log) {
     const kind = logKind(log);
     const row = document.createElement('article');
@@ -2320,11 +2404,19 @@ function createLogRow(log) {
     const detail = document.createElement('div');
     detail.className = 'kf-log-detail';
     const apiUrl = String(log.apiUrl || '').trim();
-    if (apiUrl) appendCopyableLogText(detail, `URL: ${apiUrl}`);
-    const responseDetail = String(log.responseBody ?? log.error ?? log.detail ?? '');
+    if (apiUrl) {
+        const urlLine = document.createElement('div');
+        urlLine.className = 'kf-log-detail-url';
+        urlLine.appendChild(document.createTextNode('URL: '));
+        appendCopyableLogText(urlLine, apiUrl);
+        detail.appendChild(urlLine);
+    }
+    const responseDetail = readableLogDetail(log.responseBody, log.error, log.detail);
     if (responseDetail) {
-        if (apiUrl) detail.appendChild(document.createTextNode('\n'));
-        appendCopyableLogText(detail, responseDetail);
+        const responseBody = document.createElement('div');
+        responseBody.className = 'kf-log-detail-response';
+        appendCopyableLogText(responseBody, responseDetail);
+        detail.appendChild(responseBody);
     }
     if (detail.childNodes.length) row.appendChild(detail);
     return row;
@@ -3773,6 +3865,7 @@ function bind(state, rerender, setStatus) {
         if (!presetBindingDraft) return;
         presetBindingDraft.presetName = String($(this).val() || '').trim();
         await refreshPresetBindingCatalog({ resetStates: true });
+        if (presetBindingDraft?.bound) savePresetBindingDraft(state, setStatus);
     });
     $('.kf-preset-binding-tab').off('click.kf').on('click.kf', function () {
         if (!presetBindingDraft) return;
@@ -3793,37 +3886,12 @@ function bind(state, rerender, setStatus) {
         if (next === row.enabled) delete states[key];
         else states[key] = next;
         renderPresetBindingList();
+        if (presetBindingDraft.bound) savePresetBindingDraft(state, setStatus);
     });
-    $('#kf-preset-binding-clear').off('click.kf').on('click.kf', () => {
-        if (!presetBindingDraft) return closePresetBindingModal();
-        const pool = (state.pools || []).find(item => String(item?.id) === presetBindingDraft.poolId);
-        const entry = (pool?.entries || []).find(item => String(item?.id) === presetBindingDraft.entryId);
-        if (entry) {
-            entry.presetBinding = null;
-            persistStructure(state);
-        }
-        closePresetBindingModal();
-        rerender();
-        setStatus('已取消该 API 条目的预设绑定');
-    });
-    $('#kf-preset-binding-confirm').off('click.kf').on('click.kf', () => {
-        if (!presetBindingDraft?.presetName || !presetBindingCatalog?.presetExists) {
-            showToast('请选择一个当前存在的酒馆预设', 'warning', 2800);
-            return;
-        }
-        const pool = (state.pools || []).find(item => String(item?.id) === presetBindingDraft.poolId);
-        const entry = (pool?.entries || []).find(item => String(item?.id) === presetBindingDraft.entryId);
-        if (!entry) return closePresetBindingModal();
-        entry.presetBinding = {
-            presetName: presetBindingDraft.presetName,
-            promptStates: cloneBooleanRecord(presetBindingDraft.promptStates),
-            regexStates: cloneBooleanRecord(presetBindingDraft.regexStates),
-        };
-        persistStructure(state);
-        const presetName = presetBindingDraft.presetName;
-        closePresetBindingModal();
-        rerender();
-        setStatus(`已绑定酒馆预设：${presetName}`);
+    $('#kf-preset-binding-action').off('click.kf').on('click.kf', () => {
+        if (!presetBindingDraft) return;
+        if (presetBindingDraft.bound) clearPresetBindingDraft(state, setStatus);
+        else savePresetBindingDraft(state, setStatus, true);
     });
     $('#kf-main-modal').off('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop').on('click.kfApiEditorBackdrop', '#kf-api-entries-backdrop', function (event) {
         event.stopPropagation();

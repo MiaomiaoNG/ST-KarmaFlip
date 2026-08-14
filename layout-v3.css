@@ -1807,10 +1807,12 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
 }
 
 .kf-log-detail {
-    display: -webkit-box;
+    display: block;
+    height: calc(4.35em + 18px);
     margin-top: 8px;
     padding: 9px 10px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     border: 1px solid rgba(var(--primary-rgb), 0.13);
     border-radius: 10px;
     color: var(--muted);
@@ -1821,8 +1823,12 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     line-height: 1.45;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
+    scrollbar-gutter: stable;
+}
+
+.kf-log-detail-url,
+.kf-log-detail-response {
+    display: block;
 }
 
 .kf-log-copy-url {
