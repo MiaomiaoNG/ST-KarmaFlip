@@ -1,4 +1,4 @@
-import { bindApiOverrideToFloor, clearFloorApiBinding, clearPendingApiOverride, getActivePool, getApiOverrideState, loadState, pushLog, toInt } from './plugin_state_store.js';
+import { bindApiOverrideToFloor, clearFloorApiBinding, clearPendingApiOverride, getActivePool, getApiOverrideState, getRuntimeScope, loadState, pushLog, toInt } from './plugin_state_store.js';
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 import { makeId } from './compat.js';
 
@@ -188,8 +188,8 @@ function restorePresetTransaction() {
 }
 
 function restorePreparedRuntime(prepared) {
-    if (!prepared?.state?.runtime || !prepared.runtimeSnapshot) return;
-    replaceObject(prepared.state.runtime, prepared.runtimeSnapshot);
+    if (!prepared?.runtimeScope || !prepared.runtimeSnapshot) return;
+    replaceObject(prepared.runtimeScope, prepared.runtimeSnapshot);
 }
 
 function discardPreparedSelection() {
@@ -929,14 +929,16 @@ async function prepareGenerationSelection(type, options, dryRun) {
     if (override?.invalid) return;
     if (!override && (!Array.isArray(pool?.entries) || !validRuntimeEntries(pool).length)) return;
 
-    const runtimeSnapshot = cloneData(state.runtime);
+    const runtimeScope = getRuntimeScope(state);
+    const runtimeSnapshot = cloneData(runtimeScope);
     const picked = override?.picked || pickMember(state, pool);
     if (!picked?.member) {
-        replaceObject(state.runtime, runtimeSnapshot);
+        replaceObject(runtimeScope, runtimeSnapshot);
         return;
     }
     preparedSelection = {
         state,
+        runtimeScope,
         runtimeSnapshot,
         pool: override?.pool || pool,
         picked,
@@ -955,7 +957,16 @@ function matchingPreparedSelection(type, messageId) {
         if (prepared) discardPreparedSelection();
         return null;
     }
-    if (prepared.type !== String(type) || Number(prepared.messageId) !== Number(messageId)) return null;
+    if (prepared.type !== String(type) || Number(prepared.messageId) !== Number(messageId)) {
+        retryDebug('prepared-selection-mismatch', {
+            preparedType: prepared.type,
+            currentType: String(type),
+            preparedMessageId: prepared.messageId,
+            currentMessageId: messageId,
+        });
+        discardPreparedSelection();
+        return null;
+    }
     preparedSelection = null;
     return prepared;
 }

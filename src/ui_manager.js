@@ -2228,6 +2228,10 @@ function trashIcon() {
     return '<svg class="kf-trash-icon" aria-hidden="true"><use href="#kf-i-trash"/></svg>';
 }
 
+function removeEntryIcon() {
+    return '<svg class="kf-entry-remove-icon" aria-hidden="true"><use href="#kf-i-x"/></svg>';
+}
+
 function renderEntries(state) {
     const pool = getActivePool(state);
     const root = $('#kf-entry-list').empty();
@@ -2252,7 +2256,7 @@ function renderEntries(state) {
                         <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}" placeholder="API 名称">${nameArrow}</div>
                         <div class="kf-entry-actions">
                             <button class="kf-icon-btn kf-entry-window" type="button" aria-label="打开完整 API 条目" title="打开完整 API 条目">${entryWindowIcon()}</button>
-                            <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
+                            <button class="kf-icon-btn kf-del" type="button" aria-label="移除 API 条目" title="移除 API 条目">${removeEntryIcon()}</button>
                         </div>
                     </div>
                 </div>
@@ -2282,7 +2286,7 @@ function renderEntries(state) {
                     <div class="kf-input-wrapper kf-entry-name-wrap"><span class="kf-label">名称</span><input type="text" class="kf-inner-input kf-dropdown-input kf-entry-name" value="${esc(entry.name)}" placeholder="API 名称">${nameArrow}</div>
                     <div class="kf-entry-actions">
                         <button class="kf-icon-btn kf-collapse" type="button" aria-label="${collapseLabel}" title="${collapseLabel}">${collapseIcon}</button>
-                        <button class="kf-icon-btn kf-del" type="button" aria-label="删除 API 条目" title="删除 API 条目">${trashIcon()}</button>
+                        <button class="kf-icon-btn kf-del" type="button" aria-label="移除 API 条目" title="移除 API 条目">${removeEntryIcon()}</button>
                     </div>
                 </div>
                 <div class="kf-row kf-entry-details kf-entry-secret-details">
@@ -3741,11 +3745,14 @@ function bind(state, rerender, setStatus) {
     });
     bindEntryDragSort(state, rerender, setStatus);
     $('#kf-entry-list').on('click.kf', '.kf-fetch-models', async function () {
+        const button = $(this);
+        if (button.hasClass('kf-loading')) return;
         const pool = getActivePool(state);
-        const row = $(this).closest('.kf-entry-block');
+        const row = button.closest('.kf-entry-block');
         const entry = pool.entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row, state);
+        button.addClass('kf-loading').attr('aria-busy', 'true').prop('disabled', true);
         setStatus(`正在获取${providerLabel(entry.provider)}模型，请稍候`);
         try {
             const models = await fetchProviderModels(entry);
@@ -3759,6 +3766,8 @@ function bind(state, rerender, setStatus) {
             const message = error?.message || '获取模型失败';
             setStatus(message);
             showToast(message, 'error');
+        } finally {
+            button.removeClass('kf-loading').removeAttr('aria-busy').prop('disabled', false);
         }
     });
     $('#kf-entry-list').on('click.kf', '.kf-entry-preset-settings', async function (event) {

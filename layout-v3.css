@@ -765,14 +765,24 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     height: 18.5px;
 }
 
-#kf-root .kf-del > .kf-trash-icon {
-    width: 21px;
-    height: 21px;
+#kf-root .kf-del > .kf-entry-remove-icon {
+    width: 18px;
+    height: 18px;
 }
 
 #kf-root .kf-fetch-models > svg {
     width: 21px;
     height: 21px;
+}
+
+@keyframes kf-model-refresh-spin {
+    to { transform: rotate(360deg); }
+}
+
+#kf-root .kf-fetch-models.kf-loading > svg {
+    transform-origin: center;
+    animation: kf-model-refresh-spin 0.75s linear infinite;
+    will-change: transform;
 }
 
 #kf-root .kf-entry-preset-settings > i {
