@@ -335,6 +335,15 @@ function targetMessageId(type) {
     return type === 'swipe' ? Math.max(0, length - 1) : length;
 }
 
+function compatiblePreparedMessageId(preparedMessageId, currentMessageId) {
+    const prepared = Number(preparedMessageId);
+    const current = Number(currentMessageId);
+    if (!Number.isInteger(prepared) || !Number.isInteger(current)) return false;
+    // SillyTavern inserts/removes one chat item between the pre-generation event
+    // and SETTINGS_READY for normal sends, regenerate and continue operations.
+    return Math.abs(current - prepared) <= 1;
+}
+
 function isBackgroundRequest(generateData) {
     if (!generateData || typeof generateData !== 'object') return true;
     return generateData.quiet === true ||
@@ -1000,12 +1009,13 @@ function matchingPreparedSelection(type, messageId) {
         if (prepared) discardPreparedSelection(prepared.token);
         return null;
     }
-    if (prepared.type !== String(type) || Number(prepared.messageId) !== Number(messageId)) {
+    if (prepared.type !== String(type) || !compatiblePreparedMessageId(prepared.messageId, messageId)) {
         retryDebug('prepared-selection-mismatch', {
             preparedType: prepared.type,
             currentType: String(type),
             preparedMessageId: prepared.messageId,
             currentMessageId: messageId,
+            messageIdDelta: Number(messageId) - Number(prepared.messageId),
         });
         discardPreparedSelection(prepared.token);
         return null;
