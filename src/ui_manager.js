@@ -2397,6 +2397,16 @@ function readableLogDetail(...values) {
     return '';
 }
 
+function completeErrorLogDetail(log) {
+    const responseDetail = readableLogDetail(log.responseBody, log.error, log.detail);
+    const numericStatus = Number(log.status);
+    const status = Number.isFinite(numericStatus) && numericStatus > 0 ? String(numericStatus) : '';
+    const statusText = String(log.statusText || '').trim();
+    const statusLabel = [status, statusText].filter(Boolean).join(' ');
+    if (statusLabel && responseDetail) return `${statusLabel}：${responseDetail}`;
+    return statusLabel || responseDetail;
+}
+
 function createLogRow(log) {
     const kind = logKind(log);
     const row = document.createElement('article');
@@ -2407,15 +2417,7 @@ function createLogRow(log) {
 
     const detail = document.createElement('div');
     detail.className = 'kf-log-detail';
-    const apiUrl = String(log.apiUrl || '').trim();
-    if (apiUrl) {
-        const urlLine = document.createElement('div');
-        urlLine.className = 'kf-log-detail-url';
-        urlLine.appendChild(document.createTextNode('URL: '));
-        appendCopyableLogText(urlLine, apiUrl);
-        detail.appendChild(urlLine);
-    }
-    const responseDetail = readableLogDetail(log.responseBody, log.error, log.detail);
+    const responseDetail = completeErrorLogDetail(log);
     if (responseDetail) {
         const responseBody = document.createElement('div');
         responseBody.className = 'kf-log-detail-response';

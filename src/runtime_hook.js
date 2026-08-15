@@ -10,6 +10,7 @@ let originalFetch = null;
 let preparedSelection = null;
 let activePresetTransaction = null;
 let nativePresetModulesPromise = null;
+let preparationSequence = 0;
 const pendingRequests = new Map();
 
 export function clearRuntimeHookState() {
@@ -165,10 +166,11 @@ async function nativePresetModules() {
     return nativePresetModulesPromise;
 }
 
-function restorePresetTransaction() {
+function restorePresetTransaction(expectedToken = null) {
     const transaction = activePresetTransaction;
+    if (expectedToken !== null && transaction?.token !== expectedToken) return false;
     activePresetTransaction = null;
-    if (!transaction) return;
+    if (!transaction) return false;
     if (transaction.timeoutId) clearTimeout(transaction.timeoutId);
     try {
         replaceObject(transaction.oaiSettings, transaction.settingsSnapshot);
@@ -185,6 +187,7 @@ function restorePresetTransaction() {
     } catch (error) {
         console.error('[KarmaFlip] 还原酒馆预设内存状态失败:', error);
     }
+    return true;
 }
 
 function restorePreparedRuntime(prepared) {
@@ -192,26 +195,44 @@ function restorePreparedRuntime(prepared) {
     replaceObject(prepared.runtimeScope, prepared.runtimeSnapshot);
 }
 
-function discardPreparedSelection() {
+function discardPreparedSelection(expectedToken = null) {
     const prepared = preparedSelection;
-    preparedSelection = null;
-    restorePreparedRuntime(prepared);
-    restorePresetTransaction();
-}
-
-async function beginPresetTransaction(member) {
-    restorePresetTransaction();
-    const binding = normalizedPresetBinding(member);
-    if (!binding) return true;
-    const { manager, oaiSettings, settingsToUpdate } = await nativePresetModules();
-    const currentName = String(manager?.getSelectedPresetName?.() || '').trim();
-    const preset = binding.presetName === currentName
-        ? cloneData(oaiSettings)
-        : manager?.getCompletionPresetByName?.(binding.presetName);
-    if (!manager || !oaiSettings || !preset) {
-        showRuntimeToast(`绑定的酒馆预设“${binding.presetName}”已不存在，本次仍使用当前预设`, 'warning', 4200);
+    if (expectedToken !== null && prepared?.token !== expectedToken) {
+        restorePresetTransaction(expectedToken);
         return false;
     }
+    preparedSelection = null;
+    restorePreparedRuntime(prepared);
+    restorePresetTransaction(prepared?.token ?? expectedToken);
+    return !!prepared;
+}
+
+function applyMemberConnectionSettings(oaiSettings, member) {
+    const source = providerSource(member?.provider);
+    oaiSettings.chat_completion_source = source;
+    // The final URL/Key are patched into generateData at SETTINGS_READY. Keeping
+    // them out of oai_settings avoids SillyTavern's reverse-proxy confirmation.
+    oaiSettings.reverse_proxy = '';
+    oaiSettings.proxy_password = '';
+    if (source === 'makersuite') oaiSettings.google_model = String(member?.model || '');
+    else if (source === 'claude') oaiSettings.claude_model = String(member?.model || '');
+    else oaiSettings.openai_model = String(member?.model || '');
+}
+
+async function beginPresetTransaction(member, token) {
+    const binding = normalizedPresetBinding(member);
+    const { manager, oaiSettings, settingsToUpdate } = await nativePresetModules();
+    if (!oaiSettings) throw new Error('当前酒馆未提供聊天补全设置');
+    if (token !== null && token !== undefined && preparedSelection?.token !== token) {
+        return { active: false, presetApplied: false, reason: 'stale' };
+    }
+    const currentName = String(manager?.getSelectedPresetName?.() || '').trim();
+    const preset = !binding
+        ? null
+        : (binding.presetName === currentName
+            ? cloneData(oaiSettings)
+            : manager?.getCompletionPresetByName?.(binding.presetName));
+    const presetAvailable = !binding || (!!manager && !!preset);
 
     const ctx = context();
     const extensionSettings = ctx.extensionSettings || window.extension_settings || {};
@@ -221,6 +242,7 @@ async function beginPresetTransaction(member) {
         : [];
     const select = document.getElementById('settings_preset_openai');
     const transaction = {
+        token,
         oaiSettings,
         settingsSnapshot: cloneData(oaiSettings),
         select,
@@ -237,54 +259,66 @@ async function beginPresetTransaction(member) {
     activePresetTransaction = transaction;
 
     try {
-        for (const [presetKey, mapping] of Object.entries(settingsToUpdate || {})) {
-            const settingsKey = mapping?.[1];
-            if (!settingsKey) continue;
-            if (presetKey === 'extensions') {
-                oaiSettings[settingsKey] = cloneData(preset.extensions) || {};
-            } else if (preset[presetKey] !== undefined) {
-                oaiSettings[settingsKey] = cloneData(preset[presetKey]);
+        if (binding && presetAvailable) {
+            for (const [presetKey, mapping] of Object.entries(settingsToUpdate || {})) {
+                const settingsKey = mapping?.[1];
+                if (!settingsKey) continue;
+                if (presetKey === 'extensions') {
+                    oaiSettings[settingsKey] = cloneData(preset.extensions) || {};
+                } else if (preset[presetKey] !== undefined) {
+                    oaiSettings[settingsKey] = cloneData(preset[presetKey]);
+                }
             }
-        }
-        oaiSettings.preset_settings_openai = binding.presetName;
-        if (select) {
-            const value = manager.findPreset?.(binding.presetName);
-            if (value != null) select.value = String(value);
+            oaiSettings.preset_settings_openai = binding.presetName;
+            if (select) {
+                const value = manager.findPreset?.(binding.presetName);
+                if (value != null) select.value = String(value);
+            }
+
+            const promptOrder = findPromptOrder(oaiSettings);
+            for (const item of promptOrder) {
+                const identifier = String(item?.identifier || '');
+                if (Object.prototype.hasOwnProperty.call(binding.promptStates, identifier)) {
+                    item.enabled = binding.promptStates[identifier];
+                }
+            }
+
+            updateScriptStates(globalScripts, binding.regexStates, 'global');
+            updateScriptStates(scopedScripts, binding.regexStates, 'scoped');
+            const presetScripts = oaiSettings?.extensions?.regex_scripts;
+            updateScriptStates(presetScripts, binding.regexStates, 'preset');
+
+            const avatar = ctx.characters?.[ctx.characterId]?.avatar;
+            const needsScoped = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('scoped:') && enabled);
+            if (needsScoped && avatar) {
+                if (!Array.isArray(extensionSettings.character_allowed_regex)) extensionSettings.character_allowed_regex = [];
+                if (!extensionSettings.character_allowed_regex.includes(avatar)) extensionSettings.character_allowed_regex.push(avatar);
+            }
+            const needsPreset = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('preset:') && enabled);
+            if (needsPreset) {
+                if (!extensionSettings.preset_allowed_regex || typeof extensionSettings.preset_allowed_regex !== 'object') {
+                    extensionSettings.preset_allowed_regex = {};
+                }
+                if (!Array.isArray(extensionSettings.preset_allowed_regex.openai)) extensionSettings.preset_allowed_regex.openai = [];
+                if (!extensionSettings.preset_allowed_regex.openai.includes(binding.presetName)) {
+                    extensionSettings.preset_allowed_regex.openai.push(binding.presetName);
+                }
+            }
         }
 
-        const promptOrder = findPromptOrder(oaiSettings);
-        for (const item of promptOrder) {
-            const identifier = String(item?.identifier || '');
-            if (Object.prototype.hasOwnProperty.call(binding.promptStates, identifier)) {
-                item.enabled = binding.promptStates[identifier];
-            }
+        applyMemberConnectionSettings(oaiSettings, member);
+        if (binding && !presetAvailable) {
+            console.warn(`[KarmaFlip] 绑定预设不存在，已保留当前预设并仅应用 API 类型与模型：${binding.presetName}`);
+            showRuntimeToast(`绑定的酒馆预设“${binding.presetName}”已不存在，本次仍使用当前预设`, 'warning', 4200);
         }
-
-        updateScriptStates(globalScripts, binding.regexStates, 'global');
-        updateScriptStates(scopedScripts, binding.regexStates, 'scoped');
-        const presetScripts = oaiSettings?.extensions?.regex_scripts;
-        updateScriptStates(presetScripts, binding.regexStates, 'preset');
-
-        const avatar = ctx.characters?.[ctx.characterId]?.avatar;
-        const needsScoped = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('scoped:') && enabled);
-        if (needsScoped && avatar) {
-            if (!Array.isArray(extensionSettings.character_allowed_regex)) extensionSettings.character_allowed_regex = [];
-            if (!extensionSettings.character_allowed_regex.includes(avatar)) extensionSettings.character_allowed_regex.push(avatar);
-        }
-        const needsPreset = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('preset:') && enabled);
-        if (needsPreset) {
-            if (!extensionSettings.preset_allowed_regex || typeof extensionSettings.preset_allowed_regex !== 'object') {
-                extensionSettings.preset_allowed_regex = {};
-            }
-            if (!Array.isArray(extensionSettings.preset_allowed_regex.openai)) extensionSettings.preset_allowed_regex.openai = [];
-            if (!extensionSettings.preset_allowed_regex.openai.includes(binding.presetName)) {
-                extensionSettings.preset_allowed_regex.openai.push(binding.presetName);
-            }
-        }
-        transaction.timeoutId = setTimeout(restorePresetTransaction, PRESET_TRANSACTION_TTL);
-        return true;
+        transaction.timeoutId = setTimeout(() => restorePresetTransaction(token), PRESET_TRANSACTION_TTL);
+        return {
+            active: true,
+            presetApplied: presetAvailable,
+            reason: presetAvailable ? 'applied' : 'missing-preset',
+        };
     } catch (error) {
-        restorePresetTransaction();
+        restorePresetTransaction(token);
         throw error;
     }
 }
@@ -699,12 +733,12 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         if (pending.forced && !pending.locked) {
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
         }
-        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: response.status });
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: response.status, statusText: response.statusText });
         return { ok: true, response };
     }
     const count = markRequestFailure(pending.state, member);
     const detail = businessFailure.detail;
-    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: response.status, responseBody: detail });
+    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: response.status, statusText: response.statusText, responseBody: detail });
     return { ok: false, response, count };
 }
 
@@ -917,9 +951,10 @@ function bindRetryFetch(onStatus) {
 }
 
 async function prepareGenerationSelection(type, options, dryRun) {
-    discardPreparedSelection();
     if (dryRun || !TEXT_GENERATION_TYPES.has(String(type || ''))) return;
     if (options?.quietImage === true || String(options?.quiet_prompt || '').trim()) return;
+
+    discardPreparedSelection();
 
     const state = loadState();
     if (state.enabled === false) return;
@@ -936,7 +971,9 @@ async function prepareGenerationSelection(type, options, dryRun) {
         replaceObject(runtimeScope, runtimeSnapshot);
         return;
     }
-    preparedSelection = {
+    const token = ++preparationSequence;
+    const prepared = {
+        token,
         state,
         runtimeScope,
         runtimeSnapshot,
@@ -948,13 +985,19 @@ async function prepareGenerationSelection(type, options, dryRun) {
         messageId,
         expiresAt: Date.now() + PENDING_TTL,
     };
-    await beginPresetTransaction(picked.member);
+    preparedSelection = prepared;
+    try {
+        prepared.presetResult = await beginPresetTransaction(picked.member, token);
+    } catch (error) {
+        discardPreparedSelection(token);
+        throw error;
+    }
 }
 
 function matchingPreparedSelection(type, messageId) {
     const prepared = preparedSelection;
     if (!prepared || prepared.expiresAt < Date.now()) {
-        if (prepared) discardPreparedSelection();
+        if (prepared) discardPreparedSelection(prepared.token);
         return null;
     }
     if (prepared.type !== String(type) || Number(prepared.messageId) !== Number(messageId)) {
@@ -964,7 +1007,7 @@ function matchingPreparedSelection(type, messageId) {
             preparedMessageId: prepared.messageId,
             currentMessageId: messageId,
         });
-        discardPreparedSelection();
+        discardPreparedSelection(prepared.token);
         return null;
     }
     preparedSelection = null;
@@ -973,23 +1016,24 @@ function matchingPreparedSelection(type, messageId) {
 
 function bindGenerationLifecycle(eventSource, eventTypes) {
     if (generationLifecycleBound) return;
-    const startedEvent = eventTypes.GENERATION_STARTED;
-    if (!startedEvent) return;
-    eventSource.on(startedEvent, async (type, options, dryRun) => {
+    const prepareEvent = eventTypes.GENERATION_AFTER_COMMANDS || eventTypes.GENERATION_STARTED;
+    if (!prepareEvent) return;
+    const prepare = async (type, options, dryRun) => {
         try {
             await prepareGenerationSelection(type, options, dryRun);
         } catch (error) {
-            discardPreparedSelection();
             console.error('[KarmaFlip] 发送前应用绑定预设失败:', error);
             showRuntimeToast('绑定预设应用失败，本次继续使用酒馆当前预设', 'error', 4200);
         }
-    });
-    const finish = () => {
-        if (preparedSelection) discardPreparedSelection();
-        else restorePresetTransaction();
     };
-    if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, finish);
-    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, finish);
+    if (typeof eventSource.makeLast === 'function') eventSource.makeLast(prepareEvent, prepare);
+    else eventSource.on(prepareEvent, prepare);
+    if (eventTypes.GENERATION_STOPPED) {
+        eventSource.on(eventTypes.GENERATION_STOPPED, () => {
+            const prepared = preparedSelection;
+            if (prepared) discardPreparedSelection(prepared.token);
+        });
+    }
     generationLifecycleBound = true;
 }
 
@@ -1014,6 +1058,7 @@ function bindChatCompletionSettings(onStatus) {
 
     eventSource.on(eventName, async (generateData) => {
         const startedAt = nowMs();
+        let prepared = null;
         try {
             const state = loadState();
             if (state.enabled === false) return;
@@ -1022,11 +1067,10 @@ function bindChatCompletionSettings(onStatus) {
             const pool = getActivePool(state);
             const type = generationType(generateData);
             const messageId = targetMessageId(type);
-            const prepared = matchingPreparedSelection(type, messageId);
+            prepared = matchingPreparedSelection(type, messageId);
             if (isMvuAnalysisRequest(generateData)) {
                 if (prepared) {
                     restorePreparedRuntime(prepared);
-                    restorePresetTransaction();
                 }
                 return;
             }
@@ -1041,7 +1085,15 @@ function bindChatCompletionSettings(onStatus) {
 
             const member = picked.member;
             const requestPool = prepared?.pool || override?.pool || pool;
-            if (!prepared) await beginPresetTransaction(member);
+            if (!prepared && normalizedPresetBinding(member)) {
+                console.warn('[KarmaFlip] 本轮未在提示词构建前取得预选，绑定预设不会在 READY 阶段补切。', {
+                    type,
+                    messageId,
+                    apiName: member?.name || '',
+                    presetName: normalizedPresetBinding(member)?.presetName || '',
+                });
+                showRuntimeToast('本轮未能在提示词构建前应用绑定预设，已继续使用酒馆当前预设', 'warning', 4200);
+            }
             patchGenerateData(generateData, member);
 
             generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock');
@@ -1052,6 +1104,7 @@ function bindChatCompletionSettings(onStatus) {
         } catch (error) {
             reportRuntimeError('CHAT_COMPLETION_SETTINGS_READY 处理失败', error);
         } finally {
+            if (prepared?.token !== undefined) restorePresetTransaction(prepared.token);
             warnSlowPath('chat-settings', startedAt, PERF_WARN_MS.chatSettings);
         }
     });

@@ -1836,7 +1836,6 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     scrollbar-gutter: stable;
 }
 
-.kf-log-detail-url,
 .kf-log-detail-response {
     display: block;
 }
