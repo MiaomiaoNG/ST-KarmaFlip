@@ -126,6 +126,27 @@ function replaceObject(target, snapshot) {
     Object.assign(target, cloneData(snapshot) || {});
 }
 
+function snapshotProperties(target, keys) {
+    const snapshot = new Map();
+    if (!target || typeof target !== 'object') return snapshot;
+    for (const key of keys) {
+        if (!key || snapshot.has(key)) continue;
+        snapshot.set(key, {
+            existed: Object.prototype.hasOwnProperty.call(target, key),
+            value: target[key],
+        });
+    }
+    return snapshot;
+}
+
+function restoreProperties(target, snapshot) {
+    if (!target || typeof target !== 'object' || !(snapshot instanceof Map)) return;
+    for (const [key, item] of snapshot) {
+        if (item?.existed) target[key] = item.value;
+        else delete target[key];
+    }
+}
+
 function findPromptOrder(settings) {
     const lists = Array.isArray(settings?.prompt_order) ? settings.prompt_order : [];
     return lists.find(item => String(item?.character_id) === '100001')?.order
@@ -173,15 +194,15 @@ function restorePresetTransaction(expectedToken = null) {
     if (!transaction) return false;
     if (transaction.timeoutId) clearTimeout(transaction.timeoutId);
     try {
-        replaceObject(transaction.oaiSettings, transaction.settingsSnapshot);
+        restoreProperties(transaction.oaiSettings, transaction.settingsSnapshot);
         if (transaction.select) transaction.select.value = transaction.selectedValue;
         restoreScriptStates(transaction.globalSnapshot);
         restoreScriptStates(transaction.scopedSnapshot);
         const ext = transaction.extensionSettings;
         if (ext) {
-            if (transaction.hadCharacterAllowed) ext.character_allowed_regex = cloneData(transaction.characterAllowedSnapshot);
+            if (transaction.hadCharacterAllowed) ext.character_allowed_regex = transaction.characterAllowedSnapshot;
             else delete ext.character_allowed_regex;
-            if (transaction.hadPresetAllowed) ext.preset_allowed_regex = cloneData(transaction.presetAllowedSnapshot);
+            if (transaction.hadPresetAllowed) ext.preset_allowed_regex = transaction.presetAllowedSnapshot;
             else delete ext.preset_allowed_regex;
         }
     } catch (error) {
@@ -230,7 +251,7 @@ async function beginPresetTransaction(member, token) {
     const preset = !binding
         ? null
         : (binding.presetName === currentName
-            ? cloneData(oaiSettings)
+            ? oaiSettings
             : manager?.getCompletionPresetByName?.(binding.presetName));
     const presetAvailable = !binding || (!!manager && !!preset);
 
@@ -241,17 +262,32 @@ async function beginPresetTransaction(member, token) {
         ? ctx.characters[ctx.characterId].data.extensions.regex_scripts
         : [];
     const select = document.getElementById('settings_preset_openai');
+    const changedSettingKeys = new Set([
+        'chat_completion_source',
+        'reverse_proxy',
+        'proxy_password',
+        'openai_model',
+        'google_model',
+        'claude_model',
+    ]);
+    if (binding && presetAvailable) {
+        for (const mapping of Object.values(settingsToUpdate || {})) {
+            const settingsKey = mapping?.[1];
+            if (settingsKey) changedSettingKeys.add(settingsKey);
+        }
+        changedSettingKeys.add('preset_settings_openai');
+    }
     const transaction = {
         token,
         oaiSettings,
-        settingsSnapshot: cloneData(oaiSettings),
+        settingsSnapshot: snapshotProperties(oaiSettings, changedSettingKeys),
         select,
         selectedValue: select?.value,
         extensionSettings,
         hadCharacterAllowed: Object.prototype.hasOwnProperty.call(extensionSettings, 'character_allowed_regex'),
         hadPresetAllowed: Object.prototype.hasOwnProperty.call(extensionSettings, 'preset_allowed_regex'),
-        characterAllowedSnapshot: cloneData(extensionSettings.character_allowed_regex),
-        presetAllowedSnapshot: cloneData(extensionSettings.preset_allowed_regex),
+        characterAllowedSnapshot: extensionSettings.character_allowed_regex,
+        presetAllowedSnapshot: extensionSettings.preset_allowed_regex,
         globalSnapshot: snapshotScriptStates(globalScripts),
         scopedSnapshot: snapshotScriptStates(scopedScripts),
         timeoutId: null,
@@ -291,15 +327,20 @@ async function beginPresetTransaction(member, token) {
             const avatar = ctx.characters?.[ctx.characterId]?.avatar;
             const needsScoped = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('scoped:') && enabled);
             if (needsScoped && avatar) {
-                if (!Array.isArray(extensionSettings.character_allowed_regex)) extensionSettings.character_allowed_regex = [];
+                extensionSettings.character_allowed_regex = Array.isArray(extensionSettings.character_allowed_regex)
+                    ? [...extensionSettings.character_allowed_regex]
+                    : [];
                 if (!extensionSettings.character_allowed_regex.includes(avatar)) extensionSettings.character_allowed_regex.push(avatar);
             }
             const needsPreset = Object.entries(binding.regexStates).some(([key, enabled]) => key.startsWith('preset:') && enabled);
             if (needsPreset) {
-                if (!extensionSettings.preset_allowed_regex || typeof extensionSettings.preset_allowed_regex !== 'object') {
-                    extensionSettings.preset_allowed_regex = {};
-                }
-                if (!Array.isArray(extensionSettings.preset_allowed_regex.openai)) extensionSettings.preset_allowed_regex.openai = [];
+                const currentAllowed = extensionSettings.preset_allowed_regex;
+                extensionSettings.preset_allowed_regex = currentAllowed && typeof currentAllowed === 'object'
+                    ? { ...currentAllowed }
+                    : {};
+                extensionSettings.preset_allowed_regex.openai = Array.isArray(currentAllowed?.openai)
+                    ? [...currentAllowed.openai]
+                    : [];
                 if (!extensionSettings.preset_allowed_regex.openai.includes(binding.presetName)) {
                     extensionSettings.preset_allowed_regex.openai.push(binding.presetName);
                 }

@@ -2892,10 +2892,6 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     display: none !important;
 }
 
-body:has(.kf-modal-overlay.kf-show) .kf-floating-root {
-    visibility: hidden;
-}
-
 .kf-floating-button {
     position: fixed;
     width: 46px;
@@ -3033,6 +3029,8 @@ body:has(.kf-modal-overlay.kf-show) .kf-floating-root {
 @media (max-width: 650px) {
     .kf-modal-overlay {
         padding: 8px;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     #kf-root,

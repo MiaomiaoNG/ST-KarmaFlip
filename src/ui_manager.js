@@ -60,7 +60,7 @@ let colorPickerDragging = false;
 let colorPickerDraft = { h: 0, s: 1, v: 1 };
 let floatingViewportController = null;
 let floatingVisibilityTimer = null;
-let floatingModalObserver = null;
+let apiOverrideOpenScheduled = false;
 let presetBindingDraft = null;
 let presetBindingCatalog = null;
 const THEME_PRESETS = {
@@ -81,6 +81,24 @@ function normalizeProvider(provider) {
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function syncFloatingModalVisibility() {
+    const root = document.getElementById(FLOATING_ROOT_ID);
+    if (!root) return;
+    const suppressed = MODAL_IDS.some(id => document.getElementById(id)?.classList.contains('kf-show'));
+    root.hidden = suppressed;
+    root.setAttribute('aria-hidden', String(suppressed));
+}
+
+function showModal(id) {
+    document.getElementById(id)?.classList.add('kf-show');
+    syncFloatingModalVisibility();
+}
+
+function hideModal(id) {
+    document.getElementById(id)?.classList.remove('kf-show');
+    syncFloatingModalVisibility();
 }
 
 function hexToRgb(hex) {
@@ -199,7 +217,7 @@ function openColorPicker(targetId) {
     colorPickerDraft = rgbToHsv(hexToRgbArray(color));
     $('#kf-color-picker-title').text(targetId === 'kf-theme-underline' ? '选择主色调' : '选择辅色调');
     renderColorPicker();
-    $('#kf-color-picker-modal').addClass('kf-show');
+    showModal('kf-color-picker-modal');
     window.setTimeout(() => $('#kf-color-field').trigger('focus'), 0);
 }
 
@@ -907,7 +925,7 @@ function populateUpdateNotice() {
 function openUpdateNotice(state) {
     if (!shouldShowUpdateNotice(state)) return;
     populateUpdateNotice();
-    $('#kf-update-notice-modal').addClass('kf-show');
+    showModal('kf-update-notice-modal');
 }
 
 function confirmUpdateNotice(state) {
@@ -917,7 +935,7 @@ function confirmUpdateNotice(state) {
 
 function openMainPanel(state) {
     resetMainPanelKeyboardLock();
-    $('#kf-main-modal').addClass('kf-show');
+    showModal('kf-main-modal');
     rememberMainPanelBaseHeight();
     openUpdateNotice(state);
 }
@@ -931,7 +949,7 @@ function closeExtensionsMenu() {
 
 function closeMainPanel() {
     resetMainPanelKeyboardLock();
-    $('#kf-main-modal').removeClass('kf-show');
+    hideModal('kf-main-modal');
 }
 
 function focusApiEntriesEditorEntry(entryId) {
@@ -1044,15 +1062,57 @@ function toggleGlobalEnabled(state, setStatus) {
     setStatus(state.enabled !== false ? '插件已开启' : '插件已关闭');
 }
 
+function syncApiOverrideEntries(list, entries, selected) {
+    if (!list) return;
+    const buttons = [...list.children].filter(item => item.classList.contains('kf-api-override-option'));
+    const reusable = buttons.length === entries.length
+        && buttons.every((button, index) => button.dataset.entryId === String(entries[index]?.id || ''));
+    if (!reusable) {
+        const fragment = document.createDocumentFragment();
+        for (const entry of entries) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'kf-api-override-option';
+            button.dataset.entryId = String(entry.id || '');
+            const name = document.createElement('span');
+            name.className = 'kf-api-override-name';
+            const model = document.createElement('span');
+            model.className = 'kf-api-override-model';
+            button.append(name, model);
+            fragment.appendChild(button);
+        }
+        list.replaceChildren(fragment);
+    }
+    [...list.children].filter(item => item.classList.contains('kf-api-override-option')).forEach((button, index) => {
+        const entry = entries[index];
+        const selectable = !!String(entry?.apiUrl || '').trim() && !!String(entry?.model || '').trim();
+        button.classList.toggle('kf-selected', selected?.entryId === entry?.id);
+        button.disabled = !selectable;
+        button.querySelector('.kf-api-override-name').textContent = entry?.name || '未命名 API';
+        button.querySelector('.kf-api-override-model').textContent = entry?.model || '未选择模型';
+        let invalid = button.querySelector('.kf-api-override-invalid');
+        if (!selectable && !invalid) {
+            invalid = document.createElement('span');
+            invalid.className = 'kf-api-override-invalid';
+            button.appendChild(invalid);
+        }
+        if (invalid) {
+            invalid.textContent = '无URL或未选择模型';
+            invalid.hidden = selectable;
+        }
+    });
+}
+
 function renderApiOverrideModal(state) {
     const pool = getActivePool(state);
-    const list = $('#kf-api-override-list').empty();
+    const list = document.getElementById('kf-api-override-list');
     const message = $('#kf-api-override-message');
     const lockButton = $('#kf-api-override-lock');
     const restoreButton = $('#kf-api-override-restore');
     const startButton = $('#kf-api-override-start');
 
     if (state.enabled === false) {
+        list?.replaceChildren();
         message.text('插件未开启').show();
         lockButton.hide();
         restoreButton.hide();
@@ -1089,28 +1149,26 @@ function renderApiOverrideModal(state) {
         .prop('disabled', !override.lock && !selected);
     const entries = Array.isArray(pool.entries) ? pool.entries : [];
     if (!entries.length) {
+        list?.replaceChildren();
         message.text('当前组合没有 API 条目').show();
         return;
     }
 
-    for (const entry of entries) {
-        const hasUrl = !!String(entry.apiUrl || '').trim();
-        const hasModel = !!String(entry.model || '').trim();
-        const selectable = hasUrl && hasModel;
-        const isSelected = selected?.entryId === entry.id;
-        list.append(`
-            <button type="button" class="kf-api-override-option${isSelected ? ' kf-selected' : ''}" data-entry-id="${esc(entry.id)}" ${selectable ? '' : 'disabled'}>
-                <span class="kf-api-override-name">${esc(entry.name || '未命名 API')}</span>
-                <span class="kf-api-override-model">${esc(entry.model || '未选择模型')}</span>
-                ${selectable ? '' : '<span class="kf-api-override-invalid">无URL或未选择模型</span>'}
-            </button>
-        `);
-    }
+    syncApiOverrideEntries(list, entries, selected);
 }
 
 function openApiOverrideModal(state) {
     renderApiOverrideModal(state);
-    $('#kf-api-override-modal').addClass('kf-show');
+    showModal('kf-api-override-modal');
+}
+
+function scheduleApiOverrideModal(state) {
+    if (apiOverrideOpenScheduled || document.getElementById('kf-api-override-modal')?.classList.contains('kf-show')) return;
+    apiOverrideOpenScheduled = true;
+    nextFrame(() => {
+        apiOverrideOpenScheduled = false;
+        openApiOverrideModal(state);
+    });
 }
 
 function setPoolMode(state, nextMode, rerender, setStatus) {
@@ -1230,7 +1288,7 @@ function renderFloatingSkinChoices(selectedSkin) {
 
 function openFloatingSkinModal() {
     renderFloatingSkinChoices($('#kf-floating-skin').val());
-    $('#kf-floating-skin-modal').addClass('kf-show');
+    showModal('kf-floating-skin-modal');
 }
 
 function bindShortcutLongPress(target, clickAction, longPressAction) {
@@ -1511,7 +1569,7 @@ async function openPresetBindingModal(state, entry) {
     $('#kf-preset-binding-search').val('');
     $('.kf-preset-binding-tab').removeClass('kf-active').attr('aria-selected', 'false')
         .filter('[data-binding-tab="prompts"]').addClass('kf-active').attr('aria-selected', 'true');
-    $('#kf-preset-binding-modal').addClass('kf-show');
+    showModal('kf-preset-binding-modal');
     await refreshPresetBindingCatalog();
 }
 
@@ -1645,7 +1703,7 @@ function activateFloatingButton(state, rerender, setStatus) {
     } else if (action === 'power') {
         toggleGlobalEnabled(state, setStatus);
     } else if (action === 'api') {
-        openApiOverrideModal(state);
+        scheduleApiOverrideModal(state);
     } else if (action === 'panel') {
         openMainPanel(state);
     }
@@ -1750,8 +1808,6 @@ function teardownFloatingViewportListeners() {
     floatingViewportController = null;
     window.clearInterval(floatingVisibilityTimer);
     floatingVisibilityTimer = null;
-    floatingModalObserver?.disconnect?.();
-    floatingModalObserver = null;
     if (window.STKarmaFlip?.floatingCleanup === teardownFloatingViewportListeners) {
         delete window.STKarmaFlip.floatingCleanup;
     }
@@ -1766,20 +1822,6 @@ function bindFloatingViewportListeners(state) {
         window.addEventListener('resize', reposition, options);
         window.visualViewport?.addEventListener?.('resize', reposition, options);
         window.visualViewport?.addEventListener?.('scroll', reposition, options);
-    }
-    if (!floatingModalObserver) {
-        floatingModalObserver = new MutationObserver(() => {
-            const root = document.getElementById(FLOATING_ROOT_ID);
-            if (!root) return;
-            const suppressed = isFloatingButtonSuppressed();
-            root.hidden = suppressed;
-            root.setAttribute('aria-hidden', String(suppressed));
-            if (!suppressed) window.requestAnimationFrame(() => ensureFloatingButtonVisible(state));
-        });
-        for (const id of MODAL_IDS) {
-            const modal = document.getElementById(id);
-            if (modal) floatingModalObserver.observe(modal, { attributes: true, attributeFilter: ['class'] });
-        }
     }
     window.clearInterval(floatingVisibilityTimer);
     floatingVisibilityTimer = window.setInterval(() => ensureFloatingButtonVisible(state), 3000);
@@ -2816,7 +2858,7 @@ function openSequenceModal(summary, rows) {
     for (const row of rows || []) {
         $('<div class="kf-sequence-item"></div>').text(row).appendTo(list);
     }
-    $('#kf-sequence-modal').addClass('kf-show');
+    showModal('kf-sequence-modal');
 }
 
 function showSequenceCheck(state) {
@@ -3033,7 +3075,7 @@ async function importFromFile(state, file, rerender, setStatus) {
 
 function closeModal(id) {
     if (id === 'kf-main-modal') resetMainPanelKeyboardLock();
-    $(`#${id}`).removeClass('kf-show');
+    hideModal(id);
 }
 
 function hoistModals() {
@@ -3061,7 +3103,7 @@ function openFailureDecision(message, actions) {
             if (settled) return;
             settled = true;
             window.clearTimeout(timer);
-            modal.removeClass('kf-show');
+            hideModal('kf-failure-modal');
             box.off('click.kfFailure');
             modal.off('click.kfFailureCancel');
             $(document).off('keydown.kfFailureCancel');
@@ -3085,7 +3127,7 @@ function openFailureDecision(message, actions) {
             if (event.key === 'Escape') finish('cancel', true);
         });
         timer = window.setTimeout(() => finish('cancel', true), 8000);
-        modal.addClass('kf-show');
+        showModal('kf-failure-modal');
     });
 }
 
@@ -3119,7 +3161,8 @@ function showToast(message, type = 'info', timeout = 2800) {
 window.STKarmaFlip.showToast = showToast;
 
 function closeDropdown() {
-    $('#kf-dropdown-modal').removeClass('kf-show kf-api-name-picker');
+    $('#kf-dropdown-modal').removeClass('kf-api-name-picker');
+    hideModal('kf-dropdown-modal');
     $('#kf-mobile-options').empty();
 }
 
@@ -3175,7 +3218,7 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
         row.remove();
         if (!nextOptions.length) closeDropdown();
     });
-    $('#kf-dropdown-modal').addClass('kf-show');
+    showModal('kf-dropdown-modal');
 }
 
 function openGroupPicker(state, rerender) {
@@ -3192,7 +3235,7 @@ function openGroupPicker(state, rerender) {
 function openRenamePoolModal(state) {
     const pool = getActivePool(state);
     $('#kf-rename-pool-input').val(pool.name || '');
-    $('#kf-rename-pool-modal').addClass('kf-show');
+    showModal('kf-rename-pool-modal');
     window.setTimeout(() => $('#kf-rename-pool-input').trigger('focus').trigger('select'), 0);
 }
 
@@ -3783,12 +3826,12 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => {
         populateSettingsControls(state);
-        $('#kf-settings-modal').addClass('kf-show');
+        showModal('kf-settings-modal');
     });
     $('#kf-main-close').off('click.kf').on('click.kf', () => {
         if (!closeApiEntriesEditor(state, rerender, setStatus)) closeMainPanel();
     });
-    $('#kf-btn-import-export').off('click.kf').on('click.kf', () => $('#kf-import-export-modal').addClass('kf-show'));
+    $('#kf-btn-import-export').off('click.kf').on('click.kf', () => showModal('kf-import-export-modal'));
     $('#kf-import-export-close').off('click.kf').on('click.kf', () => closeModal('kf-import-export-modal'));
     $('#kf-export-current-pool').off('click.kf').on('click.kf', () => {
         exportCurrentPool(state);
@@ -3819,7 +3862,7 @@ function bind(state, rerender, setStatus) {
         }
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
-        $('#kf-log-modal').addClass('kf-show');
+        showModal('kf-log-modal');
         renderLogs(state);
     });
     $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('kf-log-modal'));
@@ -3852,7 +3895,7 @@ function bind(state, rerender, setStatus) {
     $('#kf-btn-theme').off('click.kf').on('click.kf', () => {
         populateThemeControls(state);
         applyTheme(state);
-        $('#kf-theme-modal').addClass('kf-show');
+        showModal('kf-theme-modal');
     });
     $('#kf-theme-close,#kf-theme-cancel').off('click.kf').on('click.kf', () => closeThemeModal(state));
     $('#kf-settings-close,#kf-settings-cancel').off('click.kf').on('click.kf', () => {
@@ -3973,7 +4016,7 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-theme-confirm').off('click.kf').on('click.kf', () => saveThemeFromModal(state, setStatus));
     $('#kf-settings-confirm').off('click.kf').on('click.kf', () => saveFailureSettingsFromModal(state, rerender, setStatus));
-    $('#kf-clear-all-data').off('click.kf').on('click.kf', () => $('#kf-reset-data-modal').addClass('kf-show'));
+    $('#kf-clear-all-data').off('click.kf').on('click.kf', () => showModal('kf-reset-data-modal'));
     $('#kf-reset-data-cancel').off('click.kf').on('click.kf', () => closeModal('kf-reset-data-modal'));
     $('#kf-reset-data-confirm').off('click.kf').on('click.kf', () => {
         clearRuntimeHookState();
@@ -4010,7 +4053,7 @@ function bind(state, rerender, setStatus) {
             else if (this.id === 'kf-update-notice-modal') confirmUpdateNotice(state);
             else if (this.id === 'kf-main-modal' && apiEntriesEditorOpen) closeApiEntriesEditor(state, rerender, setStatus);
             else if (this.id === 'kf-preset-binding-modal') closePresetBindingModal();
-            else $(this).removeClass('kf-show');
+            else hideModal(this.id);
         });
     $('.kf-modal-overlay .kf-modal-box').not('#kf-failure-modal .kf-modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
         .on('pointerdown.kf mousedown.kf touchstart.kf click.kf', function (event) {
