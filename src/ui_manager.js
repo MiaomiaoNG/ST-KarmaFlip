@@ -1,4 +1,4 @@
-import { clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
+import { bindApiOverrideToFloor, clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
 import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
@@ -31,6 +31,7 @@ const FLOATING_EDGE_GAP = 8;
 const FLOATING_DRAG_THRESHOLD = 8;
 const SHORTCUT_LONG_PRESS_MS = 560;
 const SHORTCUT_PRESS_MOVE_THRESHOLD = 8;
+const API_OVERRIDE_OPEN_GUARD_MS = 500;
 const FLOATING_SKIN_DEFAULT = 'emperor-metal';
 const FLOATING_SKINS = Object.freeze([
     { id: 'emperor-metal', name: '帝王之气', kind: 'metal', url: new URL('../assets/floating-icons/emperor.png', import.meta.url).href },
@@ -61,6 +62,7 @@ let colorPickerDraft = { h: 0, s: 1, v: 1 };
 let floatingViewportController = null;
 let floatingVisibilityTimer = null;
 let apiOverrideOpenScheduled = false;
+let apiOverrideOpenGuardUntil = 0;
 let presetBindingDraft = null;
 let presetBindingCatalog = null;
 const THEME_PRESETS = {
@@ -522,8 +524,8 @@ function updateChatShortcut(state) {
     if (apiButton.length) {
         apiButton.attr('role', 'button');
         apiButton.attr('tabindex', '0');
-        apiButton.attr('title', '点击指定下个请求 API；长按顺序切换当前锁定 API');
-        apiButton.attr('aria-label', '指定下个请求 API，长按顺序切换当前锁定 API');
+        apiButton.attr('title', '点击指定下个请求 API；长按顺序切换当前指定 API');
+        apiButton.attr('aria-label', '指定下个请求 API，长按顺序切换当前指定 API');
         apiButton.html('<i class="fa-regular fa-circle-stop"></i>');
     }
 }
@@ -1162,13 +1164,25 @@ function openApiOverrideModal(state) {
     showModal('kf-api-override-modal');
 }
 
-function scheduleApiOverrideModal(state) {
+function scheduleApiOverrideModal(state, protectOpeningGesture = false) {
     if (apiOverrideOpenScheduled || document.getElementById('kf-api-override-modal')?.classList.contains('kf-show')) return;
     apiOverrideOpenScheduled = true;
     nextFrame(() => {
         apiOverrideOpenScheduled = false;
+        if (protectOpeningGesture) apiOverrideOpenGuardUntil = Date.now() + API_OVERRIDE_OPEN_GUARD_MS;
         openApiOverrideModal(state);
     });
+}
+
+function bindApiOverrideOpenGuard() {
+    const modal = document.getElementById('kf-api-override-modal');
+    if (!modal || modal.dataset.kfOpenGuardBound === 'true') return;
+    modal.dataset.kfOpenGuardBound = 'true';
+    modal.addEventListener('click', event => {
+        if (Date.now() > apiOverrideOpenGuardUntil) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }, true);
 }
 
 function setPoolMode(state, nextMode, rerender, setStatus) {
@@ -1190,19 +1204,32 @@ function setPoolMode(state, nextMode, rerender, setStatus) {
     if (equalized) rerender();
 }
 
-function cycleLockedApi(state, setStatus) {
-    const lock = getApiOverrideState(state).lock;
-    if (!lock) {
-        showToast('当前聊天尚未锁定 API，请先在指定 API 窗口中选择并锁定', 'warning', 3200);
-        setStatus('当前聊天尚未锁定 API');
-        return false;
+function cycleSpecifiedApi(state, setStatus) {
+    const override = getApiOverrideState(state);
+    const source = override.lock ? 'lock' : (override.pending ? 'pending' : (override.floorBinding ? 'floor' : ''));
+    const current = override.lock || override.pending || override.floorBinding;
+    if (!current) {
+        const pool = getActivePool(state);
+        const firstEntry = (pool?.entries || []).find(entry =>
+            String(entry?.apiUrl || '').trim() && String(entry?.model || '').trim());
+        if (!firstEntry) {
+            showToast('当前组合中没有 URL 和模型完整的 API', 'warning', 3200);
+            setStatus('当前组合没有可指定的 API');
+            return false;
+        }
+        setPendingApiOverride(state, pool.id, firstEntry.id);
+        if ($('#kf-api-override-modal').hasClass('kf-show')) renderApiOverrideModal(state);
+        const label = `${firstEntry.name || '未命名 API'} / ${firstEntry.model}`;
+        showToast(`已从第一项开始指定 API：${label}`, 'info', 2600);
+        setStatus(`已指定 API：${firstEntry.name || firstEntry.model}`);
+        return true;
     }
-    const pool = (state.pools || []).find(item => String(item?.id) === String(lock.poolId));
+    const pool = (state.pools || []).find(item => String(item?.id) === String(current.poolId));
     const entries = Array.isArray(pool?.entries) ? pool.entries : [];
-    const currentIndex = entries.findIndex(entry => String(entry?.id) === String(lock.entryId));
+    const currentIndex = entries.findIndex(entry => String(entry?.id) === String(current.entryId));
     if (!pool || currentIndex < 0) {
-        showToast('当前锁定的 API 已不存在，请重新选择锁定 API', 'error', 3600);
-        setStatus('当前锁定的 API 已不存在');
+        showToast('当前指定的 API 已不存在，请重新选择 API', 'error', 3600);
+        setStatus('当前指定的 API 已不存在');
         return false;
     }
 
@@ -1214,21 +1241,28 @@ function cycleLockedApi(state, setStatus) {
         break;
     }
     if (!nextEntry) {
-        showToast('当前锁定组合中没有其他 URL 和模型完整的 API', 'warning', 3200);
+        showToast('当前指定组合中没有其他 URL 和模型完整的 API', 'warning', 3200);
         setStatus('没有其他可顺序切换的 API');
         return false;
     }
 
-    const nextLock = setApiLock(state, pool.id, nextEntry.id);
-    if (!nextLock) {
-        showToast('当前没有可绑定的聊天，无法切换锁定 API', 'warning', 3200);
-        return false;
+    if (source === 'lock') {
+        const nextLock = setApiLock(state, pool.id, nextEntry.id);
+        if (!nextLock) {
+            showToast('当前没有可绑定的聊天，无法切换锁定 API', 'warning', 3200);
+            return false;
+        }
+        persistHot(state);
+    } else if (source === 'floor') {
+        bindApiOverrideToFloor(state, pool.id, nextEntry.id, current.messageId);
+    } else {
+        setPendingApiOverride(state, pool.id, nextEntry.id);
     }
-    persistHot(state);
     if ($('#kf-api-override-modal').hasClass('kf-show')) renderApiOverrideModal(state);
     const label = `${nextEntry.name || '未命名 API'} / ${nextEntry.model}`;
-    showToast(`已顺序切换锁定 API：${label}`, 'info', 2600);
-    setStatus(`已顺序切换锁定 API：${nextEntry.name || nextEntry.model}`);
+    const sourceLabel = source === 'lock' ? '锁定 API' : (source === 'floor' ? '本楼层指定 API' : '待执行指定 API');
+    showToast(`已顺序切换${sourceLabel}：${label}`, 'info', 2600);
+    setStatus(`已顺序切换${sourceLabel}：${nextEntry.name || nextEntry.model}`);
     return true;
 }
 
@@ -1246,7 +1280,7 @@ function bindChatShortcut(state, rerender, setStatus) {
     bindShortcutLongPress(
         apiButton,
         () => openApiOverrideModal(state),
-        () => cycleLockedApi(state, setStatus),
+        () => cycleSpecifiedApi(state, setStatus),
     );
 }
 
@@ -1681,7 +1715,7 @@ function updateFloatingButton(state) {
     const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
     const skin = normalizeFloatingSkin(state.shortcuts?.floatingSkin);
     const label = action === 'api'
-        ? '点击指定下个请求 API；长按顺序切换当前锁定 API'
+        ? '点击指定下个请求 API；长按顺序切换当前指定 API'
         : floatingActionLabel(action);
     if (button.dataset.skin !== skin) {
         button.dataset.skin = skin;
@@ -1695,7 +1729,7 @@ function updateFloatingButton(state) {
     setThemeVars(button, state.theme || {});
 }
 
-function activateFloatingButton(state, rerender, setStatus) {
+function activateFloatingButton(state, rerender, setStatus, options = {}) {
     const action = normalizeFloatingAction(state.shortcuts?.floatingAction);
     if (action === 'mode') {
         const pool = getActivePool(state);
@@ -1703,7 +1737,7 @@ function activateFloatingButton(state, rerender, setStatus) {
     } else if (action === 'power') {
         toggleGlobalEnabled(state, setStatus);
     } else if (action === 'api') {
-        scheduleApiOverrideModal(state);
+        scheduleApiOverrideModal(state, options.protectOpeningGesture === true);
     } else if (action === 'panel') {
         openMainPanel(state);
     }
@@ -1742,7 +1776,7 @@ function bindFloatingButton(button, state, rerender, setStatus) {
                 if (!drag || drag.pointerId !== pointerId || drag.moved) return;
                 drag.longPressTimer = null;
                 drag.longPressed = true;
-                cycleLockedApi(state, setStatus);
+                cycleSpecifiedApi(state, setStatus);
                 updateFloatingButton(state);
             }, SHORTCUT_LONG_PRESS_MS);
         }
@@ -1784,7 +1818,7 @@ function bindFloatingButton(button, state, rerender, setStatus) {
             const now = Date.now();
             if (now - lastTapAt > 500) {
                 lastTapAt = now;
-                activateFloatingButton(state, rerender, setStatus);
+                activateFloatingButton(state, rerender, setStatus, { protectOpeningGesture: true });
             }
         }
     };
@@ -3592,6 +3626,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
 }
 
 function bind(state, rerender, setStatus) {
+    bindApiOverrideOpenGuard();
     $('#kf-pool-picker-display').prop('readonly', true).off('click.kf keydown.kf').on('click.kf', function () {
         openGroupPicker(state, rerender);
     }).on('keydown.kf', function (event) {
@@ -3957,7 +3992,8 @@ function bind(state, rerender, setStatus) {
         const entryId = String($(this).attr('data-entry-id') || '');
         const entry = (pool.entries || []).find(item => item.id === entryId);
         if (!entry || !String(entry.apiUrl || '').trim() || !String(entry.model || '').trim()) return;
-        if (getApiOverrideState(state).lock) {
+        const override = getApiOverrideState(state);
+        if (override.lock) {
             const lock = setApiLock(state, pool.id, entry.id);
             if (!lock) {
                 showToast('当前没有可绑定的聊天，请先进入一个聊天窗口', 'warning', 3200);
@@ -3969,10 +4005,15 @@ function bind(state, rerender, setStatus) {
             setStatus(`已更换锁定 API：${entry.name || entry.model}`);
             return;
         }
-        setPendingApiOverride(state, pool.id, entry.id);
+        const updatesCurrentFloor = !override.pending && override.floorBinding?.poolId === pool.id;
+        if (updatesCurrentFloor) {
+            bindApiOverrideToFloor(state, pool.id, entry.id, override.floorBinding.messageId);
+        } else {
+            setPendingApiOverride(state, pool.id, entry.id);
+        }
         renderApiOverrideModal(state);
-        showToast(`已指定下个请求 API：${entry.name || '未命名 API'} / ${entry.model}`, 'info', 2600);
-        setStatus(`已指定 API：${entry.name || entry.model}`);
+        showToast(`${updatesCurrentFloor ? '已更换本楼层指定 API' : '已指定下个请求 API'}：${entry.name || '未命名 API'} / ${entry.model}`, 'info', 2600);
+        setStatus(`${updatesCurrentFloor ? '已更换本楼层指定 API' : '已指定 API'}：${entry.name || entry.model}`);
     });
     $('#kf-api-override-lock').off('click.kf').on('click.kf', () => {
         const override = getApiOverrideState(state);
