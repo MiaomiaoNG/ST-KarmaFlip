@@ -350,7 +350,7 @@ async function beginPresetTransaction(member, token) {
         applyMemberConnectionSettings(oaiSettings, member);
         if (binding && !presetAvailable) {
             console.warn(`[KarmaFlip] 绑定预设不存在，已保留当前预设并仅应用 API 类型与模型：${binding.presetName}`);
-            showRuntimeToast(`绑定的酒馆预设“${binding.presetName}”已不存在，本次仍使用当前预设`, 'warning', 4200);
+            showRuntimeToast(`绑定的酒馆预设“${binding.presetName}”产生变动，本次请求使用酒馆当前预设`, 'warning', 4200);
         }
         transaction.timeoutId = setTimeout(() => restorePresetTransaction(token), PRESET_TRANSACTION_TTL);
         return {
@@ -1143,7 +1143,7 @@ function bindChatCompletionSettings(onStatus) {
                     apiName: member?.name || '',
                     presetName: normalizedPresetBinding(member)?.presetName || '',
                 });
-                showRuntimeToast('本轮未能在提示词构建前应用绑定预设，已继续使用酒馆当前预设', 'warning', 4200);
+                showRuntimeToast('绑定预设未能及时应用，本轮已使用酒馆当前预设；API 配置仍正常生效。', 'warning', 4200);
             }
             patchGenerateData(generateData, member);
 
