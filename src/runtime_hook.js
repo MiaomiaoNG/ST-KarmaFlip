@@ -7,7 +7,7 @@ let fetchRetryBound = false;
 let generationLifecycleBound = false;
 let bindRetryTimer = null;
 let originalFetch = null;
-let preparedSelection = null;
+const preparedSelections = new Map();
 let activePresetTransaction = null;
 let nativePresetModulesPromise = null;
 let preparationSequence = 0;
@@ -15,7 +15,7 @@ const pendingRequests = new Map();
 
 export function clearRuntimeHookState() {
     pendingRequests.clear();
-    discardPreparedSelection();
+    discardAllPreparedSelections('runtime-clear');
 }
 
 const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
@@ -216,16 +216,39 @@ function restorePreparedRuntime(prepared) {
     replaceObject(prepared.runtimeScope, prepared.runtimeSnapshot);
 }
 
-function discardPreparedSelection(expectedToken = null) {
-    const prepared = preparedSelection;
-    if (expectedToken !== null && prepared?.token !== expectedToken) {
-        restorePresetTransaction(expectedToken);
+function newestPreparedSelection() {
+    return [...preparedSelections.values()].sort((a, b) => b.token - a.token)[0] || null;
+}
+
+function discardPreparedSelection(token, reason = 'discarded') {
+    const prepared = preparedSelections.get(token);
+    if (!prepared) {
+        restorePresetTransaction(token);
         return false;
     }
-    preparedSelection = null;
-    restorePreparedRuntime(prepared);
-    restorePresetTransaction(prepared?.token ?? expectedToken);
-    return !!prepared;
+    preparedSelections.delete(token);
+    const hasNewerSelection = [...preparedSelections.keys()].some(otherToken => otherToken > token);
+    if (hasNewerSelection) {
+        retryDebug('prepared-runtime-restore-skipped', { token, reason: 'newer-selection-exists', discardReason: reason });
+    } else {
+        restorePreparedRuntime(prepared);
+    }
+    restorePresetTransaction(token);
+    retryDebug('prepared-selection-discarded', { token, reason, type: prepared.type, messageId: prepared.messageId });
+    return true;
+}
+
+function discardAllPreparedSelections(reason) {
+    const tokens = [...preparedSelections.keys()].sort((a, b) => b - a);
+    for (const token of tokens) discardPreparedSelection(token, reason);
+    restorePresetTransaction();
+}
+
+function cleanupPreparedSelections() {
+    const now = Date.now();
+    for (const prepared of [...preparedSelections.values()]) {
+        if (prepared.expiresAt < now) discardPreparedSelection(prepared.token, 'expired');
+    }
 }
 
 function applyMemberConnectionSettings(oaiSettings, member) {
@@ -244,8 +267,15 @@ async function beginPresetTransaction(member, token) {
     const binding = normalizedPresetBinding(member);
     const { manager, oaiSettings, settingsToUpdate } = await nativePresetModules();
     if (!oaiSettings) throw new Error('当前酒馆未提供聊天补全设置');
-    if (token !== null && token !== undefined && preparedSelection?.token !== token) {
+    if (token !== null && token !== undefined && !preparedSelections.has(token)) {
         return { active: false, presetApplied: false, reason: 'stale' };
+    }
+    const activeOwner = activePresetTransaction?.token;
+    if (activeOwner !== null && activeOwner !== undefined && activeOwner !== token) {
+        restorePresetTransaction(activeOwner);
+        const superseded = preparedSelections.get(activeOwner);
+        if (superseded) superseded.presetResult = { active: false, presetApplied: false, reason: 'superseded' };
+        retryDebug('preset-transaction-superseded', { previousToken: activeOwner, nextToken: token });
     }
     const currentName = String(manager?.getSelectedPresetName?.() || '').trim();
     const preset = !binding
@@ -1004,7 +1034,7 @@ async function prepareGenerationSelection(type, options, dryRun) {
     if (dryRun || !TEXT_GENERATION_TYPES.has(String(type || ''))) return;
     if (options?.quietImage === true || String(options?.quiet_prompt || '').trim()) return;
 
-    discardPreparedSelection();
+    cleanupPreparedSelections();
 
     const state = loadState();
     if (state.enabled === false) return;
@@ -1035,33 +1065,34 @@ async function prepareGenerationSelection(type, options, dryRun) {
         messageId,
         expiresAt: Date.now() + PENDING_TTL,
     };
-    preparedSelection = prepared;
+    preparedSelections.set(token, prepared);
     try {
         prepared.presetResult = await beginPresetTransaction(picked.member, token);
     } catch (error) {
-        discardPreparedSelection(token);
+        discardPreparedSelection(token, 'preset-application-error');
         throw error;
     }
 }
 
 function matchingPreparedSelection(type, messageId) {
-    const prepared = preparedSelection;
-    if (!prepared || prepared.expiresAt < Date.now()) {
-        if (prepared) discardPreparedSelection(prepared.token);
-        return null;
-    }
-    if (prepared.type !== String(type) || !compatiblePreparedMessageId(prepared.messageId, messageId)) {
-        retryDebug('prepared-selection-mismatch', {
-            preparedType: prepared.type,
+    cleanupPreparedSelections();
+    const prepared = [...preparedSelections.values()]
+        .sort((a, b) => b.token - a.token)
+        .find(item => item.type === String(type) && compatiblePreparedMessageId(item.messageId, messageId));
+    if (!prepared) {
+        const newest = newestPreparedSelection();
+        retryDebug('prepared-selection-unmatched', {
             currentType: String(type),
-            preparedMessageId: prepared.messageId,
             currentMessageId: messageId,
-            messageIdDelta: Number(messageId) - Number(prepared.messageId),
+            available: preparedSelections.size,
+            newestType: newest?.type,
+            newestMessageId: newest?.messageId,
+            newestMessageIdDelta: newest ? Number(messageId) - Number(newest.messageId) : null,
         });
-        discardPreparedSelection(prepared.token);
         return null;
     }
-    preparedSelection = null;
+    preparedSelections.delete(prepared.token);
+    retryDebug('prepared-selection-claimed', { token: prepared.token, type: prepared.type, messageId: prepared.messageId });
     return prepared;
 }
 
@@ -1080,9 +1111,25 @@ function bindGenerationLifecycle(eventSource, eventTypes) {
     if (typeof eventSource.makeLast === 'function') eventSource.makeLast(prepareEvent, prepare);
     else eventSource.on(prepareEvent, prepare);
     if (eventTypes.GENERATION_STOPPED) {
-        eventSource.on(eventTypes.GENERATION_STOPPED, () => {
-            const prepared = preparedSelection;
-            if (prepared) discardPreparedSelection(prepared.token);
+        eventSource.on(eventTypes.GENERATION_STOPPED, (...args) => {
+            cleanupPreparedSelections();
+            const stoppedType = args
+                .map(value => typeof value === 'string' ? value : value?.type)
+                .find(value => TEXT_GENERATION_TYPES.has(String(value || '')));
+            if (!stoppedType) {
+                if (preparedSelections.size === 1) {
+                    const solePrepared = newestPreparedSelection();
+                    discardPreparedSelection(solePrepared.token, 'generation-stopped-sole-selection');
+                    return;
+                }
+                retryDebug('generation-stopped-unscoped', { pendingSelections: preparedSelections.size });
+                return;
+            }
+            const messageId = targetMessageId(stoppedType);
+            const prepared = [...preparedSelections.values()]
+                .sort((a, b) => b.token - a.token)
+                .find(item => item.type === stoppedType && compatiblePreparedMessageId(item.messageId, messageId));
+            if (prepared) discardPreparedSelection(prepared.token, 'generation-stopped');
         });
     }
     generationLifecycleBound = true;
@@ -1118,13 +1165,11 @@ function bindChatCompletionSettings(onStatus) {
             const pool = getActivePool(state);
             const type = generationType(generateData);
             const messageId = targetMessageId(type);
-            prepared = matchingPreparedSelection(type, messageId);
             if (isMvuAnalysisRequest(generateData)) {
-                if (prepared) {
-                    restorePreparedRuntime(prepared);
-                }
+                retryDebug('skip-mvu-before-prepared-claim', { type, messageId });
                 return;
             }
+            prepared = matchingPreparedSelection(type, messageId);
             const override = prepared?.override ?? findApiOverride(state, pool, messageId);
             if (override?.invalid) return;
             if (!prepared && !override && (!Array.isArray(pool?.entries) || !validRuntimeEntries(pool).length)) return;
@@ -1136,12 +1181,16 @@ function bindChatCompletionSettings(onStatus) {
 
             const member = picked.member;
             const requestPool = prepared?.pool || override?.pool || pool;
-            if (!prepared && normalizedPresetBinding(member)) {
+            const binding = normalizedPresetBinding(member);
+            const presetMissedTiming = !prepared
+                || ['stale', 'superseded'].includes(prepared?.presetResult?.reason);
+            if (binding && presetMissedTiming) {
                 console.warn('[KarmaFlip] 本轮未在提示词构建前取得预选，绑定预设不会在 READY 阶段补切。', {
                     type,
                     messageId,
                     apiName: member?.name || '',
-                    presetName: normalizedPresetBinding(member)?.presetName || '',
+                    presetName: binding.presetName,
+                    reason: prepared?.presetResult?.reason || 'missing-preselection',
                 });
                 showRuntimeToast('绑定预设未能及时应用，本轮已使用酒馆当前预设；API 配置仍正常生效。', 'warning', 4200);
             }

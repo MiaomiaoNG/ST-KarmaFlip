@@ -29,7 +29,7 @@ const KarmaFlip = (() => {
     }
 
     async function init() {
-        console.log(`[${moduleName}] Initializing...`);
+        console.log(`[KarmaFlip] [${moduleName}] Initializing...`);
 
         const html = await $.get(`${extensionFolderPath}layout-v3.html`);
         $('.kf-inline-drawer').remove();
@@ -43,7 +43,7 @@ const KarmaFlip = (() => {
         await revealLayoutWhenStyled(root, guardedNodes);
         runAfterStartup(() => installRuntimeHook(setStatus));
 
-        console.log(`[${moduleName}] Loaded.`);
+        console.log(`[KarmaFlip] [${moduleName}] Loaded.`);
     }
 
     return { init };
