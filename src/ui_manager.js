@@ -9,13 +9,14 @@ const STRUCTURE_SAVE_DELAY = 5000;
 const UPDATE_NOTICE_VERSION = '1.2.7';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
+2026年8月12日更新内容：
 1. 重做插件美化，具体操作可以看帖子说明；
 2. 新增“导出全部”；
 3. 新增“快捷方式-指定API”功能，可以快速指定下轮请求API，长按“指定下个API”的快捷方式或悬浮图标可以快速切换API；
 4. 新增悬浮图标，可设置指定悬浮图标的快捷功能；
 5. API条目可以绑定预设，请求对应API条目时自动切换；
 
-2026年8月12日`;
+`;
 
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
@@ -40,6 +41,9 @@ const FLOATING_SKINS = Object.freeze([
     { id: 'crown', name: '皇冠', kind: 'image', url: new URL('../assets/floating-icons/crown.png', import.meta.url).href },
     { id: 'emperor-cat', name: '吾皇猫', kind: 'image', url: new URL('../assets/floating-icons/emperor-cat.png', import.meta.url).href },
     { id: 'elsa', name: '艾莎', kind: 'image', url: new URL('../assets/floating-icons/elsa.png', import.meta.url).href },
+    { id: 'gemini', name: '哈基米', kind: 'image', url: new URL('../assets/floating-icons/gemini.png', import.meta.url).href },
+    { id: 'gpt', name: 'GPT', kind: 'image', url: new URL('../assets/floating-icons/gpt.png', import.meta.url).href },
+    { id: 'honey-jar', name: '蜂蜜罐', kind: 'image', url: new URL('../assets/floating-icons/honey-jar.png', import.meta.url).href },
 ]);
 const QR_ASSISTANT_LEGACY_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID];
 const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID, CHAT_API_WRAPPER_ID];
