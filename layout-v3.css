@@ -2,6 +2,11 @@
     display: contents;
 }
 
+html.kf-fullscreen-app {
+    --kf-safe-top: env(safe-area-inset-top, 0px);
+    --kf-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 .kf-icon-sprite {
     position: absolute;
     width: 0;
@@ -124,7 +129,7 @@
     align-items: center;
     justify-content: center;
     width: 100vw;
-    height: 100dvh;
+    height: var(--kf-visible-viewport-height, 100dvh);
     padding: 18px 14px;
     background: rgba(23, 32, 45, 0.28);
     backdrop-filter: blur(8px);
@@ -166,8 +171,8 @@
 #kf-main-modal .kf-main-box {
     --kf-entry-side-width: 72px;
     width: min(100%, 572px);
-    height: min(calc(100dvh - 36px), 820px);
-    max-height: calc(100dvh - 36px);
+    height: min(calc(var(--kf-visible-viewport-height, 100dvh) - 36px - var(--kf-safe-top, 0px) - var(--kf-safe-bottom, 0px)), 820px);
+    max-height: calc(var(--kf-visible-viewport-height, 100dvh) - 36px - var(--kf-safe-top, 0px) - var(--kf-safe-bottom, 0px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -2882,7 +2887,7 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     z-index: 30001;
     width: 100vw;
     height: 100vh;
-    height: 100dvh;
+    height: var(--kf-visible-viewport-height, 100dvh);
     pointer-events: none;
     transform: none;
     contain: none;
@@ -2999,19 +3004,19 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     transform: rotate(30deg) scale(1.5);
 }
 
+.kf-floating-skin-lavender {
+    transform-origin: center;
+    transform: rotate(-45deg) scale(2.0);
+}
+
 .kf-floating-skin-emperor-cat {
     width: 40px;
     height: 40px;
 }
 
-.kf-floating-skin-elsa {
-    transform-origin: center;
-    transform: rotate(45deg) scale(2.1);
-}
-
 .kf-floating-skin-preview-visual.kf-floating-skin-q-scepter,
 .kf-floating-skin-preview-visual.kf-floating-skin-crown,
-.kf-floating-skin-preview-visual.kf-floating-skin-elsa {
+.kf-floating-skin-preview-visual.kf-floating-skin-lavender {
     transform: none;
 }
 
@@ -3020,7 +3025,6 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     color: var(--primary-strong, #0f66dc) !important;
     opacity: 1;
 }
-
 .kf-floating-button.kf-dragging {
     cursor: grabbing;
     opacity: 1;
@@ -3045,8 +3049,8 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     #kf-main-modal .kf-main-box {
         width: 92vw;
         max-width: 92vw;
-        height: calc(100dvh - 16px);
-        max-height: calc(100dvh - 16px);
+        height: calc(var(--kf-visible-viewport-height, 100dvh) - 16px - var(--kf-safe-top, 0px) - var(--kf-safe-bottom, 0px));
+        max-height: calc(var(--kf-visible-viewport-height, 100dvh) - 16px - var(--kf-safe-top, 0px) - var(--kf-safe-bottom, 0px));
     }
 
     .kf-main-header {

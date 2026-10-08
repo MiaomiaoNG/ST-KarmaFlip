@@ -6,26 +6,31 @@ import { makeId, nextFrame, replaceNode } from './compat.js';
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.7';
+const UPDATE_NOTICE_VERSION = '1.2.8';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-2026年8月12日更新内容：
-1. 重做插件美化，具体操作可以看帖子说明；
-2. 新增“导出全部”；
-3. 新增“快捷方式-指定API”功能，可以快速指定下轮请求API，长按“指定下个API”的快捷方式或悬浮图标可以快速切换API；
-4. 新增悬浮图标，可设置指定悬浮图标的快捷功能；
-5. API条目可以绑定预设，请求对应API条目时自动切换；
+2026年10月8日更新内容：
+ 重做了插件美化，具体操作可以看帖子说明；
+2. 界面尺寸额外适配全屏美化；
+3. 尝试修复QR按钮不跟随主题颜色的问题；
+4. 把丑的悬浮图标下了，换了个新的漂亮的；
+5. 尝试修复点击插头重新连接时，插件概率不接管的BUG
 
 `;
 
 const LEGACY_CHAT_SHORTCUT_WRAPPER_ID = 'kf-chat-toggle-wrapper';
 const LEGACY_CHAT_SHORTCUT_BUTTON_ID = 'kf-chat-toggle-btn';
-const CHAT_POWER_WRAPPER_ID = 'kf-chat-power-wrapper';
-const CHAT_MODE_WRAPPER_ID = 'kf-chat-mode-wrapper';
-const CHAT_API_WRAPPER_ID = 'kf-chat-api-wrapper';
-const CHAT_POWER_BUTTON_ID = 'kf-chat-power-btn';
-const CHAT_MODE_BUTTON_ID = 'kf-chat-mode-btn';
-const CHAT_API_BUTTON_ID = 'kf-chat-api-btn';
+const CHAT_SHORTCUTS = Object.freeze([
+    { key: 'power', wrapperId: 'kf-chat-power-wrapper', buttonId: 'kf-chat-power-btn', groupName: 'API随机临幸：插件开关', qrIconClass: 'fa-solid fa-power-off', isEnabled: state => state.shortcuts?.powerEnabled !== false },
+    { key: 'mode', wrapperId: 'kf-chat-mode-wrapper', buttonId: 'kf-chat-mode-btn', groupName: 'API随机临幸：模式切换', qrIconClass: 'fa-solid fa-shuffle', isEnabled: state => state.shortcuts?.modeEnabled !== false },
+    { key: 'api', wrapperId: 'kf-chat-api-wrapper', buttonId: 'kf-chat-api-btn', groupName: 'API随机临幸：指定API', qrIconClass: 'fa-solid fa-bullseye', isEnabled: state => state.shortcuts?.apiEnabled === true },
+]);
+const CHAT_POWER_WRAPPER_ID = CHAT_SHORTCUTS[0].wrapperId;
+const CHAT_MODE_WRAPPER_ID = CHAT_SHORTCUTS[1].wrapperId;
+const CHAT_API_WRAPPER_ID = CHAT_SHORTCUTS[2].wrapperId;
+const CHAT_POWER_BUTTON_ID = CHAT_SHORTCUTS[0].buttonId;
+const CHAT_MODE_BUTTON_ID = CHAT_SHORTCUTS[1].buttonId;
+const CHAT_API_BUTTON_ID = CHAT_SHORTCUTS[2].buttonId;
 const FLOATING_ROOT_ID = 'kf-floating-root';
 const FLOATING_BUTTON_ID = 'kf-floating-button';
 const FLOATING_EDGE_GAP = 8;
@@ -40,7 +45,7 @@ const FLOATING_SKINS = Object.freeze([
     { id: 'q-scepter', name: 'Q版权杖', kind: 'image', url: new URL('../assets/floating-icons/q-scepter.png', import.meta.url).href },
     { id: 'crown', name: '皇冠', kind: 'image', url: new URL('../assets/floating-icons/crown.png', import.meta.url).href },
     { id: 'emperor-cat', name: '吾皇猫', kind: 'image', url: new URL('../assets/floating-icons/emperor-cat.png', import.meta.url).href },
-    { id: 'elsa', name: '艾莎', kind: 'image', url: new URL('../assets/floating-icons/elsa.png', import.meta.url).href },
+    { id: 'lavender', name: '手绘薰衣草', kind: 'image', url: new URL('../assets/floating-icons/lavender.png', import.meta.url).href },
     { id: 'gemini', name: '哈基米', kind: 'image', url: new URL('../assets/floating-icons/gemini.png', import.meta.url).href },
     { id: 'gpt', name: 'GPT', kind: 'image', url: new URL('../assets/floating-icons/gpt.png', import.meta.url).href },
     { id: 'honey-jar', name: '蜂蜜罐', kind: 'image', url: new URL('../assets/floating-icons/honey-jar.png', import.meta.url).href },
@@ -69,6 +74,7 @@ let apiOverrideOpenScheduled = false;
 let apiOverrideOpenGuardUntil = 0;
 let presetBindingDraft = null;
 let presetBindingCatalog = null;
+let fullscreenViewportController = null;
 const THEME_PRESETS = {
     default: { primary: '#1677ff', secondary: '#ffffff' },
     'mist-purple': { primary: '#7659e8', secondary: '#fbfaff' },
@@ -392,32 +398,15 @@ function applyQrAssistantRefresh() {
 }
 
 function enabledQrAssistantButtons(state) {
-    const modeEnabled = state.shortcuts?.modeEnabled !== false;
-    const powerEnabled = state.shortcuts?.powerEnabled !== false;
-    const apiEnabled = state.shortcuts?.apiEnabled === true;
-    const buttons = [];
-    if (powerEnabled) {
-        buttons.push({
-            dom_id: CHAT_POWER_WRAPPER_ID,
-            group_name: 'API随机临幸：插件开关',
-            button_name: svgDataImage(emperorSvg({ imageSafe: true }), 'API随机临幸插件开关'),
-        });
-    }
-    if (modeEnabled) {
-        buttons.push({
-            dom_id: CHAT_MODE_WRAPPER_ID,
-            group_name: 'API随机临幸：模式切换',
-            button_name: svgDataImage(lotterySvg({ imageSafe: true }), 'API随机临幸模式切换'),
-        });
-    }
-    if (apiEnabled) {
-        buttons.push({
-            dom_id: CHAT_API_WRAPPER_ID,
-            group_name: 'API随机临幸：指定API',
-            button_name: '<i class="fa-regular fa-circle-stop"></i>',
-        });
-    }
-    return buttons;
+    // QR Assistant consumes a Font Awesome class string, then renders the final themed icon.
+    // This matches the registration approach in “快捷中控 v1.8”.
+    return CHAT_SHORTCUTS
+        .filter(shortcut => shortcut.isEnabled(state))
+        .map(shortcut => ({
+            dom_id: shortcut.wrapperId,
+            group_name: shortcut.groupName,
+            button_name: shortcut.qrIconClass,
+        }));
 }
 
 function registerQrAssistantShortcuts(state) {
@@ -490,10 +479,7 @@ function syncQrAssistantManagedVisibility(wrapper, button, hasQrAssistant) {
 }
 
 function updateChatShortcut(state) {
-    const modeEnabled = state.shortcuts?.modeEnabled !== false;
-    const powerEnabled = state.shortcuts?.powerEnabled !== false;
-    const apiEnabled = state.shortcuts?.apiEnabled === true;
-    if (!modeEnabled && !powerEnabled && !apiEnabled) {
+    if (!CHAT_SHORTCUTS.some(shortcut => shortcut.isEnabled(state))) {
         document.getElementById(LEGACY_CHAT_SHORTCUT_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
@@ -506,9 +492,9 @@ function updateChatShortcut(state) {
     const powerButton = $(`#${CHAT_POWER_BUTTON_ID}`);
     const modeButton = $(`#${CHAT_MODE_BUTTON_ID}`);
     const apiButton = $(`#${CHAT_API_BUTTON_ID}`);
-    if (!powerEnabled) powerButton.remove();
-    if (!modeEnabled) modeButton.remove();
-    if (!apiEnabled) apiButton.remove();
+    if (!CHAT_SHORTCUTS[0].isEnabled(state)) powerButton.remove();
+    if (!CHAT_SHORTCUTS[1].isEnabled(state)) modeButton.remove();
+    if (!CHAT_SHORTCUTS[2].isEnabled(state)) apiButton.remove();
     if (powerButton.length) {
         powerButton.attr('role', 'button');
         powerButton.attr('tabindex', '0');
@@ -676,14 +662,6 @@ function scheduleShortcutArtifactCleanup() {
     window.setTimeout(cleanupLegacyChatShortcutArtifacts, 300);
 }
 
-function svgDataImage(svg, alt) {
-    const compact = String(svg || '').replace(/\s+/g, ' ').trim();
-    const encoded = encodeURIComponent(compact)
-        .replace(/'/g, '%27')
-        .replace(/"/g, '%22');
-    return `<img class="kf-chat-shortcut-img" src="data:image/svg+xml,${encoded}" alt="${esc(alt)}" />`;
-}
-
 function getInlineReplyHost() {
     return document.querySelector('#qr--bar .qr--buttons')
         || document.querySelector('#qr--bar');
@@ -787,10 +765,11 @@ function scheduleChatShortcutRetry(state, rerender, setStatus) {
 }
 
 function ensureChatShortcut(state, rerender, setStatus) {
-    const modeEnabled = state.shortcuts?.modeEnabled !== false;
-    const powerEnabled = state.shortcuts?.powerEnabled !== false;
-    const apiEnabled = state.shortcuts?.apiEnabled === true;
-    if (!modeEnabled && !powerEnabled && !apiEnabled) {
+    const [powerShortcut, modeShortcut, apiShortcut] = CHAT_SHORTCUTS;
+    const powerEnabled = powerShortcut.isEnabled(state);
+    const modeEnabled = modeShortcut.isEnabled(state);
+    const apiEnabled = apiShortcut.isEnabled(state);
+    if (!CHAT_SHORTCUTS.some(shortcut => shortcut.isEnabled(state))) {
         cleanupLegacyChatShortcutArtifacts();
         document.getElementById(CHAT_POWER_WRAPPER_ID)?.remove();
         document.getElementById(CHAT_MODE_WRAPPER_ID)?.remove();
@@ -847,7 +826,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
         powerWrapper?.remove();
         powerWrapper = null;
     } else {
-        if (!powerWrapper) powerWrapper = createChatShortcutWrapper(CHAT_POWER_WRAPPER_ID);
+        if (!powerWrapper) powerWrapper = createChatShortcutWrapper(powerShortcut.wrapperId);
         if (powerShell.parentElement !== powerWrapper) powerWrapper.appendChild(powerShell);
         bindQrWrapperProxy(powerWrapper, CHAT_POWER_BUTTON_ID);
     }
@@ -856,7 +835,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
         modeWrapper?.remove();
         modeWrapper = null;
     } else {
-        if (!modeWrapper) modeWrapper = createChatShortcutWrapper(CHAT_MODE_WRAPPER_ID);
+        if (!modeWrapper) modeWrapper = createChatShortcutWrapper(modeShortcut.wrapperId);
         if (modeShell.parentElement !== modeWrapper) modeWrapper.appendChild(modeShell);
         bindQrWrapperProxy(modeWrapper, CHAT_MODE_BUTTON_ID);
     }
@@ -865,7 +844,7 @@ function ensureChatShortcut(state, rerender, setStatus) {
         apiWrapper?.remove();
         apiWrapper = null;
     } else {
-        if (!apiWrapper) apiWrapper = createChatShortcutWrapper(CHAT_API_WRAPPER_ID);
+        if (!apiWrapper) apiWrapper = createChatShortcutWrapper(apiShortcut.wrapperId);
         if (apiShell.parentElement !== apiWrapper) apiWrapper.appendChild(apiShell);
         bindQrWrapperProxy(apiWrapper, CHAT_API_BUTTON_ID);
     }
@@ -4240,8 +4219,35 @@ function bind(state, rerender, setStatus) {
     });
 }
 
+function syncFullscreenViewport() {
+    const root = document.documentElement;
+    const fullscreenApp = document.fullscreenElement
+        || window.matchMedia?.('(display-mode: fullscreen)')?.matches
+        || window.matchMedia?.('(display-mode: standalone)')?.matches
+        || window.navigator?.standalone === true;
+    root.classList.toggle('kf-fullscreen-app', !!fullscreenApp);
+    if (!fullscreenApp) {
+        root.style.removeProperty('--kf-visible-viewport-height');
+        return;
+    }
+    const height = Math.round(window.visualViewport?.height || window.innerHeight || 0);
+    if (height > 0) root.style.setProperty('--kf-visible-viewport-height', `${height}px`);
+}
+
+function bindFullscreenViewport() {
+    fullscreenViewportController?.abort();
+    fullscreenViewportController = new AbortController();
+    const options = { passive: true, signal: fullscreenViewportController.signal };
+    window.addEventListener('resize', syncFullscreenViewport, options);
+    window.addEventListener('orientationchange', syncFullscreenViewport, options);
+    document.addEventListener('fullscreenchange', syncFullscreenViewport, { signal: fullscreenViewportController.signal });
+    window.visualViewport?.addEventListener?.('resize', syncFullscreenViewport, options);
+    window.visualViewport?.addEventListener?.('scroll', syncFullscreenViewport, options);
+    syncFullscreenViewport();
+}
 export async function initUI(setStatus) {
     hoistModals();
+    bindFullscreenViewport();
     window.STKarmaFlip?.floatingCleanup?.();
     document.getElementById(FLOATING_ROOT_ID)?.remove();
     const state = loadState();
