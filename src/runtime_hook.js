@@ -5,6 +5,10 @@ import { makeId } from './compat.js';
 let chatSettingsBound = false;
 let fetchRetryBound = false;
 let generationLifecycleBound = false;
+let boundEventSource = null;
+let boundEventTypes = null;
+let rebindQueued = false;
+const runtimeEventBindings = [];
 let bindRetryTimer = null;
 let originalFetch = null;
 const preparedSelections = new Map();
@@ -1096,8 +1100,34 @@ function matchingPreparedSelection(type, messageId) {
     return prepared;
 }
 
+function removeRuntimeEventBindings() {
+    for (const binding of runtimeEventBindings.splice(0)) {
+        binding.eventSource?.removeListener?.(binding.eventName, binding.handler);
+    }
+    chatSettingsBound = false;
+    generationLifecycleBound = false;
+    boundEventSource = null;
+    boundEventTypes = null;
+}
+
+function addRuntimeEventBinding(eventSource, eventName, handler, makeLast = false) {
+    if (!eventName) return;
+    if (makeLast && typeof eventSource.makeLast === 'function') eventSource.makeLast(eventName, handler);
+    else eventSource.on(eventName, handler);
+    runtimeEventBindings.push({ eventSource, eventName, handler });
+}
+
+function queueRuntimeRebind(onStatus, reason) {
+    if (rebindQueued) return;
+    rebindQueued = true;
+    Promise.resolve().then(() => {
+        rebindQueued = false;
+        bindChatCompletionSettings(onStatus, true, reason);
+    });
+}
+
 function bindGenerationLifecycle(eventSource, eventTypes) {
-    if (generationLifecycleBound) return;
+    if (generationLifecycleBound && boundEventSource === eventSource) return;
     const prepareEvent = eventTypes.GENERATION_AFTER_COMMANDS || eventTypes.GENERATION_STARTED;
     if (!prepareEvent) return;
     const prepare = async (type, options, dryRun) => {
@@ -1108,10 +1138,9 @@ function bindGenerationLifecycle(eventSource, eventTypes) {
             showRuntimeToast('绑定预设应用失败，本次继续使用酒馆当前预设', 'error', 4200);
         }
     };
-    if (typeof eventSource.makeLast === 'function') eventSource.makeLast(prepareEvent, prepare);
-    else eventSource.on(prepareEvent, prepare);
+    addRuntimeEventBinding(eventSource, prepareEvent, prepare, true);
     if (eventTypes.GENERATION_STOPPED) {
-        eventSource.on(eventTypes.GENERATION_STOPPED, (...args) => {
+        addRuntimeEventBinding(eventSource, eventTypes.GENERATION_STOPPED, (...args) => {
             cleanupPreparedSelections();
             const stoppedType = args
                 .map(value => typeof value === 'string' ? value : value?.type)
@@ -1135,8 +1164,7 @@ function bindGenerationLifecycle(eventSource, eventTypes) {
     generationLifecycleBound = true;
 }
 
-function bindChatCompletionSettings(onStatus) {
-    if (chatSettingsBound) return;
+function bindChatCompletionSettings(onStatus, force = false, reason = 'startup') {
     if (bindRetryTimer) {
         clearTimeout(bindRetryTimer);
         bindRetryTimer = null;
@@ -1146,15 +1174,18 @@ function bindChatCompletionSettings(onStatus) {
     const eventSource = ctx.eventSource;
     const eventTypes = ctx.event_types || {};
     const eventName = eventTypes.CHAT_COMPLETION_SETTINGS_READY;
-
     if (!eventSource?.on || !eventName) {
-        bindRetryTimer = setTimeout(() => bindChatCompletionSettings(onStatus), 1000);
+        if (!bindRetryTimer) bindRetryTimer = setTimeout(() => bindChatCompletionSettings(onStatus), 1000);
         return;
     }
+    if (!force && chatSettingsBound && boundEventSource === eventSource) return;
+    if (runtimeEventBindings.length) removeRuntimeEventBindings();
 
+    boundEventSource = eventSource;
+    boundEventTypes = eventTypes;
     bindGenerationLifecycle(eventSource, eventTypes);
 
-    eventSource.on(eventName, async (generateData) => {
+    addRuntimeEventBinding(eventSource, eventName, async (generateData) => {
         const startedAt = nowMs();
         let prepared = null;
         try {
@@ -1182,8 +1213,7 @@ function bindChatCompletionSettings(onStatus) {
             const member = picked.member;
             const requestPool = prepared?.pool || override?.pool || pool;
             const binding = normalizedPresetBinding(member);
-            const presetMissedTiming = !prepared
-                || ['stale', 'superseded'].includes(prepared?.presetResult?.reason);
+            const presetMissedTiming = !prepared || ['stale', 'superseded'].includes(prepared?.presetResult?.reason);
             if (binding && presetMissedTiming) {
                 console.warn('[KarmaFlip] 本轮未在提示词构建前取得预选，绑定预设不会在 READY 阶段补切。', {
                     type,
@@ -1195,7 +1225,6 @@ function bindChatCompletionSettings(onStatus) {
                 showRuntimeToast('绑定预设未能及时应用，本轮已使用酒馆当前预设；API 配置仍正常生效。', 'warning', 4200);
             }
             patchGenerateData(generateData, member);
-
             generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock');
             queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true });
             showModelAlert(state, member);
@@ -1209,10 +1238,20 @@ function bindChatCompletionSettings(onStatus) {
         }
     });
 
+    const rebindEvents = [
+        eventTypes.ONLINE_STATUS_CHANGED,
+        eventTypes.CONNECTION_PROFILE_LOADED,
+        eventTypes.CHATCOMPLETION_SOURCE_CHANGED,
+        eventTypes.MAIN_API_CHANGED,
+    ].filter(Boolean);
+    for (const rebindEvent of new Set(rebindEvents)) {
+        addRuntimeEventBinding(eventSource, rebindEvent, () => queueRuntimeRebind(onStatus, rebindEvent));
+    }
     chatSettingsBound = true;
+    console.debug('[KarmaFlip] runtime hooks bound:', reason);
 }
-
 export function installRuntimeHook(onStatus) {
     bindChatCompletionSettings(onStatus);
     bindRetryFetch(onStatus);
 }
+

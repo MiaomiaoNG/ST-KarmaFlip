@@ -42,13 +42,16 @@ const FLOATING_SKIN_DEFAULT = 'emperor-metal';
 const FLOATING_SKINS = Object.freeze([
     { id: 'emperor-metal', name: '帝王之气', kind: 'metal', url: new URL('../assets/floating-icons/emperor.png', import.meta.url).href },
     { id: 'emperor-primary', name: '天威难料', kind: 'primary', url: new URL('../assets/floating-icons/emperor.png', import.meta.url).href },
-    { id: 'q-scepter', name: 'Q版权杖', kind: 'image', url: new URL('../assets/floating-icons/q-scepter.png', import.meta.url).href },
-    { id: 'crown', name: '皇冠', kind: 'image', url: new URL('../assets/floating-icons/crown.png', import.meta.url).href },
     { id: 'emperor-cat', name: '吾皇猫', kind: 'image', url: new URL('../assets/floating-icons/emperor-cat.png', import.meta.url).href },
-    { id: 'lavender', name: '手绘薰衣草', kind: 'image', url: new URL('../assets/floating-icons/lavender.png', import.meta.url).href },
-    { id: 'gemini', name: '哈基米', kind: 'image', url: new URL('../assets/floating-icons/gemini.png', import.meta.url).href },
+    { id: 'gemini', name: 'Gemini', kind: 'image', url: new URL('../assets/floating-icons/gemini.png', import.meta.url).href },
     { id: 'gpt', name: 'GPT', kind: 'image', url: new URL('../assets/floating-icons/gpt.png', import.meta.url).href },
-    { id: 'honey-jar', name: '蜂蜜罐', kind: 'image', url: new URL('../assets/floating-icons/honey-jar.png', import.meta.url).href },
+    { id: 'claude', name: 'Claude', kind: 'image', url: new URL('../assets/floating-icons/claude.svg', import.meta.url).href },
+    { id: 'lavender', name: '薰衣草', kind: 'image', url: new URL('../assets/floating-icons/lavender.png', import.meta.url).href },
+    { id: 'carnation', name: '康乃馨', kind: 'image', url: new URL('../assets/floating-icons/carnation.png', import.meta.url).href },
+    { id: 'tulip', name: '郁金香', kind: 'image', url: new URL('../assets/floating-icons/tulip.png', import.meta.url).href },
+    { id: 'rose', name: '玫瑰', kind: 'image', url: new URL('../assets/floating-icons/rose.png', import.meta.url).href },
+    { id: 'jasmine', name: '茉莉', kind: 'image', url: new URL('../assets/floating-icons/jasmine.png', import.meta.url).href },
+    { id: 'red-spider-lily', name: '曼珠沙华', kind: 'image', url: new URL('../assets/floating-icons/red-spider-lily.png', import.meta.url).href },
 ]);
 const QR_ASSISTANT_LEGACY_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID];
 const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID, CHAT_API_WRAPPER_ID];
@@ -4282,3 +4285,4 @@ export async function initUI(setStatus) {
     }, 800);
     setStatus('已加载');
 }
+

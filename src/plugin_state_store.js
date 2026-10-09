@@ -186,7 +186,7 @@ function normalizeFloatingAction(action) {
 
 function normalizeFloatingSkin(skin) {
     const value = String(skin || 'emperor-metal').trim().toLowerCase();
-    return ['emperor-metal', 'emperor-primary', 'q-scepter', 'crown', 'emperor-cat', 'elsa', 'gemini', 'gpt', 'honey-jar', 'lavender'].includes(value)
+    return ['emperor-metal', 'emperor-primary', 'emperor-cat', 'gemini', 'gpt', 'claude', 'lavender', 'carnation', 'tulip', 'rose', 'jasmine', 'red-spider-lily'].includes(value)
         ? value
         : 'emperor-metal';
 }
@@ -914,3 +914,4 @@ export function pushLog(state, entry) {
     updateUsageStats(log);
     window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
 }
+
