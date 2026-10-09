@@ -543,10 +543,48 @@ function bindQrWrapperProxy(wrapper, buttonId) {
 }
 
 function bindShortcutActivation(target, action) {
+    let touchActive = false;
+    let touchStart = null;
+    let suppressClickUntil = 0;
+    const suppressGeneratedClick = () => {
+        suppressClickUntil = Date.now() + 800;
+    };
     target.off('.kfShortcut')
+        .on('touchstart.kfShortcut', function (event) {
+            const touch = event.touches?.[0];
+            if (!touch || event.touches.length !== 1) return;
+            touchActive = true;
+            touchStart = { x: Number(touch.clientX || 0), y: Number(touch.clientY || 0) };
+        })
+        .on('touchmove.kfShortcut', function (event) {
+            const touch = event.touches?.[0];
+            if (!touchActive || !touch || !touchStart) return;
+            const distance = Math.hypot(
+                Number(touch.clientX || 0) - touchStart.x,
+                Number(touch.clientY || 0) - touchStart.y,
+            );
+            if (distance > SHORTCUT_PRESS_MOVE_THRESHOLD) {
+                touchActive = false;
+                touchStart = null;
+            }
+        })
+        .on('touchend.kfShortcut', function (event) {
+            if (!touchActive) return;
+            touchActive = false;
+            touchStart = null;
+            event.preventDefault();
+            event.stopPropagation();
+            suppressGeneratedClick();
+            action(event);
+        })
+        .on('touchcancel.kfShortcut', () => {
+            touchActive = false;
+            touchStart = null;
+        })
         .on('click.kfShortcut', function (event) {
             event.preventDefault();
             event.stopPropagation();
+            if (Date.now() < suppressClickUntil) return;
             action(event);
         })
         .on('keydown.kfShortcut', function (event) {
@@ -556,7 +594,6 @@ function bindShortcutActivation(target, action) {
             action(event);
         });
 }
-
 function removeNodeIfPresent(node) {
     if (node?.parentNode) node.parentNode.removeChild(node);
 }
@@ -1313,7 +1350,13 @@ function openFloatingSkinModal() {
 
 function bindShortcutLongPress(target, clickAction, longPressAction) {
     let press = null;
-    let suppressClick = false;
+    let touchActive = false;
+    let touchMoved = false;
+    let longPressTriggered = false;
+    let suppressClickUntil = 0;
+    const suppressGeneratedClick = () => {
+        suppressClickUntil = Date.now() + 800;
+    };
     const clearPress = () => {
         if (press?.timer) window.clearTimeout(press.timer);
         press = null;
@@ -1322,7 +1365,8 @@ function bindShortcutLongPress(target, clickAction, longPressAction) {
         .on('pointerdown.kfShortcut', function (event) {
             if (event.button !== undefined && event.button !== 0) return;
             clearPress();
-            suppressClick = false;
+            touchMoved = false;
+            longPressTriggered = false;
             const pointerId = event.pointerId;
             press = {
                 pointerId,
@@ -1330,7 +1374,8 @@ function bindShortcutLongPress(target, clickAction, longPressAction) {
                 startY: Number(event.clientY || 0),
                 timer: window.setTimeout(() => {
                     if (!press || press.pointerId !== pointerId) return;
-                    suppressClick = true;
+                    longPressTriggered = true;
+                    suppressGeneratedClick();
                     press.timer = null;
                     longPressAction(event);
                 }, SHORTCUT_LONG_PRESS_MS),
@@ -1347,21 +1392,38 @@ function bindShortcutLongPress(target, clickAction, longPressAction) {
                 Number(event.clientX || 0) - press.startX,
                 Number(event.clientY || 0) - press.startY,
             );
-            if (distance > SHORTCUT_PRESS_MOVE_THRESHOLD) clearPress();
+            if (distance > SHORTCUT_PRESS_MOVE_THRESHOLD) {
+                if (touchActive) touchMoved = true;
+                clearPress();
+            }
         })
         .on('pointerup.kfShortcut pointercancel.kfShortcut lostpointercapture.kfShortcut', clearPress)
+        .on('touchstart.kfShortcut', function (event) {
+            if (event.touches?.length !== 1) return;
+            touchActive = true;
+        })
+        .on('touchend.kfShortcut', function (event) {
+            if (!touchActive) return;
+            touchActive = false;
+            event.preventDefault();
+            event.stopPropagation();
+            if (longPressTriggered || touchMoved) return;
+            suppressGeneratedClick();
+            clickAction(event);
+        })
+        .on('touchcancel.kfShortcut', () => {
+            touchActive = false;
+            touchMoved = true;
+        })
         .on('contextmenu.kfShortcut', function (event) {
-            if (!press && !suppressClick) return;
+            if (!press && Date.now() >= suppressClickUntil) return;
             event.preventDefault();
             event.stopPropagation();
         })
         .on('click.kfShortcut', function (event) {
             event.preventDefault();
             event.stopPropagation();
-            if (suppressClick) {
-                suppressClick = false;
-                return;
-            }
+            if (Date.now() < suppressClickUntil) return;
             clickAction(event);
         })
         .on('keydown.kfShortcut', function (event) {
@@ -1371,7 +1433,6 @@ function bindShortcutLongPress(target, clickAction, longPressAction) {
             clickAction(event);
         });
 }
-
 function cloneBooleanRecord(raw) {
     const result = {};
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
@@ -4285,4 +4346,3 @@ export async function initUI(setStatus) {
     }, 800);
     setStatus('已加载');
 }
-
