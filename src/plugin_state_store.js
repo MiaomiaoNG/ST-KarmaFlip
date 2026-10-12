@@ -186,7 +186,7 @@ function normalizeFloatingAction(action) {
 
 function normalizeFloatingSkin(skin) {
     const value = String(skin || 'emperor-metal').trim().toLowerCase();
-    return ['emperor-metal', 'emperor-primary', 'emperor-cat', 'gemini', 'gpt', 'claude', 'lavender', 'carnation', 'tulip', 'rose', 'jasmine', 'red-spider-lily'].includes(value)
+    return ['emperor-metal', 'emperor-primary', 'emperor-cat', 'gemini', 'gpt', 'claude', 'lavender', 'carnation', 'tulip', 'rose', 'jasmine', 'red-spider-lily', 'ash-rose', 'osmanthus', 'blue-plumbago'].includes(value)
         ? value
         : 'emperor-metal';
 }

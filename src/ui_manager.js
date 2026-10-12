@@ -52,6 +52,9 @@ const FLOATING_SKINS = Object.freeze([
     { id: 'rose', name: '玫瑰', kind: 'image', url: new URL('../assets/floating-icons/rose.png', import.meta.url).href },
     { id: 'jasmine', name: '茉莉', kind: 'image', url: new URL('../assets/floating-icons/jasmine.png', import.meta.url).href },
     { id: 'red-spider-lily', name: '曼珠沙华', kind: 'image', url: new URL('../assets/floating-icons/red-spider-lily.png', import.meta.url).href },
+    { id: 'ash-rose', name: '灰烬玫瑰', kind: 'image', url: new URL('../assets/floating-icons/ash-rose.png', import.meta.url).href },
+    { id: 'osmanthus', name: '桂花', kind: 'image', url: new URL('../assets/floating-icons/osmanthus.png', import.meta.url).href },
+    { id: 'blue-plumbago', name: '蓝雪花', kind: 'image', url: new URL('../assets/floating-icons/blue-plumbago.png', import.meta.url).href },
 ]);
 const QR_ASSISTANT_LEGACY_DOM_IDS = [LEGACY_CHAT_SHORTCUT_WRAPPER_ID, LEGACY_CHAT_SHORTCUT_BUTTON_ID];
 const QR_ASSISTANT_CURRENT_DOM_IDS = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID, CHAT_API_WRAPPER_ID];
