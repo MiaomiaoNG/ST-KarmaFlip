@@ -52,7 +52,7 @@ export function recordPluginError(kind, error = null, field = '') {
         const previous = index < 0 ? null : entries.splice(index, 1)[0];
         entries.unshift({ key, code: definition[0], stage: definition[1], message: definition[2],
             field: safeField, location, type, count: (previous?.count || 0) + 1,
-            time: new Date().toTimeString().slice(0, 8) });
+            timestamp: Date.now(), time: new Date().toTimeString().slice(0, 8) });
         entries.length = Math.min(entries.length, LIMIT);
         notify();
     } catch { /* Error reporting must not break generation. */ }
@@ -67,8 +67,8 @@ export function formatPluginError(entry) {
         + (entry.location ? ' @' + entry.location : '')
         + (entry.count > 1 ? ' ×' + entry.count : '');
 }
-export function diagnosticText() {
-    return VERSION + '\n' + (entries.length ? entries.map(formatPluginError).join('\n') : '未记录到插件内部错误');
+export function diagnosticText(items = entries) {
+    return VERSION + '\n' + (items.length ? items.map(formatPluginError).join('\n') : '未记录到插件内部错误');
 }
 export function clearDiagnostics() {
     entries.length = 0;

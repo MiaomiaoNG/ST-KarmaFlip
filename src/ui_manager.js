@@ -2534,7 +2534,40 @@ function completeErrorLogDetail(log) {
     return statusLabel || responseDetail;
 }
 
+function createPluginErrorRow(entry) {
+    const row = document.createElement('article');
+    row.className = 'kf-log-row';
+    row.dataset.kind = 'error';
+    const summary = document.createElement('div');
+    summary.className = 'kf-log-summary';
+    const badge = document.createElement('span');
+    badge.className = 'kf-log-badge kf-plugin-error-tag';
+    badge.textContent = '插件';
+    const stage = document.createElement('span');
+    stage.className = 'kf-log-api-name';
+    stage.textContent = entry.stage + ' · ' + entry.code;
+    const count = document.createElement('span');
+    count.className = 'kf-log-model';
+    count.textContent = entry.count > 1 ? '重复 ' + entry.count + ' 次' : '';
+    const time = document.createElement('span');
+    time.className = 'kf-log-time';
+    time.textContent = logTimeParts(entry.timestamp).full;
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'kf-log-floor kf-plugin-error-copy';
+    copy.textContent = '复制';
+    copy.setAttribute('aria-live', 'polite');
+    copy.dataset.copyText = diagnosticText([entry]);
+    summary.append(badge, stage, count, time, copy);
+    const detail = document.createElement('div');
+    detail.className = 'kf-log-detail';
+    detail.textContent = formatPluginError(entry).split('] ').slice(1).join('] ');
+    row.append(summary, detail);
+    return row;
+}
+
 function createLogRow(log) {
+    if (log.event === 'plugin-error' && log.pluginError) return createPluginErrorRow(log.pluginError);
     const kind = logKind(log);
     const row = document.createElement('article');
     row.className = 'kf-log-row';
@@ -2687,7 +2720,7 @@ function renderLogs(state, filter = currentLogFilter()) {
     const source = loadState();
     const titles = {
         all: ['全部日志', '按时间倒序'],
-        error: ['报错', 'API 返回的原始信息'],
+        error: ['报错', 'API 报错与插件错误 · 按时间倒序'],
         pick: ['抽选记录', '按时间倒序'],
         stats: ['次数统计', '记录API与模型的成功请求次数'],
     };
@@ -2696,37 +2729,6 @@ function renderLogs(state, filter = currentLogFilter()) {
     $('#kf-log-panel-title').text(title);
     $('#kf-log-panel-meta').text(meta);
     const logBox = $('#kf-logs-list').empty();
-    if (resolvedFilter === 'error') {
-        const panel = document.createElement('section');
-        panel.className = 'kf-runtime-diagnostics';
-        const head = document.createElement('div');
-        head.className = 'kf-diagnostic-head';
-        const title = document.createElement('strong');
-        title.textContent = '插件错误';
-        const copy = document.createElement('button');
-        copy.type = 'button';
-        copy.className = 'kf-action-btn kf-diagnostic-copy';
-        copy.textContent = '复制插件错误';
-        const body = document.createElement('div');
-        body.className = 'kf-diagnostic-text';
-        const pluginErrors = getPluginErrors();
-        copy.disabled = pluginErrors.length === 0;
-        if (!pluginErrors.length) body.textContent = '未记录到插件内部错误';
-        for (const entry of pluginErrors) {
-            const row = document.createElement('div');
-            row.className = 'kf-plugin-error-row';
-            const tag = document.createElement('span');
-            tag.className = 'kf-plugin-error-tag';
-            tag.textContent = '插件 · ' + entry.stage;
-            const detail = document.createElement('span');
-            detail.textContent = formatPluginError(entry).replace('[' + entry.stage + '/' + entry.code + '] ', entry.code + ' ');
-            row.append(tag, detail);
-            body.appendChild(row);
-        }
-        head.append(title, copy);
-        panel.append(head, body);
-        logBox.append(panel);
-    }
     const node = logBox.get(0);
     if (!node) return;
     const fragment = document.createDocumentFragment();
@@ -2734,7 +2736,9 @@ function renderLogs(state, filter = currentLogFilter()) {
     if (resolvedFilter === 'stats') {
         groupUsageStats(getUsageStats()).slice(0, 50).forEach(stat => fragment.appendChild(createUsageStatRow(stat)));
     } else {
-        const logs = [...(source.logs || [])].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        const pluginLogs = (resolvedFilter === 'all' || resolvedFilter === 'error')
+            ? getPluginErrors().map(entry => ({ event: 'plugin-error', time: entry.timestamp, pluginError: entry })) : [];
+        const logs = [...(source.logs || []), ...pluginLogs].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
         const filtered = logs.filter(log => {
             if (resolvedFilter === 'error') return logKind(log) === 'error';
             if (resolvedFilter === 'pick') return log.event === 'pick';
@@ -3988,12 +3992,12 @@ function bind(state, rerender, setStatus) {
         renderLogs(state);
         setStatus('日志已清空');
     });
-    $('#kf-logs-list').off('.kfDiagnostic').on('click.kfDiagnostic', '.kf-diagnostic-copy', async () => {
+    $('#kf-logs-list').off('.kfDiagnostic').on('click.kfDiagnostic', '.kf-plugin-error-copy', async function () {
         try {
-            await copyTextToClipboard(diagnosticText());
-            showToast('插件错误已复制', 'info');
+            await copyTextToClipboard(this.dataset.copyText || '');
+            this.textContent = '已复制';
         } catch {
-            showToast('复制失败，请长按紫色框中的文字手动复制', 'error');
+            this.textContent = '请长按文字复制';
         }
     });
     $('#kf-logs-list').off('.kfLogUrl')
