@@ -1,26 +1,5 @@
 ﻿import { initUI } from './src/ui_manager.js';
-import { installRuntimeHook, hasActiveDiagnosticRequest } from './src/runtime_hook.js';
-import { recordDiagnostic } from './src/runtime_diagnostics.js';
-
-// Scope global diagnostics to this extension's own source files.
-const diagnosticRoot = new URL('.', import.meta.url).href;
-recordDiagnostic('boot');
-const hostDiagnosticFiles = ['/script.js', '/scripts/openai.js', '/scripts/sse-stream.js'].map(path => new URL(path, window.location.href).href);
-window.addEventListener('error', event => {
-    if (String(event.filename || '').startsWith(diagnosticRoot)) {
-        recordDiagnostic('runtime', { location: 'window-error' }, event.error || new Error());
-    } else if (hasActiveDiagnosticRequest() && hostDiagnosticFiles.includes(String(event.filename || '').split('?')[0])) {
-        recordDiagnostic('hostError', { location: 'window-error' }, event.error || new Error());
-    }
-});
-window.addEventListener('unhandledrejection', event => {
-    if (String(event.reason?.stack || '').includes(diagnosticRoot)) {
-        recordDiagnostic('runtime', { location: 'unhandled-rejection' }, event.reason);
-    } else if (hasActiveDiagnosticRequest() && hostDiagnosticFiles.some(file => String(event.reason?.stack || '').includes(file))) {
-        recordDiagnostic('hostError', { location: 'unhandled-rejection' }, event.reason);
-    }
-});
-
+import { installRuntimeHook } from './src/runtime_hook.js';
 const KarmaFlip = (() => {
     const moduleName = 'API随机临幸';
     const extensionFolderPath = new URL('.', import.meta.url).pathname;
@@ -73,7 +52,6 @@ jQuery(async () => {
     try {
         await KarmaFlip.init();
     } catch (error) {
-        recordDiagnostic('runtime', { location: 'initialize' }, error);
         console.error('[KarmaFlip] 初始化失败:', error);
     }
 });

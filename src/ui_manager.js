@@ -1,8 +1,8 @@
 import { bindApiOverrideToFloor, clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
-import { clearRuntimeHookState, refreshRuntimeDiagnostics, runtimeDiagnosticSummary } from './runtime_hook.js';
+import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
-import { diagnosticText } from './runtime_diagnostics.js';
+import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_diagnostics.js';
 
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
@@ -2702,14 +2702,27 @@ function renderLogs(state, filter = currentLogFilter()) {
         const head = document.createElement('div');
         head.className = 'kf-diagnostic-head';
         const title = document.createElement('strong');
-        title.textContent = '插件运行诊断';
+        title.textContent = '插件错误';
         const copy = document.createElement('button');
         copy.type = 'button';
         copy.className = 'kf-action-btn kf-diagnostic-copy';
-        copy.textContent = '复制诊断';
-        const body = document.createElement('pre');
+        copy.textContent = '复制插件错误';
+        const body = document.createElement('div');
         body.className = 'kf-diagnostic-text';
-        body.textContent = diagnosticText(runtimeDiagnosticSummary());
+        const pluginErrors = getPluginErrors();
+        copy.disabled = pluginErrors.length === 0;
+        if (!pluginErrors.length) body.textContent = '未记录到插件内部错误';
+        for (const entry of pluginErrors) {
+            const row = document.createElement('div');
+            row.className = 'kf-plugin-error-row';
+            const tag = document.createElement('span');
+            tag.className = 'kf-plugin-error-tag';
+            tag.textContent = '插件 · ' + entry.stage;
+            const detail = document.createElement('span');
+            detail.textContent = formatPluginError(entry).replace('[' + entry.stage + '/' + entry.code + '] ', entry.code + ' ');
+            row.append(tag, detail);
+            body.appendChild(row);
+        }
         head.append(title, copy);
         panel.append(head, body);
         logBox.append(panel);
@@ -3966,7 +3979,6 @@ function bind(state, rerender, setStatus) {
         }
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
-        refreshRuntimeDiagnostics();
         showModal('kf-log-modal');
         renderLogs(state);
     });
@@ -3978,9 +3990,8 @@ function bind(state, rerender, setStatus) {
     });
     $('#kf-logs-list').off('.kfDiagnostic').on('click.kfDiagnostic', '.kf-diagnostic-copy', async () => {
         try {
-            refreshRuntimeDiagnostics();
-            await copyTextToClipboard(diagnosticText(runtimeDiagnosticSummary()));
-            showToast('脱敏诊断已复制', 'info');
+            await copyTextToClipboard(diagnosticText());
+            showToast('插件错误已复制', 'info');
         } catch {
             showToast('复制失败，请长按紫色框中的文字手动复制', 'error');
         }

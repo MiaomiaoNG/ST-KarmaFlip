@@ -1,7 +1,7 @@
 import { bindApiOverrideToFloor, clearFloorApiBinding, clearPendingApiOverride, getActivePool, getApiOverrideState, getRuntimeScope, loadState, pushLog, toInt } from './plugin_state_store.js';
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 import { makeId } from './compat.js';
-import { recordDiagnostic } from './runtime_diagnostics.js';
+import { recordPluginError } from './runtime_diagnostics.js';
 
 let chatSettingsBound = false;
 let fetchRetryBound = false;
@@ -12,177 +12,13 @@ let rebindQueued = false;
 const runtimeEventBindings = [];
 let bindRetryTimer = null;
 let originalFetch = null;
-let installedDiagnosticFetch = null;
-let reportedMissingHooks = false;
 const preparedSelections = new Map();
 let activePresetTransaction = null;
 let nativePresetModulesPromise = null;
 let activeStreamingSource = null;
 let preparationSequence = 0;
 const pendingRequests = new Map();
-const diagnosticRequests = new Map();
-const recentBatchDiagnostics = [];
-
-
-function generationRoute(input) {
-    try {
-        const raw = typeof input === 'string' ? input : input?.url || String(input);
-        const url = new URL(raw, window.location.href);
-        if (url.origin !== window.location.origin) return null;
-        const prefix = '/api/backends/chat-completions/';
-        if (url.pathname === prefix + 'generate') return 'single';
-        if (url.pathname === prefix + 'generate-batch-stream') return 'batch';
-        if (url.pathname === prefix + 'cancel-stream') return 'cancel-stream';
-        if (url.pathname === prefix + 'cancel-generation') return 'cancel-generation';
-    } catch { /* Not a recognized local generation request. */ }
-    return null;
-}
-
-function inspectBatchState(pending) {
-    try {
-    if (pending.route !== 'batch') return;
-    const session = pending.batchMessage?.extra?.parallel_generation_session;
-    if (!session || session.id !== pending.batchSessionId || !Array.isArray(session.candidates)) return;
-    const candidates = session.candidates.slice(0, 100);
-    const counts = {
-        candidateCount: candidates.length,
-        errorCount: candidates.filter(c => c?.status === 'error').length,
-        doneCount: candidates.filter(c => c.status === 'done').length,
-        stoppedCount: candidates.filter(c => c.status === 'stopped').length,
-    };
-    const signature = JSON.stringify(counts);
-    if (pending.batchSignature === signature) return;
-    pending.batchSignature = signature;
-    requestDiagnostic('batchState', pending, counts);
-    for (let i = 0; i < candidates.length && pending.loggedCandidateErrors.size < 5; i++) {
-        if (candidates[i]?.status !== 'error' || pending.loggedCandidateErrors.has(i)) continue;
-        pending.loggedCandidateErrors.add(i);
-        // Only the diagnostic classifier sees this message; raw text is never retained.
-        requestDiagnostic('batchError', pending, { candidateIndex: i },
-            { name: 'Error', message: candidates[i].errorMessage || '' });
-        if (pending.loggedCandidateErrors.size >= 5) break;
-    }
-    } catch { /* A malformed host snapshot must not interrupt generation. */ }
-}
-
-export function refreshRuntimeDiagnostics() {
-    for (const pending of diagnosticRequests.values()) inspectBatchState(pending);
-    for (const pending of recentBatchDiagnostics) inspectBatchState(pending);
-}
-
-export function hasActiveDiagnosticRequest() {
-    return diagnosticRequests.size > 0 || preparedSelections.size > 0;
-}
-
-// Read on opening/copying the panel, not via polling. No records are added here.
-export function runtimeDiagnosticSummary() {
-    try {
-        const ctx = context();
-        const lines = [
-            '当前自检（打开/复制时读取）：',
-            '插件：' + (loadState().enabled === false ? '已关闭' : '已开启'),
-            'READY 事件：' + (ctx.event_types?.CHAT_COMPLETION_SETTINGS_READY ? '可用' : '缺失'),
-            '生成监听：' + (chatSettingsBound && boundEventSource === ctx.eventSource ? '已绑定当前事件源' : '未绑定或事件源已变化'),
-            'fetch 观察：' + (installedDiagnosticFetch && window.fetch === installedDiagnosticFetch ? '位于当前入口' : '不在最外层（可能被其他包装覆盖，不能据此断定失效）'),
-            '待 READY 预选：' + preparedSelections.size + '；跟踪请求：' + diagnosticRequests.size,
-        ];
-        for (const pending of diagnosticRequests.values()) {
-            lines.push(pending.id + '：' + (pending.route === 'batch' ? 'TN 批量通道' : '普通请求')
-                + '，已等待 ' + Math.max(0, Math.round((Date.now() - pending.diagnosticStarted) / 1000)) + ' 秒'
-                + (pending.delivered ? '，已交还响应（不代表正文成功）' : '，尚未交还响应'));
-        }
-        return lines.join('\n');
-    } catch { return '当前自检读取失败；仍可复制已有诊断。'; }
-}
-
-async function observeUnmanagedRequest(input, init, route) {
-    const id = makeTraceId();
-    const ctx = context();
-    const runningBatchMessages = route === 'batch' && Array.isArray(ctx.chat)
-        ? ctx.chat.slice(-5).filter(m => m?.extra?.parallel_generation_session?.status === 'running')
-        : [];
-    const batchMessage = runningBatchMessages.length === 1 ? runningBatchMessages[0] : null;
-    const pending = {
-        id, route, diagnosticStarted: Date.now(), delivered: false,
-        stream: route === 'batch' ? true : undefined, processor: route === 'batch' ? null : ctx.streamingProcessor,
-        textEvents: 0, nonEmptyTextEvents: 0,
-        batchMessage, batchSessionId: batchMessage?.extra?.parallel_generation_session?.id,
-        loggedCandidateErrors: new Set(),
-    };
-    if (diagnosticRequests.size >= 20) finishRequestDiagnostic('superseded', diagnosticRequests.values().next().value);
-    diagnosticRequests.set(id, pending);
-    const signal = init?.signal || input?.signal;
-    pending.diagnosticSignal = signal;
-    pending.diagnosticAbort = () => finishRequestDiagnostic('abort', pending);
-    signal?.addEventListener('abort', pending.diagnosticAbort, { once: true });
-    requestDiagnostic(route === 'batch' ? 'batch' : 'untracked', pending, {
-        route, prepared: preparedSelections.size > 0,
-        proxyTemporarilyEmpty: !!activePresetTransaction && activePresetTransaction.oaiSettings?.reverse_proxy === '',
-    });
-    if (route === 'batch' && !batchMessage) requestDiagnostic('batchUnknown', pending);
-    if (signal?.aborted) pending.diagnosticAbort();
-    try {
-        const response = await originalFetch(input, init);
-        pending.delivered = true;
-        // Do not clone/read the body, even on non-2xx or JSON responses.
-        requestDiagnostic('response', pending, { route, status: response.status, ok: response.ok, contentType: response.headers?.get?.('content-type') || '' });
-        if (!response.ok) finishRequestDiagnostic('stopped', pending);
-        return response;
-    } catch (error) {
-        requestDiagnostic('failure', pending, { route, location: 'fetch' }, error);
-        finishRequestDiagnostic('stopped', pending);
-        throw error;
-    }
-}
-
-function requestDiagnostic(stage, pending, extra = {}, error = null) {
-    recordDiagnostic(stage, {
-        traceId: pending.id,
-        elapsedMs: Date.now() - pending.diagnosticStarted,
-        stream: pending.stream,
-        textEvents: pending.textEvents || 0,
-        nonEmptyTextEvents: pending.nonEmptyTextEvents || 0,
-        ...extra,
-    }, error);
-}
-
-function finishRequestDiagnostic(stage, pending) {
-    if (!diagnosticRequests.has(pending.id)) return;
-    inspectBatchState(pending);
-    requestDiagnostic(stage, pending);
-    pending.diagnosticSignal?.removeEventListener('abort', pending.diagnosticAbort);
-    diagnosticRequests.delete(pending.id);
-    if (pending.route === 'batch' && pending.batchMessage) {
-        recentBatchDiagnostics.unshift(pending);
-        recentBatchDiagnostics.length = Math.min(recentBatchDiagnostics.length, 8);
-    }
-}
-
-function finishGenerationDiagnostics(stage) {
-    const processor = context().streamingProcessor;
-    for (const pending of diagnosticRequests.values()) {
-        if (pending.processor && pending.processor !== processor) continue;
-        if (stage === 'ended' && pending.processor && !pending.processor.isFinished && !pending.processor.isStopped) continue;
-        finishRequestDiagnostic(stage, pending);
-    }
-}
-
-function diagnoseStreamEvent(text) {
-    const processor = context().streamingProcessor;
-    for (const pending of diagnosticRequests.values()) {
-        if (!pending.stream || !pending.delivered || !pending.processor || pending.processor !== processor) continue;
-        pending.textEvents += 1;
-        if (typeof text === 'string' && text.length > 0) pending.nonEmptyTextEvents += 1;
-        if (pending.textEvents === 1) {
-            const parserSource = context().chatCompletionSettings?.chat_completion_source;
-            requestDiagnostic('token', pending, { requestSource: pending.actualSource, parserSource, sourceMatches: typeof parserSource === 'string' ? parserSource === pending.actualSource : undefined });
-        }
-    }
-}
-
 export function clearRuntimeHookState() {
-    for (const pending of diagnosticRequests.values()) finishRequestDiagnostic('stopped', pending);
-    recentBatchDiagnostics.length = 0;
     restoreStreamingSource();
     pendingRequests.clear();
     discardAllPreparedSelections('runtime-clear');
@@ -314,6 +150,9 @@ function restoreProperties(target, snapshot) {
     for (const [key, item] of snapshot) {
         if (item?.existed) target[key] = item.value;
         else delete target[key];
+        if (item?.existed ? !Object.is(target[key], item.value) : Object.prototype.hasOwnProperty.call(target, key)) {
+            recordPluginError('restore-mismatch');
+        }
     }
 }
 
@@ -366,7 +205,13 @@ function restoreStreamingSource(expectedId = null) {
     lease.signal?.removeEventListener('abort', lease.onAbort);
     // Do not overwrite a connection change made while the stream was running.
     if (lease.settings.chat_completion_source === lease.source) {
-        lease.settings.chat_completion_source = lease.previousSource;
+        try {
+            lease.settings.chat_completion_source = lease.previousSource;
+            if (lease.settings.chat_completion_source !== lease.previousSource) recordPluginError('restore-mismatch');
+        } catch (error) {
+            recordPluginError('restore', error);
+            throw error;
+        }
     }
 }
 
@@ -398,7 +243,13 @@ async function retainStreamingSource(pending, member, signal) {
         onAbort: () => restoreStreamingSource(pending.id),
     };
     activeStreamingSource = lease;
-    oaiSettings.chat_completion_source = source;
+    try {
+        oaiSettings.chat_completion_source = source;
+        if (oaiSettings.chat_completion_source !== source) recordPluginError('stream-mismatch');
+    } catch (error) {
+        recordPluginError('stream', error);
+        throw error;
+    }
     signal?.addEventListener('abort', lease.onAbort, { once: true });
 }
 
@@ -421,7 +272,7 @@ function restorePresetTransaction(expectedToken = null) {
             else delete ext.preset_allowed_regex;
         }
     } catch (error) {
-        recordDiagnostic('runtime', { location: 'restore' }, error);
+        recordPluginError('restore', error);
         console.error('[KarmaFlip] 还原酒馆预设内存状态失败:', error);
     }
     return true;
@@ -442,7 +293,6 @@ function discardPreparedSelection(token, reason = 'discarded') {
         restorePresetTransaction(token);
         return false;
     }
-    recordDiagnostic('missingReady', { traceId: prepared.diagnosticTraceId, location: 'prepare' });
     preparedSelections.delete(token);
     const hasNewerSelection = [...preparedSelections.keys()].some(otherToken => otherToken > token);
     if (hasNewerSelection) {
@@ -599,16 +449,14 @@ async function beginPresetTransaction(member, token) {
             console.warn(`[KarmaFlip] 绑定预设不存在，已保留当前预设并仅应用 API 类型与模型：${binding.presetName}`);
             showRuntimeToast(`绑定的酒馆预设“${binding.presetName}”产生变动，本次请求使用酒馆当前预设`, 'warning', 4200);
         }
-        transaction.timeoutId = setTimeout(() => {
-            recordDiagnostic('missingReady', { traceId: preparedSelections.get(token)?.diagnosticTraceId, location: 'restore' });
-            restorePresetTransaction(token);
-        }, PRESET_TRANSACTION_TTL);
+        transaction.timeoutId = setTimeout(() => restorePresetTransaction(token), PRESET_TRANSACTION_TTL);
         return {
             active: true,
             presetApplied: presetAvailable,
             reason: presetAvailable ? 'applied' : 'missing-preset',
         };
     } catch (error) {
+        recordPluginError('preset', error);
         restorePresetTransaction(token);
         throw error;
     }
@@ -772,6 +620,12 @@ function patchGenerateData(generateData, member) {
     generateData.model = member.model;
     if (source === 'makersuite') generateData.google_model = member.model;
     if (source === 'claude') generateData.claude_model = member.model;
+    const expected = { chat_completion_source: source, reverse_proxy: providerBaseUrl(member.apiUrl, member.provider), proxy_password: member.key, model: member.model };
+    if (source === 'makersuite') expected.google_model = member.model;
+    if (source === 'claude') expected.claude_model = member.model;
+    for (const [field, value] of Object.entries(expected)) {
+        if (generateData[field] !== value) recordPluginError('route-mismatch', null, field);
+    }
 }
 
 function patchBodyForMember(body, member) {
@@ -849,7 +703,7 @@ function showRuntimeToast(message, type = 'info', timeout = 2800) {
 }
 
 function reportRuntimeError(stage, error) {
-    recordDiagnostic('runtime', { location: 'ready' }, error);
+    recordPluginError('ready', error);
     console.error(`[KarmaFlip] ${stage}，已放弃本次插件接管:`, error);
     showRuntimeToast('KarmaFlip 插件运行出错，本次请求将使用酒馆默认 API', 'error', 4200);
 }
@@ -949,9 +803,9 @@ function makeTraceId() {
     return makeId('kf');
 }
 
-function startPendingRequest(state, pool, picked, member, type, messageId, forced = false, locked = false, stream = false, diagnosticId = null) {
-    const id = diagnosticId || makeTraceId();
-    const pending = {
+function startPendingRequest(state, pool, picked, member, type, messageId, forced = false, locked = false, stream = false) {
+    const id = makeTraceId();
+    pendingRequests.set(id, {
         id,
         state,
         pool,
@@ -964,16 +818,8 @@ function startPendingRequest(state, pool, picked, member, type, messageId, force
         stream,
         sequence: preparationSequence,
         processor: stream ? context().streamingProcessor : null,
-        diagnosticStarted: Date.now(),
-        textEvents: 0,
-        nonEmptyTextEvents: 0,
-        delivered: false,
         expiresAt: Date.now() + PENDING_TTL,
-    };
-    pendingRequests.set(id, pending);
-    if (diagnosticRequests.size >= 20) finishRequestDiagnostic('superseded', diagnosticRequests.values().next().value);
-    diagnosticRequests.set(id, pending);
-    requestDiagnostic('ready', pending, { requestSource: providerSource(member.provider) });
+    });
     return id;
 }
 
@@ -1015,9 +861,13 @@ function readTraceRequest(init) {
 }
 
 async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
-    const requestInit = retryIndex === 0 && sameMember(member, pending.member)
-        ? init
-        : makeRetryInit(init, member);
+    let requestInit;
+    try {
+        requestInit = retryIndex === 0 && sameMember(member, pending.member) ? init : makeRetryInit(init, member);
+    } catch (error) {
+        recordPluginError('retry-build', error);
+        throw error;
+    }
     retryDebug('attempt', {
         traceId: pending.id,
         retryIndex,
@@ -1025,23 +875,8 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         apiName: member?.name || '',
         model: member?.model || '',
     });
-    requestDiagnostic('attempt', pending, { attempt: retryIndex + 1, requestSource: providerSource(member.provider) });
-    let response;
-    try {
-        response = await originalFetch(input, requestInit);
-    } catch (error) {
-        requestDiagnostic('failure', pending, { location: 'fetch' }, error);
-        throw error;
-    }
-    requestDiagnostic('response', pending, { status: response.status, ok: response.ok, contentType: response.headers?.get?.('content-type') || '' });
-    let businessFailure;
-    try {
-        businessFailure = await responseBusinessFailure(response);
-    } catch (error) {
-        requestDiagnostic('runtime', pending, { location: 'response-check' }, error);
-        throw error;
-    }
-    requestDiagnostic('checked', pending, { ok: !businessFailure.failed });
+    const response = await originalFetch(input, requestInit);
+    const businessFailure = await responseBusinessFailure(response);
     retryDebug('response-check', {
         traceId: pending.id,
         retryIndex,
@@ -1057,11 +892,6 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
         }
         queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: response.status, statusText: response.statusText });
-        pending.delivered = true;
-        pending.actualSource = providerSource(member.provider);
-        const parserSource = activeStreamingSource?.id === pending.id ? activeStreamingSource.settings.chat_completion_source : context().chatCompletionSettings?.chat_completion_source;
-        requestDiagnostic('delivered', pending, { requestSource: providerSource(member.provider), parserSource, sourceMatches: typeof parserSource === 'string' ? parserSource === providerSource(member.provider) : undefined });
-        if (!pending.stream) finishRequestDiagnostic('ended', pending);
         return { ok: true, response };
     }
     const count = markRequestFailure(pending.state, member);
@@ -1258,47 +1088,32 @@ function bindRetryFetch(onStatus) {
     if (fetchRetryBound) return;
     originalFetch = window.fetch.bind(window);
     window.fetch = async function karmaFlipRetryFetch(input, init) {
-        const route = generationRoute(input);
-        if (route && loadState().enabled !== false) {
-            if (route.startsWith('cancel-')) {
-                recordDiagnostic('cancel', { route });
-                refreshRuntimeDiagnostics();
-            } else if (route === 'batch' || !init?.body || typeof init.body !== 'string') {
-                return observeUnmanagedRequest(input, init, route);
-            }
+        let path = '';
+        try {
+            const url = new URL(typeof input === 'string' ? input : input?.url || String(input), window.location.href);
+            if (url.origin === window.location.origin) path = url.pathname;
+        } catch { /* Leave non-URL inputs to the original fetch. */ }
+        if (path === '/api/backends/chat-completions/generate-batch-stream'
+            && loadState().enabled !== false && preparedSelections.size > 0) {
+            recordPluginError('batch-unsupported');
         }
-        if (route !== 'single' || !init?.body || typeof init.body !== 'string') {
+        if (path !== '/api/backends/chat-completions/generate' || !init?.body || typeof init.body !== 'string') {
             return originalFetch(input, init);
         }
         const traced = readTraceRequest(init);
         if (!traced) {
-            if (loadState().enabled !== false) recordDiagnostic('unmatched');
             retryDebug('skip-no-trace', { url: typeof input === 'string' ? input : input?.url });
-            return loadState().enabled === false ? originalFetch(input, init) : observeUnmanagedRequest(input, init, 'single');
+            return originalFetch(input, init);
         }
         cleanupPendingRequests();
         const pending = consumePendingRequest(traced.traceId);
         if (!pending) {
-            recordDiagnostic('unmatched', { traceId: traced.traceId });
             retryDebug('skip-missing-pending', { traceId: traced.traceId });
-            return loadState().enabled === false ? originalFetch(input, traced.init) : observeUnmanagedRequest(input, traced.init, 'single');
+            return originalFetch(input, traced.init);
         }
         retryDebug('trace-matched', { traceId: traced.traceId, type: pending.type });
-        pending.diagnosticSignal = init.signal;
-        pending.diagnosticAbort = () => finishRequestDiagnostic('abort', pending);
-        init.signal?.addEventListener('abort', pending.diagnosticAbort, { once: true });
-        if (init.signal?.aborted) pending.diagnosticAbort();
-        try {
-            const response = await runRetryPlan(input, traced.init, pending, onStatus);
-            if (!pending.delivered) finishRequestDiagnostic('stopped', pending);
-            return response;
-        } catch (error) {
-            requestDiagnostic('failure', pending, { location: 'fetch' }, error);
-            finishRequestDiagnostic('stopped', pending);
-            throw error;
-        }
+        return runRetryPlan(input, traced.init, pending, onStatus);
     };
-    installedDiagnosticFetch = window.fetch;
     fetchRetryBound = true;
 }
 
@@ -1306,7 +1121,6 @@ async function prepareGenerationSelection(type, options, dryRun) {
     if (dryRun || !TEXT_GENERATION_TYPES.has(String(type || ''))) return;
     if (options?.quietImage === true || String(options?.quiet_prompt || '').trim()) return;
 
-    for (const pending of diagnosticRequests.values()) finishRequestDiagnostic('superseded', pending);
     restoreStreamingSource();
 
     cleanupPreparedSelections();
@@ -1327,11 +1141,8 @@ async function prepareGenerationSelection(type, options, dryRun) {
         return;
     }
     const token = ++preparationSequence;
-    const diagnosticTraceId = makeTraceId();
-    recordDiagnostic('prepare', { traceId: diagnosticTraceId });
     const prepared = {
         token,
-        diagnosticTraceId,
         state,
         runtimeScope,
         runtimeSnapshot,
@@ -1408,7 +1219,7 @@ function bindGenerationLifecycle(eventSource, eventTypes) {
         try {
             await prepareGenerationSelection(type, options, dryRun);
         } catch (error) {
-            recordDiagnostic('runtime', { location: 'prepare' }, error);
+            recordPluginError('prepare', error);
             console.error('[KarmaFlip] 发送前应用绑定预设失败:', error);
             showRuntimeToast('绑定预设应用失败，本次继续使用酒馆当前预设', 'error', 4200);
         }
@@ -1450,12 +1261,9 @@ function bindChatCompletionSettings(onStatus, force = false, reason = 'startup')
     const eventTypes = ctx.event_types || {};
     const eventName = eventTypes.CHAT_COMPLETION_SETTINGS_READY;
     if (!eventSource?.on || !eventName) {
-        if (!reportedMissingHooks) recordDiagnostic('hooksMissing');
-        reportedMissingHooks = true;
         if (!bindRetryTimer) bindRetryTimer = setTimeout(() => bindChatCompletionSettings(onStatus), 1000);
         return;
     }
-    reportedMissingHooks = false;
     if (!force && chatSettingsBound && boundEventSource === eventSource) return;
     if (runtimeEventBindings.length) removeRuntimeEventBindings();
 
@@ -1464,12 +1272,6 @@ function bindChatCompletionSettings(onStatus, force = false, reason = 'startup')
     bindGenerationLifecycle(eventSource, eventTypes);
     addRuntimeEventBinding(eventSource, eventTypes.GENERATION_ENDED, finishStreamingSource);
     addRuntimeEventBinding(eventSource, eventTypes.GENERATION_STOPPED, finishStreamingSource);
-    addRuntimeEventBinding(eventSource, eventTypes.GENERATION_ENDED, () => finishGenerationDiagnostics('ended'));
-    addRuntimeEventBinding(eventSource, eventTypes.GENERATION_STOPPED, () => finishGenerationDiagnostics('stopped'));
-    addRuntimeEventBinding(eventSource, eventTypes.STREAM_TOKEN_RECEIVED, diagnoseStreamEvent);
-    addRuntimeEventBinding(eventSource, eventTypes.MESSAGE_RECEIVED, refreshRuntimeDiagnostics);
-    addRuntimeEventBinding(eventSource, eventTypes.CHARACTER_MESSAGE_RENDERED, refreshRuntimeDiagnostics);
-    recordDiagnostic('installed', { streamEventSupported: !!eventTypes.STREAM_TOKEN_RECEIVED });
 
     addRuntimeEventBinding(eventSource, eventName, async (generateData) => {
         const startedAt = nowMs();
@@ -1511,7 +1313,7 @@ function bindChatCompletionSettings(onStatus, force = false, reason = 'startup')
                 showRuntimeToast('绑定预设未能及时应用，本轮已使用酒馆当前预设；API 配置仍正常生效。', 'warning', 4200);
             }
             patchGenerateData(generateData, member);
-            generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock', generateData.stream === true, prepared?.diagnosticTraceId);
+            generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock', generateData.stream === true);
             queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true });
             showModelAlert(state, member);
             const pickLabel = override?.source === 'lock' ? '锁定' : (override ? '指定' : '命中');

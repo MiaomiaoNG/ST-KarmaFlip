@@ -3311,3 +3311,21 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     user-select: text;
     -webkit-user-select: text;
 }
+
+.kf-plugin-error-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 5px 8px;
+    padding: 5px 0;
+}
+.kf-plugin-error-tag {
+    display: inline-block;
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border: 1px solid #a78bfa;
+    border-radius: 6px;
+    background: #6d28d9;
+    color: #fff;
+    font: 11px/1.4 sans-serif;
+}
