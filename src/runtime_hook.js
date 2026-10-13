@@ -14,10 +14,12 @@ let originalFetch = null;
 const preparedSelections = new Map();
 let activePresetTransaction = null;
 let nativePresetModulesPromise = null;
+let activeStreamingSource = null;
 let preparationSequence = 0;
 const pendingRequests = new Map();
 
 export function clearRuntimeHookState() {
+    restoreStreamingSource();
     pendingRequests.clear();
     discardAllPreparedSelections('runtime-clear');
 }
@@ -26,8 +28,6 @@ const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
 const PRESET_TRANSACTION_TTL = 120000;
-const RESPONSE_INSPECTION_TIMEOUT_MS = 1500;
-const RESPONSE_INSPECTION_MAX_BYTES = 1024 * 1024;
 const PERF_WARN_MS = {
     chatSettings: 12,
     mvuScan: 8,
@@ -191,6 +191,51 @@ async function nativePresetModules() {
         }));
     }
     return nativePresetModulesPromise;
+}
+
+// The native stream parser reads oai_settings on every chunk, after READY.
+// Keep only its source alive; presets, regexes, URL and Key still restore at READY.
+function restoreStreamingSource(expectedId = null) {
+    const lease = activeStreamingSource;
+    if (!lease || (expectedId !== null && lease.id !== expectedId)) return;
+    activeStreamingSource = null;
+    lease.signal?.removeEventListener('abort', lease.onAbort);
+    // Do not overwrite a connection change made while the stream was running.
+    if (lease.settings.chat_completion_source === lease.source) {
+        lease.settings.chat_completion_source = lease.previousSource;
+    }
+}
+
+function finishStreamingSource() {
+    const lease = activeStreamingSource;
+    if (!lease) return;
+    // Unscoped lifecycle events from background generations must not end an
+    // unrelated foreground stream. Its own AbortSignal remains authoritative.
+    if (lease.processor && !lease.processor.isFinished && !lease.processor.isStopped && !lease.signal?.aborted) return;
+    restoreStreamingSource(lease.id);
+}
+
+async function retainStreamingSource(pending, member, signal) {
+    if (!pending.stream) return;
+    const { oaiSettings } = await nativePresetModules();
+    if (!oaiSettings || signal?.aborted || pending.sequence !== preparationSequence) return;
+    const processor = context().streamingProcessor;
+    if (pending.processor && processor !== pending.processor) return;
+    if (pending.processor?.isFinished || pending.processor?.isStopped) return;
+    restoreStreamingSource();
+    const source = providerSource(member.provider);
+    const lease = {
+        id: pending.id,
+        settings: oaiSettings,
+        previousSource: oaiSettings.chat_completion_source,
+        source,
+        processor: pending.processor,
+        signal,
+        onAbort: () => restoreStreamingSource(pending.id),
+    };
+    activeStreamingSource = lease;
+    oaiSettings.chat_completion_source = source;
+    signal?.addEventListener('abort', lease.onAbort, { once: true });
 }
 
 function restorePresetTransaction(expectedToken = null) {
@@ -654,45 +699,10 @@ async function askFailureDecision(message, actions, fallback) {
 }
 
 async function responseText(response) {
-    let reader;
-    let timer;
-    let complete = false;
     try {
-        // Inspect only a clone; the original body belongs to SillyTavern.
-        const copy = response.clone();
-        if (!copy.body) return { text: '', reason: 'empty' };
-        if (typeof copy.body.getReader !== 'function') {
-            return { text: '', reason: 'unsupported-reader' };
-        }
-        reader = copy.body.getReader();
-        const timeout = new Promise(resolve => {
-            timer = setTimeout(() => resolve({ text: '', reason: 'timeout' }), RESPONSE_INSPECTION_TIMEOUT_MS);
-        });
-        const read = async () => {
-            const decoder = new TextDecoder();
-            let text = '';
-            let bytes = 0;
-            while (true) {
-                const chunk = await reader.read();
-                if (chunk.done) {
-                    complete = true;
-                    return { text: text + decoder.decode(), reason: 'complete' };
-                }
-                bytes += chunk.value.byteLength;
-                if (bytes > RESPONSE_INSPECTION_MAX_BYTES) return { text: '', reason: 'size-limit' };
-                text += decoder.decode(chunk.value, { stream: true });
-            }
-        };
-        return await Promise.race([read(), timeout]);
+        return await response.clone().text();
     } catch {
-        return { text: '', reason: 'read-error' };
-    } finally {
-        clearTimeout(timer);
-        if (reader && !complete) {
-            // A tee branch's cancel promise may wait for the original consumer.
-            // Never await it or abort the original network request.
-            try { void reader.cancel().catch(() => {}); } catch { /* Best-effort clone cleanup. */ }
-        }
+        return '';
     }
 }
 
@@ -731,19 +741,13 @@ async function responseBusinessFailure(response) {
     const startedAt = nowMs();
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
     if (!response.ok) {
-        const inspection = await responseText(response);
-        const result = { failed: true, detail: inspection.text || `HTTP ${response.status}`, reason: 'http' };
+        const result = { failed: true, detail: await responseText(response), reason: 'http' };
         warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
         return result;
     }
     if (contentType.includes('text/event-stream')) return { failed: false, detail: '', reason: 'sse-pass' };
     if (!contentType.includes('application/json')) return { failed: false, detail: '', reason: 'non-json' };
-    const inspection = await responseText(response);
-    if (!['complete', 'empty'].includes(inspection.reason)) {
-        console.warn('[KarmaFlip] response inspection skipped:', inspection.reason);
-        return { failed: false, detail: '', reason: `inspection-${inspection.reason}` };
-    }
-    const text = inspection.text;
+    const text = await responseText(response);
     const payload = parseJson(text);
     const message = businessErrorMessage(payload);
     const result = message
@@ -780,7 +784,7 @@ function makeTraceId() {
     return makeId('kf');
 }
 
-function startPendingRequest(state, pool, picked, member, type, messageId, forced = false, locked = false) {
+function startPendingRequest(state, pool, picked, member, type, messageId, forced = false, locked = false, stream = false) {
     const id = makeTraceId();
     pendingRequests.set(id, {
         id,
@@ -792,6 +796,9 @@ function startPendingRequest(state, pool, picked, member, type, messageId, force
         messageId,
         forced,
         locked,
+        stream,
+        sequence: preparationSequence,
+        processor: stream ? context().streamingProcessor : null,
         expiresAt: Date.now() + PENDING_TTL,
     });
     return id;
@@ -856,6 +863,7 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         failed: businessFailure.failed,
     });
     if (!businessFailure.failed) {
+        await retainStreamingSource(pending, member, requestInit?.signal);
         markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`, { forced: pending.forced });
         if (pending.forced && !pending.locked) {
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
@@ -1081,6 +1089,8 @@ async function prepareGenerationSelection(type, options, dryRun) {
     if (dryRun || !TEXT_GENERATION_TYPES.has(String(type || ''))) return;
     if (options?.quietImage === true || String(options?.quiet_prompt || '').trim()) return;
 
+    restoreStreamingSource();
+
     cleanupPreparedSelections();
 
     const state = loadState();
@@ -1227,6 +1237,8 @@ function bindChatCompletionSettings(onStatus, force = false, reason = 'startup')
     boundEventSource = eventSource;
     boundEventTypes = eventTypes;
     bindGenerationLifecycle(eventSource, eventTypes);
+    addRuntimeEventBinding(eventSource, eventTypes.GENERATION_ENDED, finishStreamingSource);
+    addRuntimeEventBinding(eventSource, eventTypes.GENERATION_STOPPED, finishStreamingSource);
 
     addRuntimeEventBinding(eventSource, eventName, async (generateData) => {
         const startedAt = nowMs();
@@ -1268,7 +1280,7 @@ function bindChatCompletionSettings(onStatus, force = false, reason = 'startup')
                 showRuntimeToast('绑定预设未能及时应用，本轮已使用酒馆当前预设；API 配置仍正常生效。', 'warning', 4200);
             }
             patchGenerateData(generateData, member);
-            generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock');
+            generateData[TRACE_FIELD] = startPendingRequest(state, requestPool, picked, member, type, messageId, !!override, override?.source === 'lock', generateData.stream === true);
             queueLog(state, { event: 'pick', trigger: type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true });
             showModelAlert(state, member);
             const pickLabel = override?.source === 'lock' ? '锁定' : (override ? '指定' : '命中');
