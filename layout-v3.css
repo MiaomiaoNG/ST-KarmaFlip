@@ -3279,3 +3279,35 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
 
 
 
+
+/* Runtime diagnostics stay separate from provider error messages. */
+.kf-runtime-diagnostics {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #a78bfa !important;
+    border-radius: 12px;
+    background: rgba(139, 92, 246, 0.09);
+    color: var(--ink);
+}
+.kf-diagnostic-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.kf-diagnostic-head strong { color: #a78bfa; }
+.kf-diagnostic-copy { flex: 0 0 auto; }
+.kf-diagnostic-text {
+    margin: 0;
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 12px/1.6 monospace;
+    color: inherit;
+    user-select: text;
+    -webkit-user-select: text;
+}

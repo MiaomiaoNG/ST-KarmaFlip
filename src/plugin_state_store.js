@@ -1,4 +1,5 @@
 import { makeId } from './compat.js';
+import { clearDiagnostics } from './runtime_diagnostics.js';
 
 const MODULE_KEY = 'STApiSwitcher';
 const OLD_STORAGE_KEY = 'karmaflip_state_v4';
@@ -783,12 +784,14 @@ export function getUsageStats() {
 }
 
 export function clearLogs(state) {
+    clearDiagnostics();
     if (state && typeof state === 'object') state.logs = [];
     usageStats.clear();
     window.dispatchEvent?.(new CustomEvent(LOG_EVENT_NAME));
 }
 
 export function resetAllPluginData(state) {
+    clearDiagnostics();
     const target = state && typeof state === 'object' ? state : loadState();
     const defaults = normalizeState(getDefaultState());
     for (const key of Object.keys(target)) delete target[key];

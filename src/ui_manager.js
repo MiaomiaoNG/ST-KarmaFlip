@@ -1,7 +1,8 @@
 import { bindApiOverrideToFloor, clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
-import { clearRuntimeHookState } from './runtime_hook.js';
+import { clearRuntimeHookState, refreshRuntimeDiagnostics, runtimeDiagnosticSummary } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
+import { diagnosticText } from './runtime_diagnostics.js';
 
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
@@ -2695,6 +2696,24 @@ function renderLogs(state, filter = currentLogFilter()) {
     $('#kf-log-panel-title').text(title);
     $('#kf-log-panel-meta').text(meta);
     const logBox = $('#kf-logs-list').empty();
+    if (resolvedFilter === 'error') {
+        const panel = document.createElement('section');
+        panel.className = 'kf-runtime-diagnostics';
+        const head = document.createElement('div');
+        head.className = 'kf-diagnostic-head';
+        const title = document.createElement('strong');
+        title.textContent = '插件运行诊断';
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'kf-action-btn kf-diagnostic-copy';
+        copy.textContent = '复制诊断';
+        const body = document.createElement('pre');
+        body.className = 'kf-diagnostic-text';
+        body.textContent = diagnosticText(runtimeDiagnosticSummary());
+        head.append(title, copy);
+        panel.append(head, body);
+        logBox.append(panel);
+    }
     const node = logBox.get(0);
     if (!node) return;
     const fragment = document.createDocumentFragment();
@@ -3947,6 +3966,7 @@ function bind(state, rerender, setStatus) {
         }
     });
     $('#kf-btn-logs').off('click.kf').on('click.kf', () => {
+        refreshRuntimeDiagnostics();
         showModal('kf-log-modal');
         renderLogs(state);
     });
@@ -3955,6 +3975,15 @@ function bind(state, rerender, setStatus) {
         clearLogs(state);
         renderLogs(state);
         setStatus('日志已清空');
+    });
+    $('#kf-logs-list').off('.kfDiagnostic').on('click.kfDiagnostic', '.kf-diagnostic-copy', async () => {
+        try {
+            refreshRuntimeDiagnostics();
+            await copyTextToClipboard(diagnosticText(runtimeDiagnosticSummary()));
+            showToast('脱敏诊断已复制', 'info');
+        } catch {
+            showToast('复制失败，请长按紫色框中的文字手动复制', 'error');
+        }
     });
     $('#kf-logs-list').off('.kfLogUrl')
         .on('click.kfLogUrl', '.kf-log-copy-url', async function (event) {
