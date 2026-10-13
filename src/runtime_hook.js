@@ -26,6 +26,8 @@ const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
 const PRESET_TRANSACTION_TTL = 120000;
+const RESPONSE_INSPECTION_TIMEOUT_MS = 1500;
+const RESPONSE_INSPECTION_MAX_BYTES = 1024 * 1024;
 const PERF_WARN_MS = {
     chatSettings: 12,
     mvuScan: 8,
@@ -652,10 +654,45 @@ async function askFailureDecision(message, actions, fallback) {
 }
 
 async function responseText(response) {
+    let reader;
+    let timer;
+    let complete = false;
     try {
-        return await response.clone().text();
+        // Inspect only a clone; the original body belongs to SillyTavern.
+        const copy = response.clone();
+        if (!copy.body) return { text: '', reason: 'empty' };
+        if (typeof copy.body.getReader !== 'function') {
+            return { text: '', reason: 'unsupported-reader' };
+        }
+        reader = copy.body.getReader();
+        const timeout = new Promise(resolve => {
+            timer = setTimeout(() => resolve({ text: '', reason: 'timeout' }), RESPONSE_INSPECTION_TIMEOUT_MS);
+        });
+        const read = async () => {
+            const decoder = new TextDecoder();
+            let text = '';
+            let bytes = 0;
+            while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) {
+                    complete = true;
+                    return { text: text + decoder.decode(), reason: 'complete' };
+                }
+                bytes += chunk.value.byteLength;
+                if (bytes > RESPONSE_INSPECTION_MAX_BYTES) return { text: '', reason: 'size-limit' };
+                text += decoder.decode(chunk.value, { stream: true });
+            }
+        };
+        return await Promise.race([read(), timeout]);
     } catch {
-        return '';
+        return { text: '', reason: 'read-error' };
+    } finally {
+        clearTimeout(timer);
+        if (reader && !complete) {
+            // A tee branch's cancel promise may wait for the original consumer.
+            // Never await it or abort the original network request.
+            try { void reader.cancel().catch(() => {}); } catch { /* Best-effort clone cleanup. */ }
+        }
     }
 }
 
@@ -694,13 +731,19 @@ async function responseBusinessFailure(response) {
     const startedAt = nowMs();
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
     if (!response.ok) {
-        const result = { failed: true, detail: await responseText(response), reason: 'http' };
+        const inspection = await responseText(response);
+        const result = { failed: true, detail: inspection.text || `HTTP ${response.status}`, reason: 'http' };
         warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
         return result;
     }
     if (contentType.includes('text/event-stream')) return { failed: false, detail: '', reason: 'sse-pass' };
     if (!contentType.includes('application/json')) return { failed: false, detail: '', reason: 'non-json' };
-    const text = await responseText(response);
+    const inspection = await responseText(response);
+    if (!['complete', 'empty'].includes(inspection.reason)) {
+        console.warn('[KarmaFlip] response inspection skipped:', inspection.reason);
+        return { failed: false, detail: '', reason: `inspection-${inspection.reason}` };
+    }
+    const text = inspection.text;
     const payload = parseJson(text);
     const message = businessErrorMessage(payload);
     const result = message
