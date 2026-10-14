@@ -13,7 +13,7 @@ const definitions = {
     'stream-mismatch': ['P07', '流式设置', '解析来源写入不一致'],
     restore: ['P08', '状态恢复', '插件恢复临时状态失败'],
     'restore-mismatch': ['P09', '状态恢复', '临时字段恢复不一致'],
-    'batch-unsupported': ['P10', '接管路径', '已预选 API，但插件不支持 TN 批量流式接管'],
+    'batch-unsupported': ['P10', '接管路径', 'TN 批量流请求未能认领已预选 API'],
 };
 const checks = new Set(['route-mismatch', 'stream-mismatch', 'restore-mismatch', 'batch-unsupported']);
 const fields = new Set(['chat_completion_source', 'reverse_proxy', 'proxy_password', 'model', 'google_model', 'claude_model']);

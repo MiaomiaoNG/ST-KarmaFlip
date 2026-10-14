@@ -12,6 +12,7 @@ let rebindQueued = false;
 const runtimeEventBindings = [];
 let bindRetryTimer = null;
 let originalFetch = null;
+let retryFetchWrapper = null;
 const preparedSelections = new Map();
 let activePresetTransaction = null;
 let nativePresetModulesPromise = null;
@@ -28,6 +29,7 @@ const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 
 const TRACE_FIELD = 'karmaflip_trace_id';
 const PENDING_TTL = 30000;
 const PRESET_TRANSACTION_TTL = 120000;
+const TT_SSE_PROBE_LIMIT = 128 * 1024;
 const PERF_WARN_MS = {
     chatSettings: 12,
     mvuScan: 8,
@@ -725,6 +727,84 @@ async function responseText(response) {
     }
 }
 
+function isTauriTavernHost() {
+    return !!globalThis.__TAURITAVERN__;
+}
+
+function responseWithBody(response, body) {
+    return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+    });
+}
+
+function firstSseData(buffer) {
+    let remaining = String(buffer || '');
+    while (remaining) {
+        const separator = remaining.match(/\r?\n\r?\n/);
+        if (!separator || separator.index === undefined) return { complete: false, data: '' };
+        const block = remaining.slice(0, separator.index);
+        remaining = remaining.slice(separator.index + separator[0].length);
+        const data = block
+            .split(/\r?\n/)
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).replace(/^ /, ''))
+            .join('\n');
+        if (data) return { complete: true, data };
+    }
+    return { complete: false, data: '' };
+}
+
+function tauriErrorText(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    const id = String(payload.id || '');
+    const candidates = [
+        payload?.choices?.[0]?.delta?.content,
+        payload?.choices?.[0]?.message?.content,
+        payload?.delta?.text,
+        payload?.candidates?.[0]?.content?.parts?.map?.(part => part?.text).filter(Boolean).join(''),
+        payload?.message?.content,
+    ];
+    const text = candidates.find(value => typeof value === 'string' && value.trim()) || '';
+    if (id.startsWith('tauritavern-error-')) return text || 'TauriTavern 上游流式请求失败';
+    return /^\s*\[API\s*(?:Error|错误)\]/iu.test(text) ? text : '';
+}
+
+async function probeTauriTavernSse(response) {
+    if (!isTauriTavernHost() || !response?.body?.tee) {
+        return { failed: false, detail: '', reason: 'sse-pass', response };
+    }
+    const [probeBody, consumerBody] = response.body.tee();
+    const forwardedResponse = responseWithBody(response, consumerBody);
+    const reader = probeBody.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    try {
+        while (text.length <= TT_SSE_PROBE_LIMIT) {
+            const { done, value } = await reader.read();
+            if (done) {
+                text += decoder.decode();
+                break;
+            }
+            text += decoder.decode(value, { stream: true });
+            const first = firstSseData(text);
+            if (!first.complete) continue;
+            if (first.data === '[DONE]') break;
+            const detail = tauriErrorText(parseJson(first.data));
+            if (detail) {
+                void reader.cancel().catch(() => {});
+                return { failed: true, detail, reason: 'tauritavern-sse-error', response: forwardedResponse };
+            }
+            break;
+        }
+    } catch {
+        // The consumer branch receives the original stream error unchanged.
+    }
+    void reader.cancel().catch(() => {});
+    return { failed: false, detail: '', reason: 'sse-pass', response: forwardedResponse };
+}
+
 function parseJson(text) {
     if (!text) return null;
     try {
@@ -764,7 +844,11 @@ async function responseBusinessFailure(response) {
         warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
         return result;
     }
-    if (contentType.includes('text/event-stream')) return { failed: false, detail: '', reason: 'sse-pass' };
+    if (contentType.includes('text/event-stream')) {
+        const result = await probeTauriTavernSse(response);
+        warnSlowPath('response-check', startedAt, PERF_WARN_MS.responseCheck);
+        return result;
+    }
     if (!contentType.includes('application/json')) return { failed: false, detail: '', reason: 'non-json' };
     const text = await responseText(response);
     const payload = parseJson(text);
@@ -877,11 +961,12 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
     });
     const response = await originalFetch(input, requestInit);
     const businessFailure = await responseBusinessFailure(response);
+    const checkedResponse = businessFailure.response || response;
     retryDebug('response-check', {
         traceId: pending.id,
         retryIndex,
-        status: response.status,
-        ok: response.ok,
+        status: checkedResponse.status,
+        ok: checkedResponse.ok,
         reason: businessFailure.reason,
         failed: businessFailure.failed,
     });
@@ -891,13 +976,81 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         if (pending.forced && !pending.locked) {
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
         }
-        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: response.status, statusText: response.statusText });
-        return { ok: true, response };
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: checkedResponse.status, statusText: checkedResponse.statusText });
+        return { ok: true, response: checkedResponse };
     }
     const count = markRequestFailure(pending.state, member);
     const detail = businessFailure.detail;
-    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: response.status, statusText: response.statusText, responseBody: detail });
-    return { ok: false, response, count };
+    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: checkedResponse.status, statusText: checkedResponse.statusText, responseBody: detail });
+    return { ok: false, response: checkedResponse, count };
+}
+
+function readBatchRequest(init) {
+    if (typeof init?.body !== 'string') return null;
+    const payload = parseJson(init.body);
+    if (!payload || !Array.isArray(payload.candidates) || !payload.candidates.length) return null;
+    return payload;
+}
+
+function batchGenerationType(payload) {
+    const type = payload?.candidates
+        ?.map(candidate => String(candidate?.type || ''))
+        .find(value => TEXT_GENERATION_TYPES.has(value));
+    return type || newestPreparedSelection()?.type || 'normal';
+}
+
+async function handleTavernNextBatchRequest(input, init, onStatus) {
+    const payload = readBatchRequest(init);
+    if (!payload) return originalFetch(input, init);
+    if (loadState().enabled === false) {
+        discardAllPreparedSelections('disabled-before-batch');
+        return originalFetch(input, init);
+    }
+    const type = batchGenerationType(payload);
+    const messageId = targetMessageId(type);
+    const prepared = matchingPreparedSelection(type, messageId);
+    if (!prepared) {
+        if (loadState().enabled !== false && preparedSelections.size > 0) recordPluginError('batch-unsupported');
+        return originalFetch(input, init);
+    }
+
+    const member = prepared.member;
+    const picked = prepared.picked;
+    const state = prepared.state;
+    let response;
+    try {
+        for (const candidate of payload.candidates) patchGenerateData(candidate, member);
+        payload.chat_completion_source = providerSource(member.provider);
+        const requestInit = { ...init, body: JSON.stringify(payload) };
+        queueLog(state, { event: 'pick', trigger: `${type}-batch`, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true });
+        showModelAlert(state, member);
+        const pickLabel = prepared.override?.source === 'lock' ? '锁定' : (prepared.override ? '指定' : '命中');
+        if (typeof onStatus === 'function') onStatus(`${pickLabel}: ${memberLabel(member)} | ${type}-batch | #${messageId}`);
+        response = await originalFetch(input, requestInit);
+    } catch (error) {
+        recordPluginError('ready', error);
+        throw error;
+    } finally {
+        restorePresetTransaction(prepared.token);
+    }
+
+    if (response?.ok) {
+        markRequestSuccess(state, prepared.pool, member, `${type}-batch|${Date.now()}`, { forced: !!prepared.override });
+        if (prepared.override && prepared.override.source !== 'lock') {
+            bindApiOverrideToFloor(state, prepared.pool.id, member.id, messageId);
+        }
+        queueLog(state, { event: 'request', trigger: `${type}-batch`, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true, status: response.status, statusText: response.statusText });
+        await retainStreamingSource({
+            id: `batch-${prepared.token}`,
+            stream: true,
+            sequence: prepared.token,
+            processor: context().streamingProcessor || null,
+        }, member, init?.signal);
+    } else if (response) {
+        const count = markRequestFailure(state, member);
+        queueLog(state, { event: 'request', trigger: `${type}-batch`, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: false, status: response.status, statusText: response.statusText, detail: `第 ${count} 次失败` });
+    }
+    return response;
 }
 
 async function runForcedRetryPlan(input, init, pending) {
@@ -1085,17 +1238,16 @@ async function runRetryPlan(input, init, pending, onStatus) {
 }
 
 function bindRetryFetch(onStatus) {
-    if (fetchRetryBound) return;
+    if (fetchRetryBound && window.fetch === retryFetchWrapper) return;
     originalFetch = window.fetch.bind(window);
-    window.fetch = async function karmaFlipRetryFetch(input, init) {
+    retryFetchWrapper = async function karmaFlipRetryFetch(input, init) {
         let path = '';
         try {
             const url = new URL(typeof input === 'string' ? input : input?.url || String(input), window.location.href);
             if (url.origin === window.location.origin) path = url.pathname;
         } catch { /* Leave non-URL inputs to the original fetch. */ }
-        if (path === '/api/backends/chat-completions/generate-batch-stream'
-            && loadState().enabled !== false && preparedSelections.size > 0) {
-            recordPluginError('batch-unsupported');
+        if (path === '/api/backends/chat-completions/generate-batch-stream') {
+            return handleTavernNextBatchRequest(input, init, onStatus);
         }
         if (path !== '/api/backends/chat-completions/generate' || !init?.body || typeof init.body !== 'string') {
             return originalFetch(input, init);
@@ -1114,6 +1266,7 @@ function bindRetryFetch(onStatus) {
         retryDebug('trace-matched', { traceId: traced.traceId, type: pending.type });
         return runRetryPlan(input, traced.init, pending, onStatus);
     };
+    window.fetch = retryFetchWrapper;
     fetchRetryBound = true;
 }
 
@@ -1251,6 +1404,7 @@ function bindGenerationLifecycle(eventSource, eventTypes) {
 }
 
 function bindChatCompletionSettings(onStatus, force = false, reason = 'startup') {
+    bindRetryFetch(onStatus);
     if (bindRetryTimer) {
         clearTimeout(bindRetryTimer);
         bindRetryTimer = null;

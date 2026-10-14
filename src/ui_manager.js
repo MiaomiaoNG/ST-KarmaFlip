@@ -7,15 +7,19 @@ import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_di
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.8';
+const UPDATE_NOTICE_VERSION = '1.2.9';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 2026年10月8日更新内容：
- 重做了插件美化，具体操作可以看帖子说明；
+1. 重做了插件美化，具体操作可以看帖子说明；
 2. 界面尺寸额外适配全屏美化；
 3. 尝试修复QR按钮不跟随主题颜色的问题；
 4. 把丑的悬浮图标下了，换了个新的漂亮的；
 5. 尝试修复点击插头重新连接时，插件概率不接管的BUG
+
+2026年10月14日更新内容：
+1.兼容类酒馆TavernNext和TauriTavern
+
 
 `;
 
