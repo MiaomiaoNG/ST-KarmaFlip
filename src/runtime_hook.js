@@ -27,6 +27,7 @@ export function clearRuntimeHookState() {
 
 const TEXT_GENERATION_TYPES = new Set(['normal', 'swipe', 'continue', 'append', 'regenerate']);
 const TRACE_FIELD = 'karmaflip_trace_id';
+const FETCH_WRAPPER_MARK = Symbol.for('ST-KarmaFlip.fetch-wrapper');
 const PENDING_TTL = 30000;
 const PRESET_TRANSACTION_TTL = 120000;
 const TT_SSE_PROBE_LIMIT = 128 * 1024;
@@ -1238,8 +1239,15 @@ async function runRetryPlan(input, init, pending, onStatus) {
 }
 
 function bindRetryFetch(onStatus) {
-    if (fetchRetryBound && window.fetch === retryFetchWrapper) return;
-    originalFetch = window.fetch.bind(window);
+    if (fetchRetryBound) return;
+    const upstreamFetch = window.fetch;
+    if (typeof upstreamFetch !== 'function') return;
+    if (upstreamFetch[FETCH_WRAPPER_MARK] === true) {
+        retryFetchWrapper = upstreamFetch;
+        fetchRetryBound = true;
+        return;
+    }
+    originalFetch = upstreamFetch.bind(window);
     retryFetchWrapper = async function karmaFlipRetryFetch(input, init) {
         let path = '';
         try {
@@ -1266,7 +1274,16 @@ function bindRetryFetch(onStatus) {
         retryDebug('trace-matched', { traceId: traced.traceId, type: pending.type });
         return runRetryPlan(input, traced.init, pending, onStatus);
     };
-    window.fetch = retryFetchWrapper;
+    Object.defineProperty(retryFetchWrapper, FETCH_WRAPPER_MARK, { value: true });
+    try {
+        window.fetch = retryFetchWrapper;
+        if (window.fetch !== retryFetchWrapper) throw new Error('window.fetch assignment was ignored');
+    } catch (error) {
+        retryFetchWrapper = null;
+        originalFetch = null;
+        console.warn('[KarmaFlip] 无法安装请求接管，已保持酒馆原生 fetch:', error);
+        return;
+    }
     fetchRetryBound = true;
 }
 
@@ -1404,7 +1421,6 @@ function bindGenerationLifecycle(eventSource, eventTypes) {
 }
 
 function bindChatCompletionSettings(onStatus, force = false, reason = 'startup') {
-    bindRetryFetch(onStatus);
     if (bindRetryTimer) {
         clearTimeout(bindRetryTimer);
         bindRetryTimer = null;

@@ -7,7 +7,7 @@ import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_di
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.9';
+const UPDATE_NOTICE_VERSION = '1.2.10';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 2026年10月8日更新内容：
@@ -19,6 +19,7 @@ const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 2026年10月14日更新内容：
 1.兼容类酒馆TavernNext和TauriTavern
+2.修复手机端原生酒馆更新插件后无法完成加载的问题
 
 
 `;
