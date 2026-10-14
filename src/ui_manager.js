@@ -3736,9 +3736,36 @@ function bindEntryDragSort(state, rerender, setStatus) {
         frameId = 0;
     };
 
+    const moveTouchDrag = (event) => {
+        if (!drag || event.touches?.length !== 1) return;
+        const touch = event.touches[0];
+        drag.touchFallbackActive = true;
+        latestClientY = touch.clientY;
+        scheduleDragFrame();
+        if (event.cancelable) event.preventDefault();
+    };
+
+    const finishTouchDrag = () => {
+        if (!drag) return;
+        finish();
+    };
+
+    const bindTouchDragFallback = () => {
+        document.addEventListener('touchmove', moveTouchDrag, { passive: false, capture: true });
+        document.addEventListener('touchend', finishTouchDrag, { passive: false, capture: true });
+        document.addEventListener('touchcancel', finishTouchDrag, { passive: false, capture: true });
+    };
+
+    const unbindTouchDragFallback = () => {
+        document.removeEventListener('touchmove', moveTouchDrag, true);
+        document.removeEventListener('touchend', finishTouchDrag, true);
+        document.removeEventListener('touchcancel', finishTouchDrag, true);
+    };
+
     const cleanup = () => {
         clearPending();
         cancelFrame();
+        unbindTouchDragFallback();
         $(document).off('.kfEntryDrag');
         if (drag?.row?.length) {
             drag.row.removeClass('kf-dragging').css({ position: '', left: '', top: '', width: '', zIndex: '', pointerEvents: '', transform: '' });
@@ -3848,7 +3875,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
 
     const startDrag = () => {
         if (!pending) return;
-        const { row, pointerId, startY, target } = pending;
+        const { row, pointerId, pointerType, startY, target } = pending;
         clearPending();
         syncAllEntries(state);
         const rect = row.get(0).getBoundingClientRect();
@@ -3859,7 +3886,9 @@ function bindEntryDragSort(state, rerender, setStatus) {
             placeholder,
             id: row.data('id'),
             pointerId,
+            pointerType,
             startY,
+            touchFallbackActive: false,
         };
         latestClientY = startY;
         if (target instanceof HTMLElement) target.blur?.();
@@ -3880,9 +3909,14 @@ function bindEntryDragSort(state, rerender, setStatus) {
         } catch {
             // The document listeners below keep the drag active if capture is unavailable.
         }
+        bindTouchDragFallback();
         $(document)
             .on('pointermove.kfEntryDrag', move)
-            .on('pointerup.kfEntryDrag pointercancel.kfEntryDrag', finish);
+            .on('pointerup.kfEntryDrag', finish)
+            .on('pointercancel.kfEntryDrag', event => {
+                if (drag?.pointerType === 'touch' || drag?.touchFallbackActive) return;
+                finish(event);
+            });
     };
 
     list.on('contextmenu.kfEntrySort', '.kf-entry-block', function (event) {
@@ -3896,6 +3930,7 @@ function bindEntryDragSort(state, rerender, setStatus) {
         pending = {
             row,
             pointerId: event.pointerId,
+            pointerType: String(event.pointerType || event.originalEvent?.pointerType || ''),
             startX: event.clientX,
             startY: event.clientY,
             target: event.target,
