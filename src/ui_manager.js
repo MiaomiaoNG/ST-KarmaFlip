@@ -7,7 +7,8 @@ import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_di
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.12';
+const ENTRY_DRAG_HOLD_MS = 450;
+const UPDATE_NOTICE_VERSION = '1.2.13';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
 2026年10月14日更新内容：
@@ -16,6 +17,7 @@ const UPDATE_NOTICE_TEXT = `更新内容如下：
 3.API 条目的模型选择弹窗新增关键词搜索
 4.更新公告新增“过往更新”折叠查看
 5.API 报错内容框新增“复制全部”按钮
+6.恢复 API 条目任意位置长按拖动排序，并优化拖动流畅度
 
 
 `;
@@ -3089,6 +3091,7 @@ function reorderEntriesByIds(state, orderedIds) {
         if (!next.includes(entry)) next.push(entry);
     }
     if (next.length !== entries.length) return false;
+    if (next.every((entry, index) => entry === entries[index])) return false;
     pool.entries = next;
     return true;
 }
@@ -3639,28 +3642,44 @@ function statusFailureMessage(payload, rawBody) {
     return '';
 }
 
-function isDragExcluded(target) {
-    return !!$(target).closest('input,textarea,select,button,label,.kf-dropdown-input,.kf-dropdown-arrow,.kf-toggle-chip,.kf-select-wrapper,.kf-input-wrapper').length;
-}
-
 function bindEntryDragSort(state, rerender, setStatus) {
     const list = $('#kf-entry-list');
     let timer = null;
     let drag = null;
+    let pending = null;
+    let frameId = 0;
+    let latestClientY = 0;
+
+    list.off('.kfEntrySort');
+    $(document).off('.kfEntryPrep .kfEntryDrag');
 
     const clearTimer = () => {
         if (timer) clearTimeout(timer);
         timer = null;
     };
 
-    const cleanup = () => {
+    const clearPending = () => {
         clearTimer();
+        pending?.row?.removeClass('kf-drag-pending');
+        pending = null;
+        $(document).off('.kfEntryPrep');
+    };
+
+    const cancelFrame = () => {
+        if (frameId) window.cancelAnimationFrame(frameId);
+        frameId = 0;
+    };
+
+    const cleanup = () => {
+        clearPending();
+        cancelFrame();
         $(document).off('.kfEntryDrag');
         if (drag?.row?.length) {
             drag.row.removeClass('kf-dragging').css({ position: '', left: '', top: '', width: '', zIndex: '', pointerEvents: '', transform: '' });
         }
         drag?.placeholder?.remove();
         list.removeClass('kf-drag-active');
+        document.body.classList.remove('kf-entry-dragging-active');
         drag = null;
     };
 
@@ -3681,49 +3700,78 @@ function bindEntryDragSort(state, rerender, setStatus) {
     const placePlaceholder = (clientY) => {
         if (!drag) return;
         const rows = list.children('.kf-entry-block').not(drag.row);
-        let placed = false;
+        let beforeRow = null;
         rows.each(function () {
-            const row = $(this);
             const rect = this.getBoundingClientRect();
             if (clientY < rect.top + rect.height / 2) {
-                drag.placeholder.insertBefore(row);
-                placed = true;
+                beforeRow = this;
                 return false;
             }
             return true;
         });
-        if (!placed) list.append(drag.placeholder);
+        if (beforeRow) {
+            if (drag.placeholder.next().get(0) !== beforeRow) drag.placeholder.insertBefore(beforeRow);
+            return;
+        }
+        if (list.children().last().get(0) !== drag.placeholder.get(0)) list.append(drag.placeholder);
     };
 
     const autoScroll = (clientY) => {
         const node = list.get(0);
-        if (!node) return;
+        if (!node) return false;
         const rect = node.getBoundingClientRect();
-        const edge = 42;
-        if (clientY < rect.top + edge) node.scrollTop -= 12;
-        if (clientY > rect.bottom - edge) node.scrollTop += 12;
+        const edge = Math.min(64, rect.height * 0.2);
+        let delta = 0;
+        if (clientY < rect.top + edge) delta = -Math.ceil((rect.top + edge - clientY) / 4);
+        else if (clientY > rect.bottom - edge) delta = Math.ceil((clientY - (rect.bottom - edge)) / 4);
+        if (!delta) return false;
+        const previous = node.scrollTop;
+        node.scrollTop += Math.max(-18, Math.min(18, delta));
+        return node.scrollTop !== previous;
+    };
+
+    const renderDragFrame = () => {
+        frameId = 0;
+        if (!drag) return;
+        const dy = latestClientY - drag.startY;
+        drag.row.get(0).style.transform = `translate3d(0, ${dy}px, 0)`;
+        placePlaceholder(latestClientY);
+        if (autoScroll(latestClientY)) frameId = window.requestAnimationFrame(renderDragFrame);
+    };
+
+    const scheduleDragFrame = () => {
+        if (!drag || frameId) return;
+        frameId = window.requestAnimationFrame(renderDragFrame);
     };
 
     const move = (event) => {
-        if (!drag) return;
-        const dy = event.clientY - drag.startY;
-        drag.row.css('transform', `translate3d(0, ${dy}px, 0)`);
-        placePlaceholder(event.clientY);
-        autoScroll(event.clientY);
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        latestClientY = event.clientY;
+        scheduleDragFrame();
         event.preventDefault();
+    };
+
+    const suppressPostDragClick = () => {
+        const guard = (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            document.removeEventListener('click', guard, true);
+        };
+        document.addEventListener('click', guard, true);
+        window.setTimeout(() => document.removeEventListener('click', guard, true), 550);
     };
 
     const finish = (event) => {
         if (!drag) {
-            cleanup();
+            clearPending();
             return;
         }
-        if (event?.type === 'pointercancel') {
-            cleanup();
-            return;
-        }
+        if (event?.pointerId !== undefined && event.pointerId !== drag.pointerId) return;
+        cancelFrame();
+        renderDragFrame();
         const orderedIds = orderedIdsFromDom();
         const changed = reorderEntriesByIds(state, orderedIds);
+        suppressPostDragClick();
         cleanup();
         if (changed) {
             persistStructure(state);
@@ -3732,8 +3780,10 @@ function bindEntryDragSort(state, rerender, setStatus) {
         }
     };
 
-    const startDrag = (row, event) => {
-        event.preventDefault();
+    const startDrag = () => {
+        if (!pending) return;
+        const { row, pointerId, startY, target } = pending;
+        clearPending();
         syncAllEntries(state);
         const rect = row.get(0).getBoundingClientRect();
         const placeholder = $('<div class="kf-drag-placeholder"></div>').height(rect.height);
@@ -3742,9 +3792,14 @@ function bindEntryDragSort(state, rerender, setStatus) {
             row,
             placeholder,
             id: row.data('id'),
-            startY: event.clientY,
+            pointerId,
+            startY,
         };
+        latestClientY = startY;
+        if (target instanceof HTMLElement) target.blur?.();
+        window.getSelection?.()?.removeAllRanges?.();
         list.addClass('kf-drag-active');
+        document.body.classList.add('kf-entry-dragging-active');
         row.addClass('kf-dragging').css({
             position: 'fixed',
             left: `${rect.left}px`,
@@ -3754,27 +3809,41 @@ function bindEntryDragSort(state, rerender, setStatus) {
             pointerEvents: 'none',
             transform: 'translate3d(0, 0, 0)',
         });
-        row.get(0).setPointerCapture?.(event.pointerId);
+        try {
+            row.get(0).setPointerCapture?.(pointerId);
+        } catch {
+            // The document listeners below keep the drag active if capture is unavailable.
+        }
         $(document)
             .on('pointermove.kfEntryDrag', move)
             .on('pointerup.kfEntryDrag pointercancel.kfEntryDrag', finish);
     };
 
-    list.on('pointerdown.kf', '.kf-entry-block', function (event) {
+    list.on('contextmenu.kfEntrySort', '.kf-entry-block', function (event) {
+        if (pending || drag) event.preventDefault();
+    });
+    list.on('pointerdown.kfEntrySort', '.kf-entry-block', function (event) {
         if (event.button && event.button !== 0) return;
-        if (isDragExcluded(event.target)) return;
         const row = $(this);
         if (list.children('.kf-entry-block').length < 2) return;
-        clearTimer();
-        timer = setTimeout(() => startDrag(row, event), 420);
+        clearPending();
+        pending = {
+            row,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            target: event.target,
+        };
+        row.addClass('kf-drag-pending');
+        timer = window.setTimeout(startDrag, ENTRY_DRAG_HOLD_MS);
         $(document)
-            .off('pointerup.kfEntryPrep pointercancel.kfEntryPrep pointermove.kfEntryPrep')
             .on('pointermove.kfEntryPrep', prepEvent => {
-                if (Math.abs(prepEvent.clientY - event.clientY) > 8 || Math.abs(prepEvent.clientX - event.clientX) > 8) clearTimer();
+                if (!pending || prepEvent.pointerId !== pending.pointerId) return;
+                if (Math.abs(prepEvent.clientY - pending.startY) > 10 || Math.abs(prepEvent.clientX - pending.startX) > 10) clearPending();
             })
-            .on('pointerup.kfEntryPrep pointercancel.kfEntryPrep', () => {
-                clearTimer();
-                $(document).off('.kfEntryPrep');
+            .on('pointerup.kfEntryPrep pointercancel.kfEntryPrep', prepEvent => {
+                if (!pending || prepEvent.pointerId !== pending.pointerId) return;
+                clearPending();
             });
     });
 }

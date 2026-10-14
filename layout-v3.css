@@ -948,10 +948,30 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.08);
 }
 
+.kf-entry-block.kf-drag-pending {
+    border-color: rgba(var(--primary-rgb), 0.28) !important;
+}
+
 .kf-entry-block.kf-dragging {
     z-index: 5;
     opacity: 0.95;
     box-shadow: 0 14px 28px rgba(42, 72, 112, 0.18);
+    transition: none !important;
+    will-change: transform;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grabbing;
+}
+
+.kf-entries-container.kf-drag-active,
+.kf-entries-container.kf-drag-active * {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body.kf-entry-dragging-active {
+    cursor: grabbing;
 }
 
 .kf-drag-placeholder {
@@ -959,6 +979,7 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
     border: 1px dashed rgba(var(--primary-rgb), 0.42) !important;
     border-radius: 15px;
     background: rgba(var(--primary-rgb), 0.05);
+    box-sizing: border-box;
 }
 
 .kf-plugin-actions {
