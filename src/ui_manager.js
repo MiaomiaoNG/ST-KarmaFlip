@@ -2322,6 +2322,46 @@ function saveApiPresetIfNamed(state, entry) {
     if (isMeaningfulApiEntry(entry)) saveApiPreset(state, entry);
 }
 
+function syncLinkedApiFieldAfterEdit(state, sourceEntry, field) {
+    if (!sourceEntry || !['apiUrl', 'key'].includes(field)) return [];
+    saveApiPreset(state, sourceEntry);
+    const presetId = String(sourceEntry.presetId || '').trim();
+    if (!presetId) return [];
+
+    const value = String(sourceEntry[field] || '');
+    const sourceName = String(sourceEntry.name || '').trim();
+    const preset = (state.apiPresets || []).find(item => String(item?.id || '').trim() === presetId);
+    if (preset) preset[field] = value;
+
+    const updatedEntries = [];
+    for (const pool of state.pools || []) {
+        for (const entry of pool.entries || []) {
+            if (!entry || entry.id === sourceEntry.id) continue;
+            const entryPresetId = String(entry.presetId || '').trim();
+            const legacySameName = !entryPresetId
+                && !!sourceName
+                && String(entry.name || '').trim() === sourceName;
+            if (entryPresetId !== presetId && !legacySameName) continue;
+            if (legacySameName) entry.presetId = presetId;
+            entry[field] = value;
+            updatedEntries.push(entry);
+        }
+    }
+    return updatedEntries;
+}
+
+function updateLinkedApiFieldControls(entries, field) {
+    if (!entries.length) return;
+    const selector = field === 'key' ? '.kf-entry-key' : '.kf-entry-url';
+    const values = new Map(entries.map(entry => [String(entry.id || ''), String(entry[field] || '')]));
+    document.querySelectorAll('#kf-entry-list .kf-entry-block').forEach(row => {
+        const value = values.get(String(row.dataset.id || ''));
+        if (value === undefined) return;
+        const input = row.querySelector(selector);
+        if (input) input.value = value;
+    });
+}
+
 function renderPool(state) {
     const pool = getActivePool(state);
     $('#kf-pool-picker-display').val(pool.name);
@@ -3950,6 +3990,7 @@ function bind(state, rerender, setStatus) {
         setStatus('API条目名称已保存');
     });
     $('#kf-entry-list').on('input.kf', '.kf-entry-name,.kf-entry-url,.kf-entry-key,.kf-entry-model,.kf-entry-fixed-runs,.kf-entry-weight,.kf-entry-pity,.kf-entry-cooldown', function () {
+        if ($(this).is('.kf-entry-url,.kf-entry-key')) return;
         const row = $(this).closest('.kf-entry-block');
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
@@ -3982,6 +4023,14 @@ function bind(state, rerender, setStatus) {
         const entry = getActivePool(state).entries.find(e => e.id === row.data('id'));
         if (!entry) return;
         syncEntryFromRow(entry, row, state);
+        const linkedField = $(this).hasClass('kf-entry-key')
+            ? 'key'
+            : ($(this).hasClass('kf-entry-url') ? 'apiUrl' : '');
+        const updatedEntries = linkedField ? syncLinkedApiFieldAfterEdit(state, entry, linkedField) : [];
+        if (updatedEntries.length) {
+            updateLinkedApiFieldControls(updatedEntries, linkedField);
+            setStatus(`${linkedField === 'key' ? 'KEY' : 'URL'} 已同步到另外 ${updatedEntries.length} 个关联条目`);
+        }
         const equalized = $(this).hasClass('kf-entry-weight') && maybeEqualizeWeights(state);
         persistStructure(state);
         if (equalized) rerender();
