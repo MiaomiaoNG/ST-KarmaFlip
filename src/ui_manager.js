@@ -7,19 +7,24 @@ import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_di
 const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
-const UPDATE_NOTICE_VERSION = '1.2.10';
+const UPDATE_NOTICE_VERSION = '1.2.12';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-2026年10月8日更新内容：
+2026年10月14日更新内容：
+1.兼容类酒馆TavernNext和TauriTavern
+2.修复手机端原生酒馆更新插件后无法完成加载的问题
+3.API 条目的模型选择弹窗新增关键词搜索
+4.更新公告新增“过往更新”折叠查看
+5.API 报错内容框新增“复制全部”按钮
+
+
+`;
+const UPDATE_NOTICE_HISTORY_TEXT = `2026年10月8日更新内容：
 1. 重做了插件美化，具体操作可以看帖子说明；
 2. 界面尺寸额外适配全屏美化；
 3. 尝试修复QR按钮不跟随主题颜色的问题；
 4. 把丑的悬浮图标下了，换了个新的漂亮的；
 5. 尝试修复点击插头重新连接时，插件概率不接管的BUG
-
-2026年10月14日更新内容：
-1.兼容类酒馆TavernNext和TauriTavern
-2.修复手机端原生酒馆更新插件后无法完成加载的问题
 
 
 `;
@@ -953,7 +958,16 @@ function shouldShowUpdateNotice(state) {
 }
 
 function populateUpdateNotice() {
-    $('#kf-update-notice-body').text(UPDATE_NOTICE_TEXT);
+    $('#kf-update-notice-current').text(UPDATE_NOTICE_TEXT);
+    $('#kf-update-notice-history').text(UPDATE_NOTICE_HISTORY_TEXT).prop('hidden', true);
+    $('#kf-update-notice-history-toggle').attr('aria-expanded', 'false').removeClass('kf-expanded');
+}
+
+function toggleUpdateNoticeHistory() {
+    const history = $('#kf-update-notice-history');
+    const expanded = history.prop('hidden');
+    history.prop('hidden', !expanded);
+    $('#kf-update-notice-history-toggle').attr('aria-expanded', String(expanded)).toggleClass('kf-expanded', expanded);
 }
 
 function openUpdateNotice(state) {
@@ -2587,7 +2601,14 @@ function createLogRow(log) {
         const responseBody = document.createElement('div');
         responseBody.className = 'kf-log-detail-response';
         appendCopyableLogText(responseBody, responseDetail);
-        detail.appendChild(responseBody);
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'kf-log-error-copy';
+        copy.textContent = '复制全部';
+        copy.dataset.copyText = responseDetail;
+        copy.setAttribute('aria-label', '复制全部 API 报错内容');
+        copy.setAttribute('title', '复制全部 API 报错内容');
+        detail.append(copy, responseBody);
     }
     if (detail.childNodes.length) row.appendChild(detail);
     return row;
@@ -3286,8 +3307,11 @@ function showToast(message, type = 'info', timeout = 2800) {
 window.STKarmaFlip.showToast = showToast;
 
 function closeDropdown() {
-    $('#kf-dropdown-modal').removeClass('kf-api-name-picker');
+    $('#kf-dropdown-modal').removeClass('kf-api-name-picker kf-model-picker');
     hideModal('kf-dropdown-modal');
+    $('#kf-dropdown-search').prop('hidden', true);
+    $('#kf-dropdown-search-input').val('').off('.kfDropSearch');
+    $('#kf-dropdown-search-count').text('');
     $('#kf-mobile-options').empty();
 }
 
@@ -3302,6 +3326,23 @@ function normalizePickerOptions(options) {
     return [...map.values()];
 }
 
+function pickerMatchesSearch(option, query) {
+    const needle = String(query || '').trim().toLocaleLowerCase();
+    if (!needle) return true;
+    return [option?.label, option?.value]
+        .some(value => String(value || '').toLocaleLowerCase().includes(needle));
+}
+
+function filterOptionPicker(box, options, query) {
+    const matchingValues = new Set(options.filter(option => pickerMatchesSearch(option, query)).map(option => option.value));
+    box.children('[data-value]').each(function () {
+        $(this).prop('hidden', !matchingValues.has(String($(this).attr('data-value') || '')));
+    });
+    const count = matchingValues.size;
+    $('#kf-picker-empty').prop('hidden', count !== 0);
+    $('#kf-dropdown-search-count').text(`${count}/${options.length}`);
+}
+
 function openOptionPicker(input, options, title, onPick, config = {}) {
     const unique = normalizePickerOptions(options);
     if (!unique.length) return;
@@ -3313,7 +3354,9 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
 
     closeDropdown();
     $('#kf-dropdown-title').text(title || '选择');
-    $('#kf-dropdown-modal').toggleClass('kf-api-name-picker', config.kind === 'api-name');
+    $('#kf-dropdown-modal')
+        .toggleClass('kf-api-name-picker', config.kind === 'api-name')
+        .toggleClass('kf-model-picker', config.kind === 'model');
     const box = $('#kf-mobile-options').empty();
     for (const option of unique) {
         const deleteButton = config.deletable
@@ -3327,6 +3370,7 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
             box.append(`<div class="kf-mobile-option" data-value="${esc(option.value)}">${esc(option.label)}</div>`);
         }
     }
+    box.append('<div class="kf-picker-empty" id="kf-picker-empty" hidden>未找到匹配模型</div>');
     box.data('kfOptions', unique);
     box.off('click.kfDrop').on('click.kfDrop', '.kf-mobile-option', function () {
         choose(String($(this).data('value')));
@@ -3343,6 +3387,21 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
         row.remove();
         if (!nextOptions.length) closeDropdown();
     });
+    const searchable = config.searchable === true;
+    const search = $('#kf-dropdown-search').prop('hidden', !searchable);
+    const searchInput = $('#kf-dropdown-search-input')
+        .attr('placeholder', config.searchPlaceholder || '搜索关键词')
+        .val('')
+        .off('.kfDropSearch');
+    if (searchable) {
+        $('#kf-dropdown-search-count').text(`${unique.length}/${unique.length}`);
+        searchInput.on('input.kfDropSearch search.kfDropSearch', function () {
+            filterOptionPicker(box, box.data('kfOptions') || [], $(this).val());
+        });
+    } else {
+        search.removeAttr('aria-label');
+        $('#kf-dropdown-search-count').text('');
+    }
     showModal('kf-dropdown-modal');
 }
 
@@ -3423,6 +3482,10 @@ function openEntryModelPicker(state, row, input, rerender) {
         saveApiPreset(state, entry);
         persistStructure(state);
         rerender();
+    }, {
+        kind: 'model',
+        searchable: true,
+        searchPlaceholder: '搜索模型关键词',
     });
 }
 
@@ -4005,6 +4068,20 @@ function bind(state, rerender, setStatus) {
             this.textContent = '请长按文字复制';
         }
     });
+    $('#kf-logs-list').off('.kfLogErrorCopy').on('click.kfLogErrorCopy', '.kf-log-error-copy', async function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const button = this;
+        try {
+            await copyTextToClipboard(button.dataset.copyText || '');
+            button.textContent = '已复制';
+            showToast('完整 API 报错已复制', 'info');
+        } catch {
+            button.textContent = '复制失败';
+            showToast('报错复制失败，请长按内容手动复制', 'error');
+        }
+        window.setTimeout(() => { button.textContent = '复制全部'; }, 1400);
+    });
     $('#kf-logs-list').off('.kfLogUrl')
         .on('click.kfLogUrl', '.kf-log-copy-url', async function (event) {
             event.preventDefault();
@@ -4173,6 +4250,7 @@ function bind(state, rerender, setStatus) {
         setStatus('全部数据已清除');
     });
     $('#kf-update-notice-close,#kf-update-notice-confirm').off('click.kf').on('click.kf', () => confirmUpdateNotice(state));
+    $('#kf-update-notice-history-toggle').off('click.kf').on('click.kf', toggleUpdateNoticeHistory);
     $('#kf-sequence-confirm').off('click.kf').on('click.kf', () => closeModal('kf-sequence-modal'));
     $('#kf-rename-pool-close,#kf-rename-pool-cancel').off('click.kf').on('click.kf', () => closeRenamePoolModal());
     $('#kf-rename-pool-confirm').off('click.kf').on('click.kf', () => renameActivePool(state, rerender, setStatus));

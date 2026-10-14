@@ -99,8 +99,14 @@
     <div class="kf-modal-overlay" id="kf-update-notice-modal">
         <section class="kf-modal-box kf-update-notice-box">
             <header class="kf-modal-header"><h2>更新公告</h2><button class="kf-icon-btn kf-close-btn" id="kf-update-notice-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
-            <div class="kf-modal-body kf-update-notice-body" id="kf-update-notice-body"></div>
-            <footer class="kf-modal-footer kf-modal-actions-single"><button class="kf-action-btn kf-primary-btn" id="kf-update-notice-confirm" type="button">知道了</button></footer>
+            <div class="kf-modal-body kf-update-notice-body" id="kf-update-notice-body">
+                <div id="kf-update-notice-current"></div>
+                <div class="kf-update-notice-history" id="kf-update-notice-history" hidden></div>
+            </div>
+            <footer class="kf-modal-footer kf-update-notice-footer">
+                <button class="kf-action-btn kf-secondary-btn kf-update-history-toggle" id="kf-update-notice-history-toggle" type="button" aria-expanded="false" aria-controls="kf-update-notice-history"><span>过往更新</span><svg><use href="#kf-i-chevron"/></svg></button>
+                <button class="kf-action-btn kf-primary-btn" id="kf-update-notice-confirm" type="button">知道了</button>
+            </footer>
         </section>
     </div>
 
@@ -127,6 +133,10 @@
     <div class="kf-modal-overlay" id="kf-dropdown-modal">
         <section class="kf-modal-box kf-picker-dialog">
             <header class="kf-modal-header"><h2 id="kf-dropdown-title">选择</h2><button class="kf-icon-btn kf-close-btn" id="kf-dropdown-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
+            <div class="kf-picker-search" id="kf-dropdown-search" hidden>
+                <input type="search" id="kf-dropdown-search-input" placeholder="搜索模型关键词" autocomplete="off" spellcheck="false" aria-label="搜索模型">
+                <span id="kf-dropdown-search-count" aria-live="polite"></span>
+            </div>
             <div class="kf-modal-body kf-mobile-options" id="kf-mobile-options"></div>
         </section>
     </div>
