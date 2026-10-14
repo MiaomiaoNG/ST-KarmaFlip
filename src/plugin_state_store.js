@@ -8,7 +8,6 @@ const DEFAULT_PERSIST_DELAY = 1200;
 let persistenceEnabled = false;
 let pendingPersist = false;
 let persistTimer = null;
-let persistDueAt = 0;
 let cachedState = null;
 let enabledPersistDirty = false;
 let modePersistDirty = false;
@@ -502,7 +501,6 @@ function clearLightPersistDirty() {
 function clearPersistTimer() {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = null;
-    persistDueAt = 0;
 }
 
 function flushScheduledPersist() {
@@ -578,7 +576,6 @@ function queuePersistDebounced(source, delay = DEFAULT_PERSIST_DELAY) {
     if (!persistenceEnabled) return;
     const safeDelay = Math.max(0, Number(delay) || 0);
     clearPersistTimer();
-    persistDueAt = Date.now() + safeDelay;
     persistTimer = setTimeout(() => {
         flushScheduledPersist();
     }, safeDelay);

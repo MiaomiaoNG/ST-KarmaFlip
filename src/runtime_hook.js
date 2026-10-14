@@ -7,7 +7,6 @@ let chatSettingsBound = false;
 let fetchRetryBound = false;
 let generationLifecycleBound = false;
 let boundEventSource = null;
-let boundEventTypes = null;
 let rebindQueued = false;
 const runtimeEventBindings = [];
 let bindRetryTimer = null;
@@ -1362,7 +1361,6 @@ function removeRuntimeEventBindings() {
     chatSettingsBound = false;
     generationLifecycleBound = false;
     boundEventSource = null;
-    boundEventTypes = null;
 }
 
 function addRuntimeEventBinding(eventSource, eventName, handler, makeLast = false) {
@@ -1438,7 +1436,6 @@ function bindChatCompletionSettings(onStatus, force = false, reason = 'startup')
     if (runtimeEventBindings.length) removeRuntimeEventBindings();
 
     boundEventSource = eventSource;
-    boundEventTypes = eventTypes;
     bindGenerationLifecycle(eventSource, eventTypes);
     addRuntimeEventBinding(eventSource, eventTypes.GENERATION_ENDED, finishStreamingSource);
     addRuntimeEventBinding(eventSource, eventTypes.GENERATION_STOPPED, finishStreamingSource);

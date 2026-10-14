@@ -8,6 +8,7 @@ const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'k
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
+const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
 const UPDATE_NOTICE_VERSION = '1.2.13';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
@@ -16,7 +17,7 @@ const UPDATE_NOTICE_TEXT = `更新内容如下：
 2.修复手机端原生酒馆更新插件后无法完成加载的问题
 3.API 条目的模型选择弹窗新增关键词搜索
 4.更新公告新增“过往更新”折叠查看
-5.API 报错内容框新增“复制全部”按钮
+5.API 报错内容框新增“复制”按钮，现在可以复制报错发给AI帮你检查了。
 6.恢复 API 条目任意位置长按拖动排序，并优化拖动流畅度
 
 
@@ -955,6 +956,24 @@ function observeChatShortcutHost(state, rerender, setStatus) {
     chatShortcutObserver.observe(target, { childList: true, subtree: true });
 }
 
+async function populatePluginVersion() {
+    const button = document.getElementById('kf-settings-version');
+    if (!button) return;
+    try {
+        const response = await fetch(MANIFEST_URL.href, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const manifest = await response.json();
+        const version = String(manifest?.version || '').trim();
+        if (!version) throw new Error('manifest version is empty');
+        button.textContent = `v${version}`;
+        button.dataset.version = version;
+    } catch (error) {
+        button.textContent = '版本';
+        button.removeAttribute('data-version');
+        console.warn('[KarmaFlip] 无法读取插件版本:', error);
+    }
+}
+
 function shouldShowUpdateNotice(state) {
     return String(state?.ui?.updateNoticeSeenVersion || '') !== UPDATE_NOTICE_VERSION;
 }
@@ -972,10 +991,14 @@ function toggleUpdateNoticeHistory() {
     $('#kf-update-notice-history-toggle').attr('aria-expanded', String(expanded)).toggleClass('kf-expanded', expanded);
 }
 
-function openUpdateNotice(state) {
-    if (!shouldShowUpdateNotice(state)) return;
+function showUpdateNotice() {
     populateUpdateNotice();
     showModal('kf-update-notice-modal');
+}
+
+function openUpdateNotice(state) {
+    if (!shouldShowUpdateNotice(state)) return;
+    showUpdateNotice();
 }
 
 function confirmUpdateNotice(state) {
@@ -2597,7 +2620,7 @@ function createLogRow(log) {
     if (kind !== 'error') return row;
 
     const detail = document.createElement('div');
-    detail.className = 'kf-log-detail';
+    detail.className = 'kf-log-detail kf-log-error-detail';
     const responseDetail = completeErrorLogDetail(log);
     if (responseDetail) {
         const responseBody = document.createElement('div');
@@ -2606,11 +2629,14 @@ function createLogRow(log) {
         const copy = document.createElement('button');
         copy.type = 'button';
         copy.className = 'kf-log-error-copy';
-        copy.textContent = '复制全部';
         copy.dataset.copyText = responseDetail;
-        copy.setAttribute('aria-label', '复制全部 API 报错内容');
-        copy.setAttribute('title', '复制全部 API 报错内容');
-        detail.append(copy, responseBody);
+        copy.setAttribute('aria-label', '复制 API 报错内容');
+        copy.setAttribute('title', '复制 API 报错内容');
+        const copyIcon = document.createElement('i');
+        copyIcon.className = 'fa-regular fa-copy';
+        copyIcon.setAttribute('aria-hidden', 'true');
+        copy.appendChild(copyIcon);
+        detail.append(responseBody, copy);
     }
     if (detail.childNodes.length) row.appendChild(detail);
     return row;
@@ -4083,6 +4109,7 @@ function bind(state, rerender, setStatus) {
         await openPresetBindingModal(state, entry);
     });
     $('#kf-btn-settings').off('click.kf').on('click.kf', () => {
+        if (!document.getElementById('kf-settings-version')?.dataset.version) void populatePluginVersion();
         populateSettingsControls(state);
         showModal('kf-settings-modal');
     });
@@ -4140,16 +4167,12 @@ function bind(state, rerender, setStatus) {
     $('#kf-logs-list').off('.kfLogErrorCopy').on('click.kfLogErrorCopy', '.kf-log-error-copy', async function (event) {
         event.preventDefault();
         event.stopPropagation();
-        const button = this;
         try {
-            await copyTextToClipboard(button.dataset.copyText || '');
-            button.textContent = '已复制';
+            await copyTextToClipboard(this.dataset.copyText || '');
             showToast('完整 API 报错已复制', 'info');
         } catch {
-            button.textContent = '复制失败';
             showToast('报错复制失败，请长按内容手动复制', 'error');
         }
-        window.setTimeout(() => { button.textContent = '复制全部'; }, 1400);
     });
     $('#kf-logs-list').off('.kfLogUrl')
         .on('click.kfLogUrl', '.kf-log-copy-url', async function (event) {
@@ -4182,6 +4205,7 @@ function bind(state, rerender, setStatus) {
         closeModal('kf-floating-skin-modal');
         closeModal('kf-settings-modal');
     });
+    $('#kf-settings-version').off('click.kf').on('click.kf', showUpdateNotice);
     $('#kf-floating-skin-open').off('click.kf').on('click.kf', openFloatingSkinModal);
     $('#kf-floating-skin-close,#kf-floating-skin-cancel').off('click.kf').on('click.kf', () => closeModal('kf-floating-skin-modal'));
     $('#kf-floating-skin-grid').off('click.kf').on('click.kf', '.kf-floating-skin-card', function () {
@@ -4514,6 +4538,7 @@ export async function initUI(setStatus) {
     window.STKarmaFlip?.floatingCleanup?.();
     document.getElementById(FLOATING_ROOT_ID)?.remove();
     const state = loadState();
+    void populatePluginVersion();
     const pool = getActivePool(state);
     let changed = false;
     if (!pool.entries.length) {
