@@ -12,7 +12,8 @@ const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
 const UPDATE_NOTICE_VERSION = '1.2.27';
 const UPDATE_NOTICE_TEXT = `2026年10月15日更新内容：
 
-美化设置新增尺寸以及字样修改
+1.美化设置新增尺寸以及字样修改；
+2.修复TauriTavern端自动切换API时概率失效的问题
 
 `;
 const UPDATE_NOTICE_HISTORY_TEXT = `2026年10月14日更新内容：
