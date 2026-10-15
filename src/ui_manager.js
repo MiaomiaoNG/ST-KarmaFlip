@@ -137,6 +137,9 @@ function bindModalGestureGuard(modal) {
     modal.addEventListener('pointercancel', () => modalGestureStarts.delete(modal), true);
     modal.addEventListener('touchcancel', () => modalGestureStarts.delete(modal), true);
     modal.addEventListener('click', event => {
+        // Labels dispatch a follow-up click on their hidden native input. Only
+        // consume clicks that reach the overlay itself, never modal controls.
+        if (event.target !== modal) return;
         const start = modalGestureStarts.get(modal);
         modalGestureStarts.delete(modal);
         // An opener may reveal the modal on pointerup, before the compatibility
