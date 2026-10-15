@@ -128,6 +128,16 @@ function matchingBinding(a, b) {
     return presetBindingSignature(a) === presetBindingSignature(b);
 }
 
+function matchingRetryMember(candidate, initialMember) {
+    if (!matchingBinding(candidate, initialMember)) return false;
+    // TT snapshots the parser context before fetch. Retrying inside fetch cannot
+    // update that snapshot, so keep its source/model for this generation only.
+    return !isTauriTavernHost() || (
+        providerSource(candidate.provider) === providerSource(initialMember.provider)
+        && candidate.model === initialMember.model
+    );
+}
+
 function replaceObject(target, snapshot) {
     if (!target || typeof target !== 'object') return;
     for (const key of Object.keys(target)) delete target[key];
@@ -868,7 +878,7 @@ function queueLog(state, entry) {
 
 function chooseRequest(state, pool, blockedIds = new Set(), bindingMember = null) {
     const originalEntries = pool.entries;
-    pool.entries = originalEntries.filter(e => !blockedIds.has(e.id) && (!bindingMember || matchingBinding(e, bindingMember)));
+    pool.entries = originalEntries.filter(e => !blockedIds.has(e.id) && (!bindingMember || matchingRetryMember(e, bindingMember)));
     try {
         return pickMember(state, pool);
     } finally {
@@ -1113,7 +1123,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
     const maxFailures = retryLimit(state);
     const delayMs = retryDelayMs(state);
     const alertEnabled = !!state.failure?.alertEnabled;
-    const availableEntries = validRuntimeEntries(pool).filter(entry => matchingBinding(entry, pending.member));
+    const availableEntries = validRuntimeEntries(pool).filter(entry => matchingRetryMember(entry, pending.member));
     const onlyOneAvailable = availableEntries.length === 1;
     const maxSwitches = Math.max(1, availableEntries.length);
     const blockedIds = new Set();
@@ -1173,7 +1183,9 @@ async function runRetryPlan(input, init, pending, onStatus) {
 
         if (onlyOneAvailable) {
             retryDebug('only-one-stop', { traceId: pending.id, apiName: currentMember?.name || '', model: currentMember?.model || '' });
-            showRuntimeToast(onlyActiveFailureMessage(), 'error', 4200);
+            showRuntimeToast(isTauriTavernHost()
+                ? '本轮 API 请求失败，没有接口类型、模型和预设绑定均相同的可用备用条目，已停止本轮重试。下一轮仍按组合正常选择。'
+                : onlyActiveFailureMessage(), 'error', 4200);
             break;
         }
 
