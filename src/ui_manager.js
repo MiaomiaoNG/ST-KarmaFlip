@@ -10,9 +10,8 @@ const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
 const UPDATE_NOTICE_VERSION = '1.2.27';
-const UPDATE_NOTICE_TEXT = `
+const UPDATE_NOTICE_TEXT = `2026年10月15日更新内容：
 
-2026年10月15日更新内容：
 美化设置新增尺寸以及字样修改
 
 `;
