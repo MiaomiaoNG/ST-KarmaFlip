@@ -48,6 +48,8 @@ export function getDefaultState() {
             underline: '#1677ff',
             mode: 'light',
             preset: 'default',
+            uiScale: 100,
+            fontScale: 100,
         },
         failure: {
             retryCount: 3,
@@ -198,11 +200,24 @@ function normalizeFloatingPosition(position) {
     return { left: Math.round(left), top: Math.round(top) };
 }
 
+export function normalizeThemeSizes(theme = {}) {
+    const percent = (value, min, max) => {
+        const number = Number(value);
+        return value == null || value === '' || !Number.isFinite(number)
+            ? 100 : Math.min(max, Math.max(min, Math.round(number)));
+    };
+    return {
+        uiScale: percent(theme.uiScale, 75, 125),
+        fontScale: percent(theme.fontScale, 80, 140),
+    };
+}
+
 function normalizeTheme(theme) {
     const defaults = getDefaultState().theme;
     const normalized = {
         ...defaults,
         ...(theme || {}),
+        ...normalizeThemeSizes(theme || {}),
         mode: theme?.mode === 'dark' ? 'dark' : 'light',
         preset: String(theme?.preset || 'default'),
     };

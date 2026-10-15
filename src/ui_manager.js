@@ -1,4 +1,4 @@
-import { bindApiOverrideToFloor, clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
+import { bindApiOverrideToFloor, clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, normalizeThemeSizes, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
 import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
 import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
@@ -9,10 +9,13 @@ const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
-const UPDATE_NOTICE_VERSION = '1.2.13';
+const UPDATE_NOTICE_VERSION = '1.2.27';
 const UPDATE_NOTICE_TEXT = `更新内容如下：
 
-2026年10月14日更新内容：
+2026年10月15日更新内容：
+美化设置新增尺寸以及字样修改
+`;
+const UPDATE_NOTICE_HISTORY_TEXT = `2026年10月14日更新内容：
 1.兼容类酒馆TavernNext和TauriTavern
 2.修复手机端原生酒馆更新插件后无法完成加载的问题
 3.API 条目的模型选择弹窗新增关键词搜索
@@ -20,9 +23,7 @@ const UPDATE_NOTICE_TEXT = `更新内容如下：
 5.API 报错内容框新增“复制”按钮，现在可以复制报错发给AI帮你检查了。
 6.恢复 API 条目任意位置长按拖动排序，并优化拖动流畅度
 
-
-`;
-const UPDATE_NOTICE_HISTORY_TEXT = `2026年10月8日更新内容：
+2026年10月8日更新内容：
 1. 重做了插件美化，具体操作可以看帖子说明；
 2. 界面尺寸额外适配全屏美化；
 3. 尝试修复QR按钮不跟随主题颜色的问题；
@@ -123,13 +124,42 @@ function syncFloatingModalVisibility() {
     root.setAttribute('aria-hidden', String(suppressed));
 }
 
+const modalGestureStarts = new WeakMap();
+
+function bindModalGestureGuard(modal) {
+    if (modal.dataset.kfGestureGuardBound === 'true') return;
+    modal.dataset.kfGestureGuardBound = 'true';
+    const begin = event => {
+        if (modal.classList.contains('kf-show')) modalGestureStarts.set(modal, event.target);
+    };
+    for (const type of ['pointerdown', 'mousedown', 'touchstart']) modal.addEventListener(type, begin, true);
+    modal.addEventListener('pointercancel', () => modalGestureStarts.delete(modal), true);
+    modal.addEventListener('touchcancel', () => modalGestureStarts.delete(modal), true);
+    modal.addEventListener('click', event => {
+        const start = modalGestureStarts.get(modal);
+        modalGestureStarts.delete(modal);
+        // An opener may reveal the modal on pointerup, before the compatibility
+        // click arrives. Only accept a new pointer gesture inside this modal.
+        // Keyboard/assistive activation (detail 0) does not require a pointerdown.
+        if (event.detail !== 0 && (!start || (event.target === modal && start !== modal))) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+    }, true);
+}
+
 function showModal(id) {
-    document.getElementById(id)?.classList.add('kf-show');
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    if (!modal.classList.contains('kf-show')) modalGestureStarts.delete(modal);
+    modal.classList.add('kf-show');
     syncFloatingModalVisibility();
 }
 
 function hideModal(id) {
-    document.getElementById(id)?.classList.remove('kf-show');
+    const modal = document.getElementById(id);
+    if (modal) modalGestureStarts.delete(modal);
+    modal?.classList.remove('kf-show');
     syncFloatingModalVisibility();
 }
 
@@ -330,6 +360,9 @@ function resolveThemePalette(theme = {}) {
 
 function setThemeVars(target, theme) {
     if (!target) return;
+    const sizes = normalizeThemeSizes(theme);
+    target.style.setProperty('--kf-ui-scale', String(sizes.uiScale / 100));
+    target.style.setProperty('--kf-font-scale', String(sizes.fontScale / 100));
     const palette = resolveThemePalette(theme);
     target.dataset.themeMode = palette.mode;
     target.style.setProperty('--primary', palette.primary);
@@ -2008,6 +2041,10 @@ function applyTheme(state) {
 
 function populateThemeControls(state) {
     const theme = state.theme || {};
+    const sizes = normalizeThemeSizes(theme);
+    $('#kf-theme-ui-scale').val(sizes.uiScale);
+    $('#kf-theme-font-scale').val(sizes.fontScale);
+    updateThemeSizeLabels();
     const primary = normalizeHex(theme.underline, '#1677ff');
     const secondary = normalizeHex(theme.bgMain, '#ffffff');
     const mode = theme.mode === 'dark' ? 'dark' : 'light';
@@ -2034,6 +2071,11 @@ function populateThemeControls(state) {
     });
 }
 
+function updateThemeSizeLabels() {
+    $('#kf-theme-ui-scale-value').val($('#kf-theme-ui-scale').val());
+    $('#kf-theme-font-scale-value').val($('#kf-theme-font-scale').val());
+}
+
 function readThemeDraftFromControls() {
     const primary = normalizeHex($('#kf-theme-underline').val(), '#1677ff');
     const secondary = normalizeHex($('#kf-theme-bg-main').val(), '#ffffff');
@@ -2045,6 +2087,7 @@ function readThemeDraftFromControls() {
         underline: primary,
         mode,
         preset: String($('#kf-theme-preset').val() || 'default'),
+        ...normalizeThemeSizes({ uiScale: $('#kf-theme-ui-scale').val(), fontScale: $('#kf-theme-font-scale').val() }),
     };
 }
 
@@ -2966,6 +3009,8 @@ function syncThemeFromControls(state) {
     state.theme.mode = draft.mode;
     delete state.theme.brush;
     state.theme.preset = draft.preset;
+    state.theme.uiScale = draft.uiScale;
+    state.theme.fontScale = draft.fontScale;
 }
 
 function readFailureSettingsDraft() {
@@ -3303,6 +3348,7 @@ function hoistModals() {
             node = cleanNode;
         }
         if (node.parentElement !== document.body) document.body.appendChild(node);
+        bindModalGestureGuard(node);
     }
 }
 
@@ -4552,7 +4598,29 @@ function bind(state, rerender, setStatus) {
         $('.kf-theme-preset').removeClass('kf-active');
         previewThemeFromControls();
     });
+    $('#kf-theme-ui-scale,#kf-theme-font-scale').off('input.kf change.kf').on('input.kf change.kf', function () {
+        updateThemeSizeLabels();
+        previewThemeFromControls();
+    });
+    $('#kf-theme-ui-scale-value,#kf-theme-font-scale-value').off('input.kf change.kf').on('input.kf change.kf', function (event) {
+        const raw = this.value;
+        const number = Number(raw);
+        // Allow clearing/retyping without clamping the first digit mid-edit.
+        if (event.type === 'input' && (raw === '' || !Number.isFinite(number) || number < Number(this.min) || number > Number(this.max))) return;
+        const key = this.id === 'kf-theme-ui-scale-value' ? 'uiScale' : 'fontScale';
+        const value = normalizeThemeSizes({ [key]: raw })[key];
+        $('#' + this.id.replace('-value', '')).val(value);
+        if (event.type === 'change') this.value = String(value);
+        previewThemeFromControls();
+    });
+    $('#kf-theme-size-reset').off('click.kf').on('click.kf', function () {
+        $('#kf-theme-ui-scale,#kf-theme-font-scale').val(100);
+        updateThemeSizeLabels();
+        previewThemeFromControls();
+    });
     $('#kf-theme-reset').off('click.kf').on('click.kf', function () {
+        $('#kf-theme-ui-scale,#kf-theme-font-scale').val(100);
+        updateThemeSizeLabels();
         const preset = THEME_PRESETS.default;
         $('#kf-theme-preset').val('default');
         setThemeColorControlValue('kf-theme-underline', preset.primary);

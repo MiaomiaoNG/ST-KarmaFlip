@@ -272,6 +272,12 @@
             <header class="kf-modal-header"><h2>外观美化</h2><button class="kf-icon-btn kf-close-btn" id="kf-theme-close" type="button" title="关闭" aria-label="关闭"><svg><use href="#kf-i-x"/></svg></button></header>
             <div class="kf-modal-body kf-theme-body">
                 <section class="kf-theme-group">
+                    <div class="kf-group-head"><strong>尺寸修改</strong><span>实时预览，确认后保存</span></div>
+                    <div class="kf-size-control"><div class="kf-size-control-head"><label for="kf-theme-ui-scale-value"><strong>插件尺寸</strong></label><span class="kf-size-percent"><input id="kf-theme-ui-scale-value" type="number" min="75" max="125" step="1" value="100" inputmode="numeric" aria-label="插件尺寸百分比"><span aria-hidden="true">%</span></span></div><input id="kf-theme-ui-scale" type="range" min="75" max="125" step="1" value="100" aria-label="插件尺寸"><small>整体等比例调整，超出屏幕时自适应布局</small></div>
+                    <div class="kf-size-control"><div class="kf-size-control-head"><label for="kf-theme-font-scale-value"><strong>字体大小</strong></label><span class="kf-size-percent"><input id="kf-theme-font-scale-value" type="number" min="80" max="140" step="1" value="100" inputmode="numeric" aria-label="字体大小百分比"><span aria-hidden="true">%</span></span></div><input id="kf-theme-font-scale" type="range" min="80" max="140" step="1" value="100" aria-label="字体大小"><small>在插件尺寸基础上单独调整文字</small></div>
+                    <div class="kf-size-actions"><button class="kf-action-btn kf-secondary-btn" id="kf-theme-size-reset" type="button">重置</button></div>
+                </section>
+                <section class="kf-theme-group">
                     <div class="kf-group-head"><strong>主题预设</strong><span>选择配色后仍可继续微调</span></div>
                     <div class="kf-theme-presets" id="kf-theme-presets">
                         <button class="kf-theme-preset" type="button" data-preset="default" data-primary="#1677ff" data-secondary="#ffffff"><span style="--swatch-a:#1677ff;--swatch-b:#ffffff"><i></i><i></i></span><em>经典蓝白</em></button>
