@@ -54,6 +54,7 @@ export function getDefaultState() {
         failure: {
             retryCount: 3,
             retryDelaySeconds: 3,
+            autoSwitchEnabled: true,
             alertEnabled: false,
             modelAlertEnabled: false,
         },
@@ -422,6 +423,7 @@ function createPersistedState(source) {
             ...(base.failure || {}),
             retryCount: Math.max(1, toInt(base?.failure?.retryCount || 3)),
             retryDelaySeconds: toInt(base?.failure?.retryDelaySeconds ?? 3),
+            autoSwitchEnabled: base?.failure?.autoSwitchEnabled !== false,
             alertEnabled: !!base?.failure?.alertEnabled,
             modelAlertEnabled: !!base?.failure?.modelAlertEnabled,
         },

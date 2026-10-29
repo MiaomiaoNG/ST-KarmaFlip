@@ -1122,6 +1122,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
     const pool = pending.pool;
     const maxFailures = retryLimit(state);
     const delayMs = retryDelayMs(state);
+    const autoSwitchEnabled = state.failure?.autoSwitchEnabled !== false;
     const alertEnabled = !!state.failure?.alertEnabled;
     const availableEntries = validRuntimeEntries(pool).filter(entry => matchingRetryMember(entry, pending.member));
     const onlyOneAvailable = availableEntries.length === 1;
@@ -1136,6 +1137,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         mode: pool.mode,
         maxFailures,
         delayMs,
+        autoSwitchEnabled,
         alertEnabled,
         availableCount: availableEntries.length,
         initialApiName: currentMember?.name || '',
@@ -1189,12 +1191,14 @@ async function runRetryPlan(input, init, pending, onStatus) {
             break;
         }
 
-        if (!alertEnabled) {
+        if (autoSwitchEnabled && !alertEnabled) {
             blockedIds.add(currentMember.id);
             retryDebug('auto-switch-after-failures', { traceId: pending.id, blockedIds: [...blockedIds] });
             await wait(delayMs);
             continue;
         }
+
+        if (!autoSwitchEnabled && !alertEnabled) break;
 
         const decision = await askFailureDecision(
             failureMessage(currentMember, maxFailures),

@@ -2110,6 +2110,7 @@ function closeThemeModal(state) {
 function populateSettingsControls(state) {
     $('#kf-failure-retry-count').val(Math.max(1, toInt(state.failure?.retryCount || 3)));
     $('#kf-failure-retry-delay').val(toInt(state.failure?.retryDelaySeconds ?? 3));
+    $('#kf-failure-auto-switch-enabled').prop('checked', state.failure?.autoSwitchEnabled !== false);
     $('#kf-failure-alert-enabled').prop('checked', !!state.failure?.alertEnabled);
     $('#kf-model-alert-enabled').prop('checked', !!state.failure?.modelAlertEnabled);
     $('#kf-shortcut-mode-enabled').prop('checked', state.shortcuts?.modeEnabled !== false);
@@ -3021,6 +3022,7 @@ function readFailureSettingsDraft() {
     return {
         retryCount: Math.max(1, toInt($('#kf-failure-retry-count').val() || 3)),
         retryDelaySeconds: toInt($('#kf-failure-retry-delay').val() ?? 3),
+        autoSwitchEnabled: $('#kf-failure-auto-switch-enabled').prop('checked'),
         alertEnabled: $('#kf-failure-alert-enabled').prop('checked'),
         modelAlertEnabled: $('#kf-model-alert-enabled').prop('checked'),
         compactApiEntries: $('#kf-compact-api-entries').prop('checked'),
@@ -3037,6 +3039,7 @@ function readFailureSettingsDraft() {
 function sameFailureSettings(state, draft) {
     return Math.max(1, toInt(state.failure?.retryCount || 3)) === draft.retryCount
         && toInt(state.failure?.retryDelaySeconds ?? 3) === draft.retryDelaySeconds
+        && (state.failure?.autoSwitchEnabled !== false) === draft.autoSwitchEnabled
         && !!state.failure?.alertEnabled === draft.alertEnabled
         && !!state.failure?.modelAlertEnabled === draft.modelAlertEnabled
         && (state.ui?.compactApiEntries === true) === draft.compactApiEntries
@@ -3050,6 +3053,7 @@ function sameFailureSettings(state, draft) {
 function applyFailureSettingsDraft(state, draft) {
     state.failure.retryCount = draft.retryCount;
     state.failure.retryDelaySeconds = draft.retryDelaySeconds;
+    state.failure.autoSwitchEnabled = draft.autoSwitchEnabled;
     state.failure.alertEnabled = draft.alertEnabled;
     state.failure.modelAlertEnabled = draft.modelAlertEnabled;
     state.ui = state.ui || {};
@@ -3135,7 +3139,7 @@ function showSequenceCheck(state) {
     const runtime = getRuntimeScope(state);
     const mode = pool.mode === 'random' ? 'random' : 'fixed';
     const entries = (pool.entries || []).filter(entry => entryReady(entry, mode) && !runtime.disabledByFailure?.[entry.id]);
-    const summary = `${mode === 'random' ? '随机模式' : '固定模式'} ${pool.random?.noConsecutive ? '已勾选连续' : '未勾选连续'}`;
+    const summary = `${mode === 'random' ? '随机模式' : '固定模式'} ${pool.random?.noConsecutive ? '已勾选避免连续' : '未勾选避免连续，可能会连续请求同一渠道模型'}`;
     if (!entries.length) {
         openSequenceModal(summary, ['当前组合没有可用于检测的 API 条目']);
         return;
@@ -4635,7 +4639,7 @@ function bind(state, rerender, setStatus) {
         $('.kf-theme-mode').removeClass('kf-active').filter('[data-theme-mode="light"]').addClass('kf-active');
         previewThemeFromControls();
     });
-    $('#kf-failure-retry-count,#kf-failure-retry-delay,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-mode-enabled,#kf-shortcut-power-enabled,#kf-shortcut-api-enabled,#kf-compact-api-entries').off('input.kf change.kf').on('input.kf change.kf', function () {
+    $('#kf-failure-retry-count,#kf-failure-retry-delay,#kf-failure-auto-switch-enabled,#kf-failure-alert-enabled,#kf-model-alert-enabled,#kf-shortcut-mode-enabled,#kf-shortcut-power-enabled,#kf-shortcut-api-enabled,#kf-compact-api-entries').off('input.kf change.kf').on('input.kf change.kf', function () {
         if (this.id === 'kf-failure-retry-delay' && toInt($(this).val()) === 0) {
             showToast('间隔次数过短可能会触发上限，请注意', 'warning', 3600);
         }
