@@ -833,8 +833,9 @@ input[type="number"].kf-inner-input::-webkit-outer-spin-button {
 }
 
 #kf-root .kf-entry-preset-settings.kf-bound {
-    color: var(--muted) !important;
-    background: transparent !important;
+    color: var(--primary-strong) !important;
+    background: rgba(var(--primary-rgb), 0.18) !important;
+    border-color: rgba(var(--primary-rgb), 0.4) !important;
 }
 
 #kf-root .kf-entry-preset-settings.kf-bound > i {
@@ -1079,6 +1080,20 @@ body.kf-entry-dragging-active {
     color: var(--muted);
     border-color: var(--line) !important;
     background: linear-gradient(180deg, rgba(var(--surface-rgb), 0.91), rgba(var(--surface-rgb), 0.82)) !important;
+}
+
+#kf-delete-confirm-modal {
+    z-index: 10030;
+}
+
+.kf-global-toggle[data-enabled="false"] .kf-global-toggle-label {
+    color: #95545a;
+    font-weight: 700;
+}
+
+#kf-chat-power-btn[data-enabled="false"],
+body[data-kf-enabled="false"] .kf-qr-power-icon {
+    color: #95545a !important;
 }
 
 .kf-global-toggle[data-enabled="false"] .kf-status-dot {
@@ -1750,6 +1765,12 @@ body.kf-entry-dragging-active {
 .kf-log-badge.kf-error {
     color: #c74055;
     background: rgba(220, 82, 102, 0.085);
+}
+
+.kf-log-badge.kf-cancel,
+.kf-log-badge.kf-retry {
+    color: #a87816;
+    background: rgba(215, 165, 31, 0.16);
 }
 
 .kf-log-badge.kf-success {

@@ -177,7 +177,7 @@ export function pickMember(state, pool) {
 }
 
 export function markRequestSuccess(state, pool, member, requestKey, options = {}) {
-    const runtime = getRuntimeScope(state);
+    const runtime = options.runtime || getRuntimeScope(state);
     reduceCooldowns(runtime);
     const cooldown = pool.mode === 'random' || options.forced === true ? toInt(member.cooldownTurns) : 0;
     runtime.cooldowns[member.id] = cooldown;
@@ -189,8 +189,8 @@ export function markRequestSuccess(state, pool, member, requestKey, options = {}
     runtime.missStreaks[member.id] = 0;
 }
 
-export function markRequestFailure(state, member) {
-    const runtime = getRuntimeScope(state);
+export function markRequestFailure(state, member, options = {}) {
+    const runtime = options.runtime || getRuntimeScope(state);
     runtime.cooldowns[member.id] = 0;
     delete runtime.cooldownElapsed[member.id];
     runtime.failures[member.id] = toInt(runtime.failures[member.id]) + 1;

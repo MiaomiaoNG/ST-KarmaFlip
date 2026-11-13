@@ -2,6 +2,7 @@ import { bindApiOverrideToFloor, clearFloorApiBinding, clearPendingApiOverride, 
 import { disableMemberByFailure, markRequestFailure, markRequestSuccess, pickMember } from './router.js';
 import { makeId } from './compat.js';
 import { recordPluginError } from './runtime_diagnostics.js';
+import { beginTauriRequest, clearTauriRequestObservations } from './tauri_request_observer.js';
 
 let chatSettingsBound = false;
 let fetchRetryBound = false;
@@ -19,6 +20,7 @@ let activeStreamingSource = null;
 let preparationSequence = 0;
 const pendingRequests = new Map();
 export function clearRuntimeHookState() {
+    clearTauriRequestObservations();
     restoreStreamingSource();
     pendingRequests.clear();
     discardAllPreparedSelections('runtime-clear');
@@ -233,6 +235,7 @@ function finishStreamingSource() {
     // Unscoped lifecycle events from background generations must not end an
     // unrelated foreground stream. Its own AbortSignal remains authoritative.
     if (lease.processor && !lease.processor.isFinished && !lease.processor.isStopped && !lease.signal?.aborted) return;
+    if (lease.processor?.isStopped || lease.signal?.aborted) logCancellation(lease.pending, lease.member);
     restoreStreamingSource(lease.id);
 }
 
@@ -247,12 +250,17 @@ async function retainStreamingSource(pending, member, signal) {
     const source = providerSource(member.provider);
     const lease = {
         id: pending.id,
+        pending,
+        member,
         settings: oaiSettings,
         previousSource: oaiSettings.chat_completion_source,
         source,
         processor: pending.processor,
         signal,
-        onAbort: () => restoreStreamingSource(pending.id),
+        onAbort: () => {
+            logCancellation(pending, member);
+            restoreStreamingSource(pending.id);
+        },
     };
     activeStreamingSource = lease;
     try {
@@ -306,6 +314,7 @@ function discardPreparedSelection(token, reason = 'discarded') {
         return false;
     }
     preparedSelections.delete(token);
+    if (reason.startsWith('generation-stopped')) logCancellation(prepared, prepared.member);
     const hasNewerSelection = [...preparedSelections.keys()].some(otherToken => otherToken > token);
     if (hasNewerSelection) {
         retryDebug('prepared-runtime-restore-skipped', { token, reason: 'newer-selection-exists', discardReason: reason });
@@ -662,9 +671,25 @@ function retryDelayMs(state) {
     return Math.max(0, Math.round(seconds)) * 1000;
 }
 
-function wait(ms) {
+function checkRequestSignal(signal) {
+    if (signal?.aborted) throw new DOMException('用户已取消请求', 'AbortError');
+}
+
+function wait(ms, signal) {
+    checkRequestSignal(signal);
     if (!ms) return Promise.resolve();
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', onAbort);
+            reject(new DOMException('用户已取消请求', 'AbortError'));
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
 }
 
 function memberLabel(member) {
@@ -769,6 +794,7 @@ function firstSseData(buffer) {
 function tauriErrorText(payload) {
     if (!payload || typeof payload !== 'object') return '';
     const id = String(payload.id || '');
+    if (!id.startsWith('tauritavern-error-')) return '';
     const candidates = [
         payload?.choices?.[0]?.delta?.content,
         payload?.choices?.[0]?.message?.content,
@@ -777,8 +803,7 @@ function tauriErrorText(payload) {
         payload?.message?.content,
     ];
     const text = candidates.find(value => typeof value === 'string' && value.trim()) || '';
-    if (id.startsWith('tauritavern-error-')) return text || 'TauriTavern 上游流式请求失败';
-    return /^\s*\[API\s*(?:Error|错误)\]/iu.test(text) ? text : '';
+    return text || 'TauriTavern 上游请求失败';
 }
 
 async function probeTauriTavernSse(response) {
@@ -862,7 +887,7 @@ async function responseBusinessFailure(response) {
     if (!contentType.includes('application/json')) return { failed: false, detail: '', reason: 'non-json' };
     const text = await responseText(response);
     const payload = parseJson(text);
-    const message = businessErrorMessage(payload);
+    const message = businessErrorMessage(payload) || (isTauriTavernHost() ? tauriErrorText(payload) : '');
     const result = message
         ? { failed: true, detail: text || message, reason: 'business-json' }
         : { failed: false, detail: '', reason: 'json-ok' };
@@ -871,9 +896,20 @@ async function responseBusinessFailure(response) {
 }
 
 function queueLog(state, entry) {
+    const time = new Date().toISOString();
     setTimeout(() => {
-        pushLog(state, entry);
+        pushLog(state, { time, ...entry });
     }, 0);
+}
+
+function logCancellation(pending, member = pending.activeMember || pending.member) {
+    if (pending.cancelLogged || pending.completedSuccessfully || !pending.state || !member) return;
+    pending.cancelLogged = true;
+    queueLog(pending.state, {
+        event: 'cancel', trigger: pending.type, mode: pending.picked?.detail?.mode,
+        apiName: member.name, apiUrl: member.apiUrl, model: member.model,
+        messageId: pending.messageId,
+    });
 }
 
 function chooseRequest(state, pool, blockedIds = new Set(), bindingMember = null) {
@@ -955,9 +991,23 @@ function readTraceRequest(init) {
 }
 
 async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
+    checkRequestSignal(init?.signal);
+    pending.activeMember = member;
+    if (retryIndex > 0) {
+        queueLog(pending.state, {
+            event: 'retry', trigger: pending.type, mode: picked.detail.mode,
+            apiName: member.name, apiUrl: member.apiUrl, model: member.model,
+            messageId: pending.messageId, retryNumber: retryIndex,
+        });
+    }
     let requestInit;
+    let tauriRequest = null;
     try {
         requestInit = retryIndex === 0 && sameMember(member, pending.member) ? init : makeRetryInit(init, member);
+        if (isTauriTavernHost()) {
+            tauriRequest = beginTauriRequest(requestInit);
+            if (tauriRequest) requestInit = tauriRequest.init;
+        }
     } catch (error) {
         recordPluginError('retry-build', error);
         throw error;
@@ -969,8 +1019,29 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         apiName: member?.name || '',
         model: member?.model || '',
     });
-    const response = await originalFetch(input, requestInit);
-    const businessFailure = await responseBusinessFailure(response);
+    const observation = tauriRequest?.observation;
+    const runtime = getRuntimeScope(pending.state);
+    let response;
+    let businessFailure;
+    try {
+        response = await originalFetch(input, requestInit);
+        if (response.ok && observation?.bound) {
+            // Wait for the host's first structured event, without reading or
+            // duplicating its response stream. Later outcomes stay observable.
+            await observation.firstEvent;
+            if (observation.status === 'cancelled') throw new DOMException('用户已取消请求', 'AbortError');
+            businessFailure = observation.status === 'failure'
+                ? { failed: true, detail: observation.detail, reason: 'tauritavern-structured-error' }
+                : (pending.stream ? { failed: false, reason: 'tauritavern-structured-stream' } : await responseBusinessFailure(response));
+        } else {
+            observation?.dispose();
+            businessFailure = await responseBusinessFailure(response);
+        }
+    } catch (error) {
+        observation?.dispose();
+        throw error;
+    }
+    checkRequestSignal(init?.signal);
     const checkedResponse = businessFailure.response || response;
     retryDebug('response-check', {
         traceId: pending.id,
@@ -980,18 +1051,51 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         reason: businessFailure.reason,
         failed: businessFailure.failed,
     });
-    if (!businessFailure.failed) {
-        await retainStreamingSource(pending, member, requestInit?.signal);
-        markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`, { forced: pending.forced });
+    let outcomeRecorded = false;
+    const recordSuccess = () => {
+        if (outcomeRecorded) return;
+        outcomeRecorded = true;
+        if (observation?.bound && pending.stream) pending.completedSuccessfully = true;
+        markRequestSuccess(pending.state, pending.pool, member, `${pending.type}|${Date.now()}|${retryIndex}`, { forced: pending.forced, runtime });
         if (pending.forced && !pending.locked) {
-            bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId);
+            bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId, runtime);
         }
         queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: checkedResponse.status, statusText: checkedResponse.statusText });
+    };
+    const recordFailure = detail => {
+        if (outcomeRecorded) return 0;
+        outcomeRecorded = true;
+        const count = markRequestFailure(pending.state, member, { runtime });
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: checkedResponse.status, statusText: checkedResponse.statusText, responseBody: detail });
+        return count;
+    };
+    if (!businessFailure.failed) {
+        try {
+            await retainStreamingSource(pending, member, requestInit?.signal);
+            checkRequestSignal(init?.signal);
+        } catch (error) {
+            observation?.dispose();
+            throw error;
+        }
+        if (observation?.bound && pending.stream) {
+            if (observation.status === 'failure') {
+                const count = recordFailure(observation.detail);
+                return { ok: false, response: checkedResponse, count };
+            }
+            if (observation.status === 'cancelled') throw new DOMException('用户已取消请求', 'AbortError');
+            observation.onOutcome(outcome => {
+                if (outcome.status === 'success') recordSuccess();
+                else if (outcome.status === 'failure') recordFailure(outcome.detail);
+                else if (outcome.status === 'cancelled') logCancellation(pending, member);
+            });
+        } else {
+            recordSuccess();
+            observation?.dispose();
+        }
         return { ok: true, response: checkedResponse };
     }
-    const count = markRequestFailure(pending.state, member);
-    const detail = businessFailure.detail;
-    queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: checkedResponse.status, statusText: checkedResponse.statusText, responseBody: detail });
+    const count = recordFailure(businessFailure.detail);
+    observation?.dispose();
     return { ok: false, response: checkedResponse, count };
 }
 
@@ -1027,8 +1131,15 @@ async function handleTavernNextBatchRequest(input, init, onStatus) {
     const member = prepared.member;
     const picked = prepared.picked;
     const state = prepared.state;
+    const batchPending = {
+        id: `batch-${prepared.token}`, state, member, picked, type: `${type}-batch`, messageId,
+        stream: true, sequence: prepared.token, processor: context().streamingProcessor || null,
+    };
+    const onAbort = () => logCancellation(batchPending);
+    init?.signal?.addEventListener('abort', onAbort, { once: true });
     let response;
     try {
+        checkRequestSignal(init?.signal);
         for (const candidate of payload.candidates) patchGenerateData(candidate, member);
         payload.chat_completion_source = providerSource(member.provider);
         const requestInit = { ...init, body: JSON.stringify(payload) };
@@ -1037,10 +1148,13 @@ async function handleTavernNextBatchRequest(input, init, onStatus) {
         const pickLabel = prepared.override?.source === 'lock' ? '锁定' : (prepared.override ? '指定' : '命中');
         if (typeof onStatus === 'function') onStatus(`${pickLabel}: ${memberLabel(member)} | ${type}-batch | #${messageId}`);
         response = await originalFetch(input, requestInit);
+        checkRequestSignal(init?.signal);
     } catch (error) {
-        recordPluginError('ready', error);
+        if (isUserAbortError(error, init)) logCancellation(batchPending);
+        else recordPluginError('ready', error);
         throw error;
     } finally {
+        init?.signal?.removeEventListener('abort', onAbort);
         restorePresetTransaction(prepared.token);
     }
 
@@ -1050,12 +1164,7 @@ async function handleTavernNextBatchRequest(input, init, onStatus) {
             bindApiOverrideToFloor(state, prepared.pool.id, member.id, messageId);
         }
         queueLog(state, { event: 'request', trigger: `${type}-batch`, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: true, status: response.status, statusText: response.statusText });
-        await retainStreamingSource({
-            id: `batch-${prepared.token}`,
-            stream: true,
-            sequence: prepared.token,
-            processor: context().streamingProcessor || null,
-        }, member, init?.signal);
+        await retainStreamingSource(batchPending, member, init?.signal);
     } else if (response) {
         const count = markRequestFailure(state, member);
         queueLog(state, { event: 'request', trigger: `${type}-batch`, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId, success: false, status: response.status, statusText: response.statusText, detail: `第 ${count} 次失败` });
@@ -1081,7 +1190,7 @@ async function runForcedRetryPlan(input, init, pending) {
     });
 
     for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
-        if (retryAttempt > 0) await wait(delayMs);
+        if (retryAttempt > 0) await wait(delayMs, init?.signal);
         try {
             const result = await fetchWithMember(input, init, pending, pending.picked, member, retryAttempt);
             if (result.ok) return result.response;
@@ -1162,7 +1271,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         }
 
         for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
-            if (retryAttempt > 0) await wait(delayMs);
+            if (retryAttempt > 0) await wait(delayMs, init?.signal);
             try {
                 const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, retryAttempt);
                 if (result.ok) return result.response;
@@ -1194,7 +1303,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         if (autoSwitchEnabled && !alertEnabled) {
             blockedIds.add(currentMember.id);
             retryDebug('auto-switch-after-failures', { traceId: pending.id, blockedIds: [...blockedIds] });
-            await wait(delayMs);
+            await wait(delayMs, init?.signal);
             continue;
         }
 
@@ -1213,11 +1322,11 @@ async function runRetryPlan(input, init, pending, onStatus) {
         if (decision === 'switch') {
             blockedIds.add(currentMember.id);
             retryDebug('user-switch-after-failures', { traceId: pending.id, blockedIds: [...blockedIds] });
-            await wait(delayMs);
+            await wait(delayMs, init?.signal);
             continue;
         }
         if (decision === 'confirm') {
-            await wait(delayMs);
+            await wait(delayMs, init?.signal);
             try {
                 const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, maxFailures);
                 if (result.ok) return result.response;
@@ -1240,7 +1349,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                 if (pool.mode === 'random') disableMemberByFailure(state, currentMember);
                 blockedIds.add(currentMember.id);
                 retryDebug('user-use-next-after-extra-fail', { traceId: pending.id, blockedIds: [...blockedIds] });
-                await wait(delayMs);
+                await wait(delayMs, init?.signal);
                 continue;
             }
             if (nextDecision === 'disable-cancel') disableMemberByFailure(state, currentMember);
@@ -1287,7 +1396,22 @@ function bindRetryFetch(onStatus) {
             return originalFetch(input, traced.init);
         }
         retryDebug('trace-matched', { traceId: traced.traceId, type: pending.type });
-        return runRetryPlan(input, traced.init, pending, onStatus);
+        const signal = traced.init?.signal;
+        const onAbort = () => {
+            logCancellation(pending);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+        try {
+            checkRequestSignal(signal);
+            const response = await runRetryPlan(input, traced.init, pending, onStatus);
+            checkRequestSignal(signal);
+            return response;
+        } catch (error) {
+            if (isUserAbortError(error, traced.init)) logCancellation(pending);
+            throw error;
+        } finally {
+            signal?.removeEventListener('abort', onAbort);
+        }
     };
     Object.defineProperty(retryFetchWrapper, FETCH_WRAPPER_MARK, { value: true });
     try {

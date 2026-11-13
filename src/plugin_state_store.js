@@ -775,7 +775,9 @@ function usageStatKey(apiName, apiUrl, model) {
 }
 
 function updateUsageStats(log) {
-    if (String(log?.event || '') !== 'pick') return;
+    const event = String(log?.event || '');
+    const isResult = (event === 'request' || event === 'request-error') && typeof log.success === 'boolean';
+    if (event !== 'pick' && !isResult) return;
     const apiName = String(log?.apiName || '').trim() || '未命名';
     const apiUrl = String(log?.apiUrl || '').trim();
     const model = String(log?.model || '').trim() || '未填模型';
@@ -785,7 +787,9 @@ function updateUsageStats(log) {
         apiName,
         apiUrl,
         model,
-        count: (previous?.count || 0) + 1,
+        count: (previous?.count || 0) + (event === 'pick' ? 1 : 0),
+        successCount: (previous?.successCount || 0) + (isResult && log.success ? 1 : 0),
+        failureCount: (previous?.failureCount || 0) + (isResult && !log.success ? 1 : 0),
         lastTime: String(log?.time || new Date().toISOString()),
     });
 }
@@ -899,8 +903,7 @@ export function setPendingApiOverride(state, poolId, entryId) {
     return runtime.pendingApiOverride;
 }
 
-export function bindApiOverrideToFloor(state, poolId, entryId, messageId) {
-    const runtime = getRuntimeScope(state);
+export function bindApiOverrideToFloor(state, poolId, entryId, messageId, runtime = getRuntimeScope(state)) {
     runtime.pendingApiOverride = null;
     runtime.floorApiBinding = apiOverrideRef(poolId, entryId, messageId);
     return runtime.floorApiBinding;

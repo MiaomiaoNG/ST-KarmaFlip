@@ -4,19 +4,30 @@ import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_diagnostics.js';
 
-const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
+const MODAL_IDS = ['kf-main-modal', 'kf-update-notice-modal', 'kf-log-modal', 'kf-dropdown-modal', 'kf-theme-modal', 'kf-color-picker-modal', 'kf-settings-modal', 'kf-floating-skin-modal', 'kf-reset-data-modal', 'kf-delete-confirm-modal', 'kf-failure-modal', 'kf-sequence-modal', 'kf-rename-pool-modal', 'kf-import-export-modal', 'kf-api-override-modal', 'kf-preset-binding-modal'];
+let deletionResolver = null;
 const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
-const UPDATE_NOTICE_VERSION = '1.2.27';
-const UPDATE_NOTICE_TEXT = `2026年10月15日更新内容：
+const UPDATE_NOTICE_VERSION = '1.2.32';
+const UPDATE_NOTICE_TEXT = `2026年11月13日更新内容：
+1.TT 报错改为按请求和流会话捕获结构化失败，不再通过正文关键词判断。
+2.修复 TT 非流式及流式中途报错被误记为成功的问题，流式正常结束后才记录成功。
+3.TT 流式响应交回宿主前的失败沿用重试；交回后的中途失败记录日志，不自动重发或拼接回复。
+`;
+const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月13日更新内容：
+1.日志统计保留“共 x 次”，模型明细显示失败与成功次数，时间精确到秒。
+2.主动暂停请求新增黄色取消日志；重试新增进度日志。
+3.API 条目绑定预设后显示按钮底色。
+4.插件关闭时，QR 插件驱动图标与底部“API未开启”显示低饱和暗红色，底部文字加粗。
+5.删除组合、移除条目、删除 API 预设和清空日志均需确认；清除全部数据保留原确认弹窗。
+2026年10月15日更新内容：
 
 1.美化设置新增尺寸以及字样修改；
 2.修复TauriTavern端自动切换API时概率失效的问题
 
-`;
-const UPDATE_NOTICE_HISTORY_TEXT = `2026年10月14日更新内容：
+2026年10月14日更新内容：
 1.兼容类酒馆TavernNext和TauriTavern
 2.修复手机端原生酒馆更新插件后无法完成加载的问题
 3.API 条目的模型选择弹窗新增关键词搜索
@@ -161,6 +172,11 @@ function showModal(id) {
 }
 
 function hideModal(id) {
+    if (id === 'kf-delete-confirm-modal' && deletionResolver) {
+        const resolve = deletionResolver;
+        deletionResolver = null;
+        resolve(false);
+    }
     const modal = document.getElementById(id);
     if (modal) modalGestureStarts.delete(modal);
     modal?.classList.remove('kf-show');
@@ -403,7 +419,8 @@ function updateGlobalToggleState(state) {
     const toggle = $('#kf-global-toggle');
     toggle.toggleClass('kf-active', enabled);
     toggle.attr('data-enabled', String(enabled));
-    toggle.find('.kf-global-toggle-label').text(enabled ? '插件已开启' : '插件已关闭');
+    document.body.setAttribute('data-kf-enabled', String(enabled));
+    toggle.find('.kf-global-toggle-label').text(enabled ? 'API已开启' : 'API未开启');
 }
 
 function updateModeState(state) {
@@ -462,7 +479,7 @@ function enabledQrAssistantButtons(state) {
         .map(shortcut => ({
             dom_id: shortcut.wrapperId,
             group_name: shortcut.groupName,
-            button_name: shortcut.qrIconClass,
+            button_name: `${shortcut.qrIconClass}${shortcut.key === 'power' ? ' kf-qr-power-icon' : ''}`,
         }));
 }
 
@@ -2281,6 +2298,21 @@ function getApiPresetNames(state) {
     return savedApiEntries(state).map(entry => entry.name).filter(Boolean);
 }
 
+function confirmDeletion(message) {
+    if (deletionResolver) hideModal('kf-delete-confirm-modal');
+    $('#kf-delete-confirm-message').text(`${message}\n此操作无法撤销，是否确认？`);
+    return new Promise(resolve => {
+        deletionResolver = resolve;
+        $('#kf-delete-confirm-yes,#kf-delete-confirm-no').off('click.kfDeleteConfirm').on('click.kfDeleteConfirm', function () {
+            const finish = deletionResolver;
+            deletionResolver = null;
+            hideModal('kf-delete-confirm-modal');
+            finish?.(this.id === 'kf-delete-confirm-yes');
+        });
+        showModal('kf-delete-confirm-modal');
+    });
+}
+
 function deleteSavedApiEntry(state, target) {
     if (!target) return false;
     const before = Array.isArray(state.apiPresets) ? state.apiPresets.length : 0;
@@ -2584,6 +2616,8 @@ function renderEntries(state) {
 function logKind(log) {
     const event = String(log.event || '');
     if (event === 'pick') return 'pick';
+    if (event === 'cancel') return 'cancel';
+    if (event === 'retry') return 'retry';
     if (log.success === false || event.includes('error')) return 'error';
     return 'success';
 }
@@ -2597,7 +2631,7 @@ function logTimeParts(value) {
         pad(date.getMonth() + 1),
         pad(date.getDate()),
     ].join('-');
-    const clock = [pad(date.getHours()), pad(date.getMinutes())].join(':');
+    const clock = [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(':');
     return { full: `${day} ${clock}`, clock };
 }
 
@@ -2611,7 +2645,7 @@ function createLogSummary(log, kind) {
 
     const badge = document.createElement('span');
     badge.className = `kf-log-badge kf-${kind}`;
-    badge.textContent = kind === 'pick' ? '抽选' : (kind === 'error' ? '报错' : '成功');
+    badge.textContent = ({ pick: '抽选', error: '报错', success: '成功', cancel: '取消', retry: '重试' })[kind];
 
     const api = document.createElement('span');
     api.className = 'kf-log-api-name';
@@ -2623,6 +2657,7 @@ function createLogSummary(log, kind) {
     api.title = api.textContent;
     model.textContent = modelName || '未填模型';
     model.title = model.textContent;
+    if (kind === 'retry') model.textContent += ` · 第 ${log.retryNumber || 1} 次重试`;
 
     const time = document.createElement('span');
     time.className = 'kf-log-time';
@@ -2757,7 +2792,7 @@ function createUsageStatRow(stat) {
         model.title = model.textContent;
         const count = document.createElement('span');
         count.className = 'kf-log-stat-count';
-        count.textContent = `${item.count || 0} 次`;
+        count.textContent = `失败 ${item.failureCount || 0} 次 成功 ${item.successCount || 0} 次`;
         modelRow.append(model, count);
         models.appendChild(modelRow);
     }
@@ -2775,7 +2810,7 @@ function groupUsageStats(stats) {
         const group = groups.get(key);
         group.count += Number(stat.count || 0);
         if (String(stat.lastTime || '') > group.lastTime) group.lastTime = String(stat.lastTime || '');
-        group.models.push({ model: stat.model, count: Number(stat.count || 0), lastTime: stat.lastTime });
+        group.models.push({ model: stat.model, count: Number(stat.count || 0), successCount: Number(stat.successCount || 0), failureCount: Number(stat.failureCount || 0), lastTime: stat.lastTime });
     }
     return [...groups.values()]
         .map(group => ({
@@ -3497,12 +3532,13 @@ function openOptionPicker(input, options, title, onPick, config = {}) {
     box.data('kfOptions', unique);
     box.off('click.kfDrop').on('click.kfDrop', '.kf-mobile-option', function () {
         choose(String($(this).data('value')));
-    }).on('click.kfDrop', '.kf-option-delete', function (event) {
+    }).on('click.kfDrop', '.kf-option-delete', async function (event) {
         event.preventDefault();
         event.stopPropagation();
         const row = $(this).closest('.kf-mobile-option-row');
         const value = String(row.data('value') || '');
         const item = (box.data('kfOptions') || []).find(option => option.value === value)?.item || { name: value };
+        if (!await confirmDeletion(`删除 API 预设“${item.name || value}”，并移除所有组合中关联的条目？`)) return;
         const result = config.onDelete?.(item, value);
         if (result === false) return;
         const nextOptions = (box.data('kfOptions') || []).filter(option => option.value !== value);
@@ -4047,9 +4083,12 @@ function bind(state, rerender, setStatus) {
         rerender();
     });
     $('#kf-btn-rename-pool').off('click.kf').on('click.kf', () => openRenamePoolModal(state));
-    $('#kf-btn-delete-pool').off('click.kf').on('click.kf', () => {
+    $('#kf-btn-delete-pool').off('click.kf').on('click.kf', async () => {
         if (state.pools.length <= 1) return setStatus('至少保留一个组合');
-        state.pools = state.pools.filter(p => p.id !== state.activePoolId);
+        const poolId = state.activePoolId;
+        if (!await confirmDeletion(`删除组合“${getActivePool(state).name || '未命名'}”及其中的条目？`)) return;
+        if (state.pools.length <= 1 || !state.pools.some(p => p.id === poolId)) return;
+        state.pools = state.pools.filter(p => p.id !== poolId);
         state.activePoolId = state.pools[0].id;
         persistNow(state);
         rerender();
@@ -4197,11 +4236,13 @@ function bind(state, rerender, setStatus) {
         patchEntryCollapsedState(state, pool.id, entryId, nextCollapsed);
         updateEntryCollapsedRow(row, nextCollapsed);
     });
-    $('#kf-entry-list').on('click.kf', '.kf-del', function () {
+    $('#kf-entry-list').on('click.kf', '.kf-del', async function () {
         const pool = getActivePool(state);
         const row = $(this).closest('.kf-entry-block');
         const id = row.data('id');
         const entry = pool.entries.find(e => e.id === id);
+        if (!entry || !await confirmDeletion(`从当前组合移除 API 条目“${entry.name || '未命名'}”？保存的 API 预设将保留。`)) return;
+        if (!state.pools.includes(pool) || !pool.entries.includes(entry)) return;
         if (entry) {
             syncEntryFromRow(entry, row, state);
             saveApiPresetIfNamed(state, entry);
@@ -4289,7 +4330,8 @@ function bind(state, rerender, setStatus) {
         renderLogs(state);
     });
     $('#kf-log-close').off('click.kf').on('click.kf', () => closeModal('kf-log-modal'));
-    $('#kf-log-clear').off('click.kf').on('click.kf', () => {
+    $('#kf-log-clear').off('click.kf').on('click.kf', async () => {
+        if (!await confirmDeletion('清空全部日志、诊断记录和次数统计？')) return;
         clearLogs(state);
         renderLogs(state);
         setStatus('日志已清空');
@@ -4558,6 +4600,10 @@ function bind(state, rerender, setStatus) {
         });
     $(document).off('keydown.kfColorPicker').on('keydown.kfColorPicker', function (event) {
         if (event.key !== 'Escape') return;
+        if ($('#kf-delete-confirm-modal').hasClass('kf-show')) {
+            hideModal('kf-delete-confirm-modal');
+            return;
+        }
         if ($('#kf-color-picker-modal').hasClass('kf-show')) closeColorPicker();
         else if (apiEntriesEditorOpen) closeApiEntriesEditor(state, rerender, setStatus);
     });
