@@ -991,19 +991,13 @@ function readTraceRequest(init) {
     };
 }
 
-async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
+async function fetchWithMember(input, init, pending, picked, member, retryIndex, retry = null) {
     checkRequestSignal(init?.signal);
     const usesInitialBody = retryIndex === 0 && sameMember(member, pending.member);
     // Keep the attempt aligned with its serialized body even if the UI edits the entry.
     member = usesInitialBody && pending.initialMember ? pending.initialMember : { ...member };
     pending.activeMember = member;
-    if (retryIndex > 0) {
-        queueLog(pending.state, {
-            event: 'retry', trigger: pending.type, mode: picked.detail.mode,
-            apiName: member.name, apiUrl: member.apiUrl, model: member.model,
-            messageId: pending.messageId, retryNumber: retryIndex,
-        });
-    }
+    pending.activeRetry = retry;
     let requestInit;
     let tauriRequest = null;
     try {
@@ -1028,6 +1022,13 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
     let response;
     let businessFailure;
     try {
+        if (retry) {
+            queueLog(pending.state, {
+                event: 'retry', trigger: pending.type, mode: picked.detail.mode,
+                apiName: member.name, apiUrl: member.apiUrl, model: member.model,
+                messageId: pending.messageId, retry,
+            });
+        }
         response = await originalFetch(input, requestInit);
         if (response.ok && observation?.bound) {
             // Wait for the host's first structured event, without reading or
@@ -1064,13 +1065,13 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
         if (pending.forced && !pending.locked) {
             bindApiOverrideToFloor(pending.state, pending.pool.id, member.id, pending.messageId, runtime);
         }
-        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: true, status: checkedResponse.status, statusText: checkedResponse.statusText });
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, retry, success: true, status: checkedResponse.status, statusText: checkedResponse.statusText });
     };
     const recordFailure = detail => {
         if (outcomeRecorded) return 0;
         outcomeRecorded = true;
         const count = markRequestFailure(pending.state, member, { runtime });
-        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, status: checkedResponse.status, statusText: checkedResponse.statusText, responseBody: detail });
+        queueLog(pending.state, { event: 'request', trigger: pending.type, mode: picked.detail.mode, apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, retry, success: false, status: checkedResponse.status, statusText: checkedResponse.statusText, responseBody: detail });
         return count;
     };
     if (!businessFailure.failed) {
@@ -1193,10 +1194,11 @@ async function runForcedRetryPlan(input, init, pending) {
         messageId: pending.messageId,
     });
 
-    for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
+    for (let retryAttempt = 0; retryAttempt <= maxFailures; retryAttempt += 1) {
         if (retryAttempt > 0) await wait(delayMs, init?.signal);
         try {
-            const result = await fetchWithMember(input, init, pending, pending.picked, member, retryAttempt);
+            const retry = retryAttempt > 0 ? { kind: 'auto', number: retryAttempt, limit: maxFailures } : null;
+            const result = await fetchWithMember(input, init, pending, pending.picked, member, retryAttempt, retry);
             if (result.ok) return result.response;
             lastResponse = result.response;
             lastError = null;
@@ -1214,7 +1216,7 @@ async function runForcedRetryPlan(input, init, pending) {
                 count,
                 error: String(error?.message || error),
             });
-            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, retry: pending.activeRetry, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
         }
     }
 
@@ -1246,6 +1248,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
     let lastError = null;
     let currentPicked = pending.picked;
     let currentMember = pending.member;
+    let manualRetries = 0;
     retryDebug('plan-start', {
         traceId: pending.id,
         mode: pool.mode,
@@ -1275,17 +1278,20 @@ async function runRetryPlan(input, init, pending, onStatus) {
             if (typeof onStatus === 'function') onStatus(`命中: ${memberLabel(currentMember)} | ${pending.type}`);
         }
 
-        for (let retryAttempt = 0; retryAttempt < maxFailures; retryAttempt += 1) {
+        for (let retryAttempt = 0; retryAttempt <= maxFailures; retryAttempt += 1) {
             if (retryAttempt > 0) await wait(delayMs, init?.signal);
             try {
-                const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, retryAttempt);
+                const retry = retryAttempt > 0 ? { kind: 'auto', number: retryAttempt, limit: maxFailures } : null;
+                const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, retryAttempt, retry);
                 if (result.ok) return result.response;
                 lastResponse = result.response;
+                lastError = null;
             } catch (error) {
                 if (isUserAbortError(error, init)) throw error;
                 const count = markRequestFailure(state, currentMember);
                 const attempted = pending.activeMember;
                 lastError = error;
+                lastResponse = null;
                 retryDebug('network-error', {
                     traceId: pending.id,
                     retryAttempt,
@@ -1294,7 +1300,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                     count,
                     error: String(error?.message || error),
                 });
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, retry: pending.activeRetry, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
             }
         }
 
@@ -1316,7 +1322,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
         if (!autoSwitchEnabled && !alertEnabled) break;
 
         const decision = await askFailureDecision(
-            failureMessage(currentMember, maxFailures),
+            failureMessage(currentMember, maxFailures + 1),
             [
                 { value: 'confirm', label: '确认' },
                 { value: 'switch', label: '切换API' },
@@ -1334,14 +1340,17 @@ async function runRetryPlan(input, init, pending, onStatus) {
         if (decision === 'confirm') {
             await wait(delayMs, init?.signal);
             try {
-                const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, maxFailures);
+                const retry = { kind: 'manual', number: ++manualRetries };
+                const result = await fetchWithMember(input, init, pending, currentPicked, currentMember, maxFailures + 1, retry);
                 if (result.ok) return result.response;
                 lastResponse = result.response;
+                lastError = null;
             } catch (error) {
                 if (isUserAbortError(error, init)) throw error;
                 lastError = error;
+                lastResponse = null;
                 const attempted = pending.activeMember;
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, success: false, error: String(error?.message || error) });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, retry: pending.activeRetry, success: false, error: String(error?.message || error) });
             }
             const nextDecision = await askFailureDecision(
                 secondFailureMessage(currentMember),

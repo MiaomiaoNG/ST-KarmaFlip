@@ -1818,6 +1818,17 @@ body[data-kf-enabled="false"] .kf-qr-power-icon {
     grid-row: 2;
 }
 
+.kf-log-summary-with-retry {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.kf-log-retry-detail {
+    grid-column: 2 / -1;
+    grid-row: 3;
+    color: var(--kf-muted);
+    font-size: calc(11px * var(--kf-ui-scale, 1) * var(--kf-font-scale, 1));
+}
+
 .kf-log-api-stat {
     padding: calc(9px * var(--kf-ui-scale, 1));
     border: calc(1px * var(--kf-ui-scale, 1)) solid var(--kf-line) !important;

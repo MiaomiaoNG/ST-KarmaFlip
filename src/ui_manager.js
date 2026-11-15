@@ -10,10 +10,11 @@ const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
-const UPDATE_NOTICE_VERSION = '1.2.35';
+const UPDATE_NOTICE_VERSION = '1.2.36';
 const UPDATE_NOTICE_TEXT = `2026年11月15日更新内容：
 1.统一顺序检测和实际抽选的候选判断，减少界面更新的重复计算，并隔离插件主题变量和弹窗事件；
 2.修复请求发出后编辑 API 条目，导致取消、成功或失败日志记录到错误模型的问题。
+3.首次请求不计入自动重试上限，自动和手动重试及对应报错分别记录，并显示重试进度。
 `;
 const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月13日更新内容：
 1.TT 报错改为按请求和流会话捕获结构化失败，不再通过正文关键词判断。
@@ -2670,7 +2671,6 @@ function createLogSummary(log, kind) {
     api.title = api.textContent;
     model.textContent = modelName || '未填模型';
     model.title = model.textContent;
-    if (kind === 'retry') model.textContent += ` · 第 ${log.retryNumber || 1} 次重试`;
 
     const time = document.createElement('span');
     time.className = 'kf-log-time';
@@ -2683,6 +2683,17 @@ function createLogSummary(log, kind) {
         ? `#${Number(log.messageId)}`
         : (log.status ? `HTTP ${log.status}` : '');
     summary.append(badge, api, model, time, floor);
+    if (log.retry) {
+        const { kind: retryKind, number, limit } = log.retry;
+        const automatic = retryKind === 'auto';
+        const detail = document.createElement('span');
+        detail.className = 'kf-log-retry-detail';
+        const position = automatic ? `${number}/${limit}` : String(number);
+        const outcome = kind === 'error' ? '失败' : (kind === 'success' ? '成功' : '');
+        detail.textContent = `${automatic ? '自动' : '手动'} · 第 ${position} 次${outcome}`;
+        summary.classList.add('kf-log-summary-with-retry');
+        summary.appendChild(detail);
+    }
     return summary;
 }
 
