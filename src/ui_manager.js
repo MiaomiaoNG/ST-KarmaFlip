@@ -10,20 +10,22 @@ const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
-const UPDATE_NOTICE_VERSION = '1.2.32';
-const UPDATE_NOTICE_TEXT = `2026年11月13日更新内容：
+const UPDATE_NOTICE_VERSION = '1.2.34';
+const UPDATE_NOTICE_TEXT = `2026年11月15日更新内容：
+修复请求发出后编辑 API 条目，导致取消、成功或失败日志记录到错误模型的问题。
+`;
+const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月13日更新内容：
 1.TT 报错改为按请求和流会话捕获结构化失败，不再通过正文关键词判断。
 2.修复 TT 非流式及流式中途报错被误记为成功的问题，流式正常结束后才记录成功。
 3.TT 流式响应交回宿主前的失败沿用重试；交回后的中途失败记录日志，不自动重发或拼接回复。
-`;
-const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月13日更新内容：
-1.日志统计保留“共 x 次”，模型明细显示失败与成功次数，时间精确到秒。
-2.主动暂停请求新增黄色取消日志；重试新增进度日志。
-3.API 条目绑定预设后显示按钮底色。
-4.插件关闭时，QR 插件驱动图标与底部“API未开启”显示低饱和暗红色，底部文字加粗。
-5.删除组合、移除条目、删除 API 预设和清空日志均需确认；清除全部数据保留原确认弹窗。
-2026年10月15日更新内容：
+4.顺序检测新增保底剩余回合及已达保底提示，并计入保底优先后的当前概率。
+5.日志统计保留“共 x 次”，模型明细显示失败与成功次数，时间精确到秒。
+6.主动暂停请求新增黄色取消日志；重试新增进度日志。
+7.API 条目绑定预设后显示按钮底色。
+8.插件关闭时，QR 插件驱动图标与底部“API未开启”显示低饱和暗红色，底部文字加粗。
+9.删除组合、移除条目、删除 API 预设和清空日志均需确认；清除全部数据保留原确认弹窗。
 
+2026年10月15日更新内容：
 1.美化设置新增尺寸以及字样修改；
 2.修复TauriTavern端自动切换API时概率失效的问题
 
@@ -3163,6 +3165,16 @@ function openSequenceModal(summary, rows) {
     showModal('kf-sequence-modal');
 }
 
+function sequencePityDetail(entry, runtime, mode) {
+    const threshold = toInt(entry.pityTurns);
+    if (threshold <= 0) return '';
+    if (mode !== 'random') return '；保底仅在随机模式生效';
+    const remaining = Math.max(0, threshold - toInt(runtime.missStreaks?.[entry.id]));
+    return remaining > 0
+        ? `；距离保底还差 ${remaining} 个未命中成功回合`
+        : '；已达保底（仍受冷却、避免连续及其他保底条目优先级影响）';
+}
+
 function showSequenceCheck(state) {
     if (state.enabled === false) {
         openSequenceModal('插件暂未开启，开启后显示api顺序', []);
@@ -3183,7 +3195,7 @@ function showSequenceCheck(state) {
         const sequence = buildFixedSequence(entries, !!pool.random?.noConsecutive);
         const cursor = sequence.length ? toInt(runtime.fixedCursor) % sequence.length : 0;
         const preview = sequence.slice(cursor).concat(sequence.slice(0, cursor));
-        openSequenceModal(summary, preview.map((entry, index) => `${index + 1}. ${sequenceLabel(entry)}`));
+        openSequenceModal(summary, preview.map((entry, index) => `${index + 1}. ${sequenceLabel(entry)}${sequencePityDetail(entry, runtime, mode)}`));
         return;
     }
     const lastIdentity = runtime.lastPick?.identity || (runtime.lastPick?.memberId ? `entry:${runtime.lastPick.memberId}` : '');
@@ -3205,12 +3217,17 @@ function showSequenceCheck(state) {
     const usableIds = new Set(cooldownCandidates.map(entry => entry.id));
     const usable = cooldownCandidates.length ? cooldownCandidates : active;
     const total = usable.reduce((sum, entry) => sum + toInt(entry.weight), 0);
+    const pityWinner = usable
+        .filter(entry => toInt(entry.pityTurns) > 0 && toInt(runtime.missStreaks?.[entry.id]) >= toInt(entry.pityTurns))
+        .sort((a, b) => toInt(runtime.missStreaks?.[b.id]) - toInt(runtime.missStreaks?.[a.id]))[0];
     const rows = active.map(entry => {
-        if (noConsecutiveBlocked.has(entry.id)) return `${sequenceLabel(entry)} 详情：因避免连续设置，本轮不参与`;
+        const pityDetail = sequencePityDetail(entry, runtime, mode);
+        if (noConsecutiveBlocked.has(entry.id)) return `${sequenceLabel(entry)} 详情：因避免连续设置，本轮不参与${pityDetail}`;
         const cooldown = toInt(runtime.cooldowns?.[entry.id]);
-        if (cooldown > 0 && candidateIds.has(entry.id) && !usableIds.has(entry.id)) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合`;
-        const percent = total > 0 && usableIds.has(entry.id) ? Math.round((toInt(entry.weight) / total) * 100) : 0;
-        return `${sequenceLabel(entry)} 详情：当前概率约 ${percent}%`;
+        if (cooldown > 0 && candidateIds.has(entry.id) && !usableIds.has(entry.id)) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合${pityDetail}`;
+        const percent = pityWinner ? (entry === pityWinner ? 100 : 0)
+            : (total > 0 && usableIds.has(entry.id) ? Math.round((toInt(entry.weight) / total) * 100) : 0);
+        return `${sequenceLabel(entry)} 详情：当前概率约 ${percent}%${pityDetail}`;
     });
     openSequenceModal(summary, rows);
 }

@@ -314,7 +314,7 @@ function discardPreparedSelection(token, reason = 'discarded') {
         return false;
     }
     preparedSelections.delete(token);
-    if (reason.startsWith('generation-stopped')) logCancellation(prepared, prepared.member);
+    if (reason.startsWith('generation-stopped')) logCancellation(prepared);
     const hasNewerSelection = [...preparedSelections.keys()].some(otherToken => otherToken > token);
     if (hasNewerSelection) {
         retryDebug('prepared-runtime-restore-skipped', { token, reason: 'newer-selection-exists', discardReason: reason });
@@ -902,7 +902,7 @@ function queueLog(state, entry) {
     }, 0);
 }
 
-function logCancellation(pending, member = pending.activeMember || pending.member) {
+function logCancellation(pending, member = pending.activeMember || pending.initialMember || pending.member) {
     if (pending.cancelLogged || pending.completedSuccessfully || !pending.state || !member) return;
     pending.cancelLogged = true;
     queueLog(pending.state, {
@@ -941,6 +941,7 @@ function startPendingRequest(state, pool, picked, member, type, messageId, force
         pool,
         picked,
         member,
+        initialMember: { ...member },
         type,
         messageId,
         forced,
@@ -992,6 +993,9 @@ function readTraceRequest(init) {
 
 async function fetchWithMember(input, init, pending, picked, member, retryIndex) {
     checkRequestSignal(init?.signal);
+    const usesInitialBody = retryIndex === 0 && sameMember(member, pending.member);
+    // Keep the attempt aligned with its serialized body even if the UI edits the entry.
+    member = usesInitialBody && pending.initialMember ? pending.initialMember : { ...member };
     pending.activeMember = member;
     if (retryIndex > 0) {
         queueLog(pending.state, {
@@ -1003,7 +1007,7 @@ async function fetchWithMember(input, init, pending, picked, member, retryIndex)
     let requestInit;
     let tauriRequest = null;
     try {
-        requestInit = retryIndex === 0 && sameMember(member, pending.member) ? init : makeRetryInit(init, member);
+        requestInit = usesInitialBody ? init : makeRetryInit(init, member);
         if (isTauriTavernHost()) {
             tauriRequest = beginTauriRequest(requestInit);
             if (tauriRequest) requestInit = tauriRequest.init;
@@ -1128,7 +1132,7 @@ async function handleTavernNextBatchRequest(input, init, onStatus) {
         return originalFetch(input, init);
     }
 
-    const member = prepared.member;
+    const member = { ...prepared.member };
     const picked = prepared.picked;
     const state = prepared.state;
     const batchPending = {
@@ -1199,6 +1203,7 @@ async function runForcedRetryPlan(input, init, pending) {
         } catch (error) {
             if (isUserAbortError(error, init)) throw error;
             const count = markRequestFailure(state, member);
+            const attempted = pending.activeMember;
             lastError = error;
             lastResponse = null;
             retryDebug('forced-network-error', {
@@ -1209,7 +1214,7 @@ async function runForcedRetryPlan(input, init, pending) {
                 count,
                 error: String(error?.message || error),
             });
-            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: member.name, apiUrl: member.apiUrl, model: member.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+            queueLog(state, { event: 'request-error', trigger: pending.type, mode: 'specified', apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
         }
     }
 
@@ -1279,6 +1284,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
             } catch (error) {
                 if (isUserAbortError(error, init)) throw error;
                 const count = markRequestFailure(state, currentMember);
+                const attempted = pending.activeMember;
                 lastError = error;
                 retryDebug('network-error', {
                     traceId: pending.id,
@@ -1288,7 +1294,7 @@ async function runRetryPlan(input, init, pending, onStatus) {
                     count,
                     error: String(error?.message || error),
                 });
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, apiUrl: currentMember.apiUrl, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, success: false, error: String(error?.message || error), detail: `第 ${count} 次失败` });
             }
         }
 
@@ -1334,7 +1340,8 @@ async function runRetryPlan(input, init, pending, onStatus) {
             } catch (error) {
                 if (isUserAbortError(error, init)) throw error;
                 lastError = error;
-                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: currentMember.name, apiUrl: currentMember.apiUrl, model: currentMember.model, messageId: pending.messageId, success: false, error: String(error?.message || error) });
+                const attempted = pending.activeMember;
+                queueLog(state, { event: 'request-error', trigger: pending.type, mode: currentPicked.detail.mode, apiName: attempted.name, apiUrl: attempted.apiUrl, model: attempted.model, messageId: pending.messageId, success: false, error: String(error?.message || error) });
             }
             const nextDecision = await askFailureDecision(
                 secondFailureMessage(currentMember),
@@ -1458,6 +1465,7 @@ async function prepareGenerationSelection(type, options, dryRun) {
         pool: override?.pool || pool,
         picked,
         member: picked.member,
+        initialMember: { ...picked.member },
         override,
         type: String(type),
         messageId,
