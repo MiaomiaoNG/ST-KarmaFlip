@@ -17,7 +17,9 @@ The author may use these tags to describe the purpose of a request:
 - Keep modifications within the ST-KarmaFlip directory.
 - Leave the backup-1 directory unchanged unless the author explicitly requests a specific archive or recovery operation there.
 - Update SPEC.md after completing implementation changes.
-- After completing a major update, update the plugin announcement in `const UPDATE_NOTICE_TEXT = \`更新内容如下：……\``. After all work is complete, tell the author exactly what announcement content was added.
+- After completing a major update, add the announcement to `UPDATE_NOTICE_TEXT`. Organize announcements by calendar date in the author's local time zone. Each date has exactly one heading and one block, regardless of how many updates or version increments occur that day.
+- For another announcement on the same date, add the new items to the existing current-date block and continue its numbering. Keep all earlier items from that date in the same block. Start a new current block only when the date changes, and move the complete previous date block to the top of `UPDATE_NOTICE_HISTORY_TEXT`. If a historical block already uses that date, merge the items under one heading.
+- Use `UPDATE_NOTICE_VERSION` independently of the date grouping so users who read an earlier revision can see newly added items. After all work is complete, tell the author exactly what announcement content was added.
 - Unless the author explicitly confirms that an update is a major version update, change only the final version component; for example, for `1.2.xx`, update only the `xx` component.
 
 ## 4. Reference Repositories

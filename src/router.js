@@ -38,13 +38,19 @@ function clearCooldowns(runtime) {
     runtime.cooldownElapsed = {};
 }
 
-function reconcileRuntimeCooldown(runtime, memberId, cooldownTurns) {
-    const id = String(memberId || '').trim();
+function remainingCooldown(runtime, id, cooldownTurns) {
     if (!id || !Object.prototype.hasOwnProperty.call(runtime.cooldownElapsed || {}, id)) {
         return toInt(runtime.cooldowns?.[id]);
     }
-    const remaining = Math.max(0, toInt(cooldownTurns) - toInt(runtime.cooldownElapsed[id]));
-    runtime.cooldowns[id] = remaining;
+    return Math.max(0, toInt(cooldownTurns) - toInt(runtime.cooldownElapsed[id]));
+}
+
+function reconcileRuntimeCooldown(runtime, memberId, cooldownTurns) {
+    const id = String(memberId || '').trim();
+    const remaining = remainingCooldown(runtime, id, cooldownTurns);
+    if (id && Object.prototype.hasOwnProperty.call(runtime.cooldownElapsed || {}, id)) {
+        runtime.cooldowns[id] = remaining;
+    }
     return remaining;
 }
 
@@ -114,10 +120,7 @@ function fixedPick(pool, runtime) {
     return sequence[idx];
 }
 
-function randomPick(pool, runtime) {
-    const active = validEntries(pool, runtime).filter(e => toInt(e.weight) > 0);
-    if (!active.length) return { member: null, blocked: [] };
-
+function randomCandidates(pool, runtime, active, readCooldown) {
     const blocked = [];
     const lastIdentity = lastPickIdentity(runtime.lastPick);
     let candidates = active.filter(e => {
@@ -128,22 +131,41 @@ function randomPick(pool, runtime) {
     });
     if (!candidates.length) candidates = active;
 
-    let cooldownCandidates = candidates.filter(e => {
-        const onCooldown = reconcileRuntimeCooldown(runtime, e.id, e.cooldownTurns) > 0;
+    const ready = candidates.filter(e => {
+        const onCooldown = readCooldown(e) > 0;
         if (onCooldown) blocked.push({ entry: e, reason: 'cooldown' });
         return !onCooldown;
     });
-    if (!cooldownCandidates.length) {
-        clearCooldowns(runtime);
-        cooldownCandidates = candidates;
+    const resetCooldowns = candidates.length > 0 && !ready.length;
+    const usable = resetCooldowns ? candidates : ready;
+    let pityWinner = null;
+    let longestStreak = 0;
+    for (const entry of usable) {
+        const misses = toInt(runtime.missStreaks?.[entry.id]);
+        if (pityRemainingRounds(entry, runtime) === 0 && misses > longestStreak) {
+            pityWinner = entry;
+            longestStreak = misses;
+        }
     }
+    return { usable, blocked, pityWinner, resetCooldowns };
+}
 
-    const pity = cooldownCandidates
-        .filter(e => toInt(e.pityTurns) > 0 && toInt(runtime.missStreaks?.[e.id]) >= toInt(e.pityTurns))
-        .sort((a, b) => toInt(runtime.missStreaks?.[b.id]) - toInt(runtime.missStreaks?.[a.id]));
-    if (pity.length) return { member: pity[0], blocked };
+export function pityRemainingRounds(entry, runtime) {
+    const threshold = toInt(entry.pityTurns);
+    return threshold > 0 ? Math.max(0, threshold - toInt(runtime.missStreaks?.[entry.id])) : null;
+}
 
-    return { member: weightedPick(cooldownCandidates), blocked };
+export function previewRandomCandidates(pool, runtime, entries) {
+    return randomCandidates(pool, runtime, entries, entry =>
+        remainingCooldown(runtime, String(entry.id || '').trim(), entry.cooldownTurns));
+}
+
+function randomPick(pool, runtime) {
+    const active = validEntries(pool, runtime).filter(e => toInt(e.weight) > 0);
+    const result = randomCandidates(pool, runtime, active, entry =>
+        reconcileRuntimeCooldown(runtime, entry.id, entry.cooldownTurns));
+    if (result.resetCooldowns) clearCooldowns(runtime);
+    return { member: result.pityWinner || weightedPick(result.usable), blocked: result.blocked };
 }
 
 function updateMissStreaks(pool, runtime, member) {

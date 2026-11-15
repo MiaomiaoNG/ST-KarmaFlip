@@ -1,5 +1,5 @@
 import { bindApiOverrideToFloor, clearApiLock, clearApiOverride, clearLogs, createExportSnapshot, enableStatePersistence, getActivePool, getApiOverrideState, getRuntimeScope, getUsageStats, loadState, normalizeThemeSizes, patchActivePoolId, patchEnabledState, patchEntryCollapsedState, patchEntryEnabledState, patchPoolMode, patchPoolNoConsecutive, patchUpdateNoticeSeenVersion, resetAllPluginData, saveState, saveStateDebounced, setApiLock, setPendingApiOverride, toInt } from './plugin_state_store.js';
-import { buildFixedSequence, memberIdentity, reconcileMemberCooldown } from './router.js';
+import { buildFixedSequence, pityRemainingRounds, previewRandomCandidates, reconcileMemberCooldown } from './router.js';
 import { clearRuntimeHookState } from './runtime_hook.js';
 import { makeId, nextFrame, replaceNode } from './compat.js';
 import { diagnosticText, getPluginErrors, formatPluginError } from './runtime_diagnostics.js';
@@ -10,9 +10,10 @@ const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
-const UPDATE_NOTICE_VERSION = '1.2.34';
+const UPDATE_NOTICE_VERSION = '1.2.35';
 const UPDATE_NOTICE_TEXT = `2026年11月15日更新内容：
-修复请求发出后编辑 API 条目，导致取消、成功或失败日志记录到错误模型的问题。
+1.统一顺序检测和实际抽选的候选判断，减少界面更新的重复计算，并隔离插件主题变量和弹窗事件；
+2.修复请求发出后编辑 API 条目，导致取消、成功或失败日志记录到错误模型的问题。
 `;
 const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月13日更新内容：
 1.TT 报错改为按请求和流会话捕获结构化失败，不再通过正文关键词判断。
@@ -380,40 +381,47 @@ function resolveThemePalette(theme = {}) {
     };
 }
 
-function setThemeVars(target, theme) {
-    if (!target) return;
+function buildThemeStyle(theme) {
     const sizes = normalizeThemeSizes(theme);
-    target.style.setProperty('--kf-ui-scale', String(sizes.uiScale / 100));
-    target.style.setProperty('--kf-font-scale', String(sizes.fontScale / 100));
     const palette = resolveThemePalette(theme);
-    target.dataset.themeMode = palette.mode;
-    target.style.setProperty('--primary', palette.primary);
-    target.style.setProperty('--primary-strong', palette.primaryStrong);
-    target.style.setProperty('--primary-rgb', hexToRgb(palette.primary));
-    target.style.setProperty('--secondary', palette.secondary);
-    target.style.setProperty('--secondary-rgb', hexToRgb(palette.secondary));
-    target.style.setProperty('--surface', palette.surface);
-    target.style.setProperty('--surface-soft', palette.surfaceSoft);
-    target.style.setProperty('--surface-strong', palette.surfaceStrong);
-    target.style.setProperty('--surface-rgb', hexToRgb(palette.surface));
-    target.style.setProperty('--page-bg-start', palette.pageStart);
-    target.style.setProperty('--page-bg-end', palette.pageEnd);
-    target.style.setProperty('--ink', palette.ink);
-    target.style.setProperty('--muted', palette.muted);
-    target.style.setProperty('--muted-light', palette.mutedLight);
-    target.style.setProperty('--on-primary', palette.onPrimary);
-    target.style.setProperty('--on-primary-strong', palette.onPrimaryStrong);
-    target.style.setProperty('--on-secondary', palette.onSecondary);
-    target.style.setProperty('--shadow-color', hexToRgb(palette.shadow));
-    target.style.setProperty('--line', `rgba(${hexToRgb(palette.primary)}, 0.11)`);
-    target.style.setProperty('--line-strong', `rgba(${hexToRgb(palette.primary)}, 0.18)`);
-    target.style.setProperty('--bg-main', palette.surface);
-    target.style.setProperty('--bg-sub', palette.surfaceSoft);
-    target.style.setProperty('--text-main', palette.ink);
-    target.style.setProperty('--text-sub', palette.ink);
-    target.style.setProperty('--text-accent', palette.onPrimary);
-    target.style.setProperty('--underline-color', palette.primary);
-    target.style.setProperty('--underline-rgb', hexToRgb(palette.primary));
+    const primaryRgb = hexToRgb(palette.primary);
+    const variables = {
+        '--kf-ui-scale': String(sizes.uiScale / 100),
+        '--kf-font-scale': String(sizes.fontScale / 100),
+        '--kf-primary': palette.primary,
+        '--kf-primary-strong': palette.primaryStrong,
+        '--kf-primary-rgb': primaryRgb,
+        '--kf-secondary': palette.secondary,
+        '--kf-secondary-rgb': hexToRgb(palette.secondary),
+        '--kf-surface': palette.surface,
+        '--kf-surface-soft': palette.surfaceSoft,
+        '--kf-surface-strong': palette.surfaceStrong,
+        '--kf-surface-rgb': hexToRgb(palette.surface),
+        '--kf-page-bg-start': palette.pageStart,
+        '--kf-page-bg-end': palette.pageEnd,
+        '--kf-ink': palette.ink,
+        '--kf-muted': palette.muted,
+        '--kf-muted-light': palette.mutedLight,
+        '--kf-on-primary': palette.onPrimary,
+        '--kf-on-primary-strong': palette.onPrimaryStrong,
+        '--kf-on-secondary': palette.onSecondary,
+        '--kf-shadow-color': hexToRgb(palette.shadow),
+        '--kf-line': `rgba(${primaryRgb}, 0.11)`,
+        '--kf-line-strong': `rgba(${primaryRgb}, 0.18)`,
+        '--kf-bg-main': palette.surface,
+        '--kf-bg-sub': palette.surfaceSoft,
+        '--kf-text-main': palette.ink,
+        '--kf-text-sub': palette.ink,
+        '--kf-text-accent': palette.onPrimary,
+        '--kf-underline-color': palette.primary,
+        '--kf-underline-rgb': primaryRgb,
+    };
+    return { mode: palette.mode, properties: Object.entries(variables) };
+}
+
+function setThemeVars(target, { mode, properties }) {
+    target.dataset.themeMode = mode;
+    for (const [name, value] of properties) target.style.setProperty(name, value);
 }
 
 function updateGlobalToggleState(state) {
@@ -600,7 +608,7 @@ function createChatShortcutWrapper(id) {
     const wrapper = document.createElement('div');
     wrapper.id = id;
     wrapper.className = 'qr--buttons qr--color kf-chat-shortcut-wrapper';
-    wrapper.style.setProperty('--qr--color', 'rgba(0,0,0,0)');
+    wrapper.style.setProperty('--kf-qr--color', 'rgba(0,0,0,0)');
     return wrapper;
 }
 
@@ -1877,7 +1885,7 @@ function updateFloatingButton(state) {
     button.dataset.mode = getActivePool(state)?.mode === 'random' ? 'random' : 'fixed';
     button.title = label;
     button.setAttribute('aria-label', label);
-    setThemeVars(button, state.theme || {});
+    setThemeVars(button, buildThemeStyle(state.theme || {}));
 }
 
 function activateFloatingButton(state, rerender, setStatus, options = {}) {
@@ -2051,7 +2059,8 @@ function applyThemeVisual(theme = {}) {
     const root = document.getElementById('kf-root');
     if (!root) return;
     const targets = [root, ...MODAL_IDS.map(id => document.getElementById(id)), document.getElementById('kf-toast-layer'), document.getElementById(FLOATING_BUTTON_ID)].filter(Boolean);
-    for (const target of targets) setThemeVars(target, theme);
+    const style = buildThemeStyle(theme);
+    for (const target of targets) setThemeVars(target, style);
 }
 
 function applyTheme(state) {
@@ -2527,7 +2536,8 @@ function removeEntryIcon() {
 
 function renderEntries(state) {
     const pool = getActivePool(state);
-    const root = $('#kf-entry-list').empty();
+    const root = $('#kf-entry-list');
+    const rows = [];
     const apiPresetNames = getApiPresetNames(state);
     const compact = state.ui?.compactApiEntries === true && !apiEntriesEditorOpen;
     $('#kf-api-entries-block').toggleClass('kf-api-entries-modal-open', apiEntriesEditorOpen);
@@ -2538,7 +2548,7 @@ function renderEntries(state) {
         const nameHasOptions = apiPresetNames.some(name => name !== entry.name);
         const nameArrow = nameHasOptions ? '<button class="kf-dropdown-arrow kf-entry-name-arrow" type="button" aria-label="选择 API 名称"><svg><use href="#kf-i-chevron"/></svg></button>' : '';
         if (compact) {
-            root.append(`
+            rows.push(`
                 <div class="kf-entry-block kf-compact-entry" data-id="${esc(entry.id)}">
                     <div class="kf-row kf-entry-row-top">
                         <label class="kf-toggle-chip kf-entry-enabled-wrap">
@@ -2568,7 +2578,7 @@ function renderEntries(state) {
         const modelHasOptions = getModelOptions(entry).some(model => model !== entry.model);
         const modelArrow = modelHasOptions ? '<button class="kf-dropdown-arrow kf-entry-model-arrow" type="button" aria-label="选择模型"><svg><use href="#kf-i-chevron"/></svg></button>' : '';
         const urlPlaceholder = providerUrlPlaceholder(entry.provider);
-        root.append(`
+        rows.push(`
             <div class="kf-entry-block${collapsedClass}" data-id="${esc(entry.id)}"${preserveCollapsed}>
                 <div class="kf-row kf-entry-row-top">
                     <label class="kf-toggle-chip kf-entry-enabled-wrap">
@@ -2613,6 +2623,7 @@ function renderEntries(state) {
             </div>
         `);
     }
+    root.empty().append(rows.join(''));
 }
 
 function logKind(log) {
@@ -3166,10 +3177,9 @@ function openSequenceModal(summary, rows) {
 }
 
 function sequencePityDetail(entry, runtime, mode) {
-    const threshold = toInt(entry.pityTurns);
-    if (threshold <= 0) return '';
+    const remaining = pityRemainingRounds(entry, runtime);
+    if (remaining === null) return '';
     if (mode !== 'random') return '；保底仅在随机模式生效';
-    const remaining = Math.max(0, threshold - toInt(runtime.missStreaks?.[entry.id]));
     return remaining > 0
         ? `；距离保底还差 ${remaining} 个未命中成功回合`
         : '；已达保底（仍受冷却、避免连续及其他保底条目优先级影响）';
@@ -3198,35 +3208,18 @@ function showSequenceCheck(state) {
         openSequenceModal(summary, preview.map((entry, index) => `${index + 1}. ${sequenceLabel(entry)}${sequencePityDetail(entry, runtime, mode)}`));
         return;
     }
-    const lastIdentity = runtime.lastPick?.identity || (runtime.lastPick?.memberId ? `entry:${runtime.lastPick.memberId}` : '');
-    const active = entries;
-    if (!active.length) {
-        openSequenceModal(summary, ['当前可用条目已被失败流程临时停用']);
-        return;
-    }
-    const noConsecutiveBlocked = new Set();
-    let candidates = active.filter(entry => {
-        const blocked = pool.random?.noConsecutive && lastIdentity === memberIdentity(entry) && active.length > 1;
-        if (blocked) noConsecutiveBlocked.add(entry.id);
-        return !blocked;
-    });
-    if (!candidates.length) candidates = active;
-    let cooldownCandidates = candidates.filter(entry => toInt(runtime.cooldowns?.[entry.id]) <= 0);
-    if (!cooldownCandidates.length) cooldownCandidates = candidates;
-    const candidateIds = new Set(candidates.map(entry => entry.id));
-    const usableIds = new Set(cooldownCandidates.map(entry => entry.id));
-    const usable = cooldownCandidates.length ? cooldownCandidates : active;
+    const { usable, blocked, pityWinner } = previewRandomCandidates(pool, runtime, entries);
+    const usableEntries = new Set(usable);
+    const blockedReasons = new Map(blocked.map(({ entry, reason }) => [entry, reason]));
     const total = usable.reduce((sum, entry) => sum + toInt(entry.weight), 0);
-    const pityWinner = usable
-        .filter(entry => toInt(entry.pityTurns) > 0 && toInt(runtime.missStreaks?.[entry.id]) >= toInt(entry.pityTurns))
-        .sort((a, b) => toInt(runtime.missStreaks?.[b.id]) - toInt(runtime.missStreaks?.[a.id]))[0];
-    const rows = active.map(entry => {
+    const rows = entries.map(entry => {
         const pityDetail = sequencePityDetail(entry, runtime, mode);
-        if (noConsecutiveBlocked.has(entry.id)) return `${sequenceLabel(entry)} 详情：因避免连续设置，本轮不参与${pityDetail}`;
+        const reason = blockedReasons.get(entry);
+        if (reason === 'noConsecutive' && !usableEntries.has(entry)) return `${sequenceLabel(entry)} 详情：因避免连续设置，本轮不参与${pityDetail}`;
         const cooldown = toInt(runtime.cooldowns?.[entry.id]);
-        if (cooldown > 0 && candidateIds.has(entry.id) && !usableIds.has(entry.id)) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合${pityDetail}`;
+        if (reason === 'cooldown' && !usableEntries.has(entry)) return `${sequenceLabel(entry)} 冷却中 详情：冷却还剩 ${cooldown} 回合${pityDetail}`;
         const percent = pityWinner ? (entry === pityWinner ? 100 : 0)
-            : (total > 0 && usableIds.has(entry.id) ? Math.round((toInt(entry.weight) / total) * 100) : 0);
+            : (total > 0 && usableEntries.has(entry) ? Math.round((toInt(entry.weight) / total) * 100) : 0);
         return `${sequenceLabel(entry)} 详情：当前概率约 ${percent}%${pityDetail}`;
     });
     openSequenceModal(summary, rows);
@@ -4549,11 +4542,13 @@ function bind(state, rerender, setStatus) {
         if (event.key === 'Escape') closeRenamePoolModal();
     });
     $('#kf-dropdown-close').off('click.kf').on('click.kf', () => closeDropdown());
-    $('.kf-modal-overlay').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
-        .on('pointerdown.kf mousedown.kf touchstart.kf', function (event) {
+    const pluginModals = $(MODAL_IDS.map(id => document.getElementById(id)).filter(Boolean));
+    const modalEvents = 'pointerdown.kfModalBoundary mousedown.kfModalBoundary touchstart.kfModalBoundary';
+    pluginModals.off('.kfModalBoundary')
+        .on(modalEvents, function (event) {
             event.stopPropagation();
         })
-        .on('click.kf', function (event) {
+        .on('click.kfModalBoundary', function (event) {
             event.stopPropagation();
             if (event.target !== this) return;
             if (this.id === 'kf-theme-modal') closeThemeModal(state);
@@ -4563,8 +4558,8 @@ function bind(state, rerender, setStatus) {
             else if (this.id === 'kf-preset-binding-modal') closePresetBindingModal();
             else hideModal(this.id);
         });
-    $('.kf-modal-overlay .kf-modal-box').not('#kf-failure-modal .kf-modal-box').off('pointerdown.kf mousedown.kf touchstart.kf click.kf')
-        .on('pointerdown.kf mousedown.kf touchstart.kf click.kf', function (event) {
+    pluginModals.not('#kf-failure-modal').find('.kf-modal-box').off('.kfModalBoundary')
+        .on(`${modalEvents} click.kfModalBoundary`, function (event) {
             event.stopPropagation();
         });
     $(document).off('mousedown.kfDropdown').on('mousedown.kfDropdown', function (event) {
