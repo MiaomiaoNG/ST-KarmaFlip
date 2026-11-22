@@ -10,13 +10,17 @@ const HOT_SAVE_DELAY = 1000;
 const STRUCTURE_SAVE_DELAY = 5000;
 const ENTRY_DRAG_HOLD_MS = 450;
 const MANIFEST_URL = new URL('../manifest.json', import.meta.url);
-const UPDATE_NOTICE_VERSION = '1.2.36';
-const UPDATE_NOTICE_TEXT = `2026年11月15日更新内容：
+const UPDATE_NOTICE_VERSION = '1.2.38';
+const UPDATE_NOTICE_TEXT = `2026年11月22日更新内容：
+1.修复 TT 快捷按钮错误识别自身为宿主容器，导致重复出现 HierarchyRequestError 的问题；
+2.“重试”标签改用与“抽选”相同的主题色。
+`;
+const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月15日更新内容：
 1.统一顺序检测和实际抽选的候选判断，减少界面更新的重复计算，并隔离插件主题变量和弹窗事件；
 2.修复请求发出后编辑 API 条目，导致取消、成功或失败日志记录到错误模型的问题。
 3.首次请求不计入自动重试上限，自动和手动重试及对应报错分别记录，并显示重试进度。
-`;
-const UPDATE_NOTICE_HISTORY_TEXT = `2026年11月13日更新内容：
+
+2026年11月13日更新内容：
 1.TT 报错改为按请求和流会话捕获结构化失败，不再通过正文关键词判断。
 2.修复 TT 非流式及流式中途报错被误记为成功的问题，流式正常结束后才记录成功。
 3.TT 流式响应交回宿主前的失败沿用重试；交回后的中途失败记录日志，不自动重发或拼接回复。
@@ -785,8 +789,13 @@ function scheduleShortcutArtifactCleanup() {
 }
 
 function getInlineReplyHost() {
-    return document.querySelector('#qr--bar .qr--buttons')
-        || document.querySelector('#qr--bar');
+    const bar = document.getElementById('qr--bar');
+    if (!bar) return null;
+    const wrappers = [CHAT_POWER_WRAPPER_ID, CHAT_MODE_WRAPPER_ID, CHAT_API_WRAPPER_ID]
+        .map(id => document.getElementById(id)).filter(Boolean);
+    const isHost = node => !node.closest('.kf-chat-shortcut-wrapper')
+        && !wrappers.some(wrapper => wrapper.contains(node));
+    return [...bar.querySelectorAll('.qr--buttons'), bar].find(isHost) || null;
 }
 
 function getChatShortcutObserverTarget() {
@@ -970,9 +979,11 @@ function ensureChatShortcut(state, rerender, setStatus) {
         if (apiShell.parentElement !== apiWrapper) apiWrapper.appendChild(apiShell);
         bindQrWrapperProxy(apiWrapper, CHAT_API_BUTTON_ID);
     }
-    if (modeWrapper && modeWrapper.parentElement !== host) host.prepend(modeWrapper);
-    if (powerWrapper && powerWrapper.parentElement !== host) host.prepend(powerWrapper);
-    if (apiWrapper && apiWrapper.parentElement !== host) host.prepend(apiWrapper);
+    for (const wrapper of [modeWrapper, powerWrapper, apiWrapper]) {
+        if (wrapper && wrapper.parentElement !== host && !wrapper.contains(host)) {
+            host.prepend(wrapper);
+        }
+    }
     syncQrAssistantManagedVisibility(powerWrapper, powerShell, qrAssistantEnabled);
     syncQrAssistantManagedVisibility(modeWrapper, modeShell, qrAssistantEnabled);
     syncQrAssistantManagedVisibility(apiWrapper, apiShell, qrAssistantEnabled);

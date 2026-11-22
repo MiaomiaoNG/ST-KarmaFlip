@@ -1767,8 +1767,7 @@ body[data-kf-enabled="false"] .kf-qr-power-icon {
     background: rgba(220, 82, 102, 0.085);
 }
 
-.kf-log-badge.kf-cancel,
-.kf-log-badge.kf-retry {
+.kf-log-badge.kf-cancel {
     color: #a87816;
     background: rgba(215, 165, 31, 0.16);
 }
